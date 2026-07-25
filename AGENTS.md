@@ -6,7 +6,7 @@ Welcome! This guide is designed specifically for AI agents working on the Agent 
 
 ### 📚 Core Documentation
 - **[README.md](README.md)** - Project overview and getting started
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** - System architecture and agent roles
+- **[architecture.md](architecture.md)** - System architecture and agent roles
 - **[QUICKSTART.md](QUICKSTART.md)** - Deployment and setup instructions
 - **[PLAN.md](PLAN.md)** - Development roadmap and priorities
 
