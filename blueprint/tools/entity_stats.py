@@ -41,7 +41,7 @@ def get_entity_stats(entity_name: str) -> str:
         with conn.cursor() as cur:
             query = """
                 SELECT entity_name, entity_type, status, total_communications, resolved_count, pending_count
-                FROM agent_first_erp_crm.entity_communication_stats
+                FROM agent_first_erp_crm.vw_entity_communication_stats
                 WHERE entity_name ILIKE %s
                 LIMIT 5
             """

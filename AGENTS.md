@@ -250,14 +250,33 @@ See `.env.example` for required variables.
 ### Views for Agents
 | View | Purpose |
 |------|---------|
-| `customer_communications_summary` | Customer interactions with context |
-| `pending_followups` | Tasks requiring action |
-| `entity_communication_stats` | Customer health metrics |
-| `v_recent_interactions` | Last 100 agent interactions |
-| `v_failed_interactions` | Error analysis |
-| `v_tool_performance` | Tool usage statistics |
+| `vw_customers` | Customer entity overview |
+| `vw_customer_communications_summary` | Customer interactions with context |
+| `vw_recent_communications` | Last 7 days of communications |
+| `vw_pending_followups` | Tasks requiring action |
+| `vw_entity_communication_stats` | Customer health metrics |
+| `vw_primary_contact_communications` | Primary contact interactions |
+| `vw_communication_thread` | Communication threading hierarchy |
+| `vw_agent_activity_summary` | Agent activity summary |
+| `vw_entity_contact_details` | Complete entity and contact details |
+| `vw_communication_timeline` | Chronological communication view |
+| `vw_recent_interactions` | Last 100 agent interactions |
+| `vw_failed_interactions` | Error analysis |
+| `vw_tool_performance` | Tool usage statistics |
+| `vw_inventory_valuation` | Inventory value by warehouse/category |
+| `vw_item_availability` | Stock levels across warehouses |
+| `vw_item_movement_summary` | 30-day item movement patterns |
+| `vw_low_stock_alerts` | Items below reorder point |
 
 See [blueprint/docs/views.md](blueprint/docs/views.md) for complete view reference.
+
+### Database Naming Conventions
+- **SQL Tables**: snake_case (e.g., `customers`, `communications`)
+- **SQL Views**: MUST use `vw_` prefix (e.g., `vw_customers`, `vw_customer_communications_summary`)
+- **SQL Columns**: snake_case (e.g., `created_at`, `entity_id`)
+- **SQL Functions**: snake_case with verb prefix (e.g., `add_customer`, `get_inventory`)
+- **Python Variables**: snake_case (e.g., `customer_id`)
+- **Python Classes**: PascalCase (e.g., `CustomerServiceAgent`)
 
 ---
 
@@ -308,6 +327,7 @@ The Chief Agent Officer (CAO) provides:
 
 ### Naming Conventions
 - **SQL Tables**: snake_case (e.g., `customer_communications`)
+- **SQL Views**: MUST use `vw_` prefix (e.g., `vw_customers`, `vw_pending_followups`)
 - **SQL Columns**: snake_case (e.g., `created_at`)
 - **Python Variables**: snake_case (e.g., `customer_id`)
 - **Python Classes**: PascalCase (e.g., `CustomerServiceAgent`)

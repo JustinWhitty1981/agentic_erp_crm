@@ -174,25 +174,25 @@ WHERE id = 'interaction-uuid-here';
 
 The schema includes several useful views:
 
-### `v_recent_interactions`
+### `vw_recent_interactions`
 Last 100 interactions with full context
 
 ```sql
-SELECT * FROM v_recent_interactions LIMIT 10;
+SELECT * FROM vw_recent_interactions LIMIT 10;
 ```
 
-### `v_failed_interactions`
+### `vw_failed_interactions`
 All interactions that resulted in errors
 
 ```sql
-SELECT * FROM v_failed_interactions LIMIT 20;
+SELECT * FROM vw_failed_interactions LIMIT 20;
 ```
 
-### `v_tool_performance`
+### `vw_tool_performance`
 Tool usage statistics and error rates
 
 ```sql
-SELECT * FROM v_tool_performance;
+SELECT * FROM vw_tool_performance;
 ```
 
 ## Integration with LangChain
@@ -225,10 +225,10 @@ Every interaction should be logged, including failures. This is critical for deb
 Always include `conversation_id`, `telegram_chat_id`, `user_id`, and `message_id` for traceability.
 
 ### 3. **Monitor Performance**
-Query `v_tool_performance` regularly to identify slow or error-prone tools.
+Query `vw_tool_performance` regularly to identify slow or error-prone tools.
 
 ### 4. **Review Failures**
-Check `v_failed_interactions` daily to catch and fix issues quickly.
+Check `vw_failed_interactions` daily to catch and fix issues quickly.
 
 ### 5. **Use for Training**
 Export successful interactions to train fine-tuned models on real-world examples.
