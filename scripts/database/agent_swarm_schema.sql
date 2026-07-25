@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS _schema_graph (
 );
 
 
-COMMENT ON TABLE _schema_graph IS 'Knowledge graph of the agent_swarm schema for AI agent understanding. Query this table to understand the entire system structure.';
+COMMENT ON TABLE _schema_graph IS 'Knowledge graph of the agent_first_erp_crm schema for AI agent understanding. Query this table to understand the entire system structure.';
 
 --
 -- Name: audit_summary; Type: TABLE; Schema: -; Owner: -

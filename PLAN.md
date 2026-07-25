@@ -1,4 +1,4 @@
-# Agent Swarm Development Plan
+# Agent First ERP CRM Development Plan
 
 ## 📚 Documentation Navigation
 
@@ -20,7 +20,7 @@ Before starting work, AI agents should review:
 ## Immediate Priorities (This Week)
 
 ### 1. Verify Database Schema is Deployed ✅ COMPLETED
-- [x] Check if `agent_swarm` schema exists in PostgreSQL
+- [x] Check if `agent_first_erp_crm` schema exists in PostgreSQL
 - [x] Verify required views (`customers`, `recent_communications`, `entity_communication_stats`)
 - [x] Run `blueprint/setup_sample_data.sql` if tables don't exist
 - [x] Test blueprint bot against real database

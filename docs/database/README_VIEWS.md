@@ -14,7 +14,7 @@ Run the following command to create all views:
 # Set environment variables first
 export POSTGRES_HOST=localhost
 export POSTGRES_PORT=5432
-export POSTGRES_DB=agent_swarm
+export POSTGRES_DB=agent_first_erp_crm
 export POSTGRES_USER=postgres
 export POSTGRES_PASSWORD=your_password
 
@@ -94,35 +94,35 @@ Or execute the SQL content directly in your database client.
 
 ### Get all communications for a specific customer
 ```sql
-SELECT * FROM agent_swarm.customer_communications_summary 
+SELECT * FROM agent_first_erp_crm.customer_communications_summary 
 WHERE entity_id = 123 
 ORDER BY started_at DESC;
 ```
 
 ### Get pending follow-ups sorted by priority
 ```sql
-SELECT * FROM agent_swarm.pending_followups 
+SELECT * FROM agent_first_erp_crm.pending_followups 
 WHERE priority IN ('high', 'critical');
 ```
 
 ### Get communication stats for all customers
 ```sql
 SELECT entity_name, total_communications, avg_sentiment 
-FROM agent_swarm.entity_communication_stats 
+FROM agent_first_erp_crm.entity_communication_stats 
 WHERE entity_type = 'customer' 
 ORDER BY total_communications DESC;
 ```
 
 ### Get recent activity
 ```sql
-SELECT * FROM agent_swarm.recent_communications 
+SELECT * FROM agent_first_erp_crm.recent_communications 
 ORDER BY started_at DESC 
 LIMIT 20;
 ```
 
 ### Get agent performance
 ```sql
-SELECT * FROM agent_swarm.agent_activity_summary;
+SELECT * FROM agent_first_erp_crm.agent_activity_summary;
 ```
 
 ---
@@ -133,7 +133,7 @@ After executing the script, verify with:
 
 ```sql
 SELECT viewname FROM pg_views 
-WHERE schemaname = 'agent_swarm' 
+WHERE schemaname = 'agent_first_erp_crm' 
 ORDER BY viewname;
 ```
 

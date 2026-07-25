@@ -1,6 +1,6 @@
-# Agent Swarm - AI Agent Documentation Guide
+# Agent First ERP CRM - AI Agent Documentation Guide
 
-Welcome! This guide is designed specifically for AI agents working on the Agent Swarm project. Follow this documentation structure to navigate the codebase effectively.
+Welcome! This guide is designed specifically for AI agents working on the Agent First ERP CRM project. Follow this documentation structure to navigate the codebase effectively.
 
 ## Quick Navigation
 
@@ -13,15 +13,14 @@ Welcome! This guide is designed specifically for AI agents working on the Agent 
 ### 🤖 Agent-Specific Guides
 - **[blueprint/AGENT_SUMMARY.md](blueprint/AGENT_SUMMARY.md)** - Blueprint pattern reference implementation
 - **[blueprint/tools/README.md](blueprint/tools/README.md)** - Tool development guidelines
-- **[blueprint/tools/customer_tools.py](blueprint/tools/customer_tools.py)** - Production customer tools (primary reference)
 - **[docs/agent_requirements/customer_service/customer_service.md](docs/agent_requirements/customer_service/customer_service.md)** - Customer service agent requirements
 - **[docs/agent_requirements/inventory/inventory.md](docs/agent_requirements/inventory/inventory.md)** - Inventory agent requirements
 - **[docs/attachments/ATTACHMENT_SYSTEM.md](docs/attachments/ATTACHMENT_SYSTEM.md)** - Attachment system documentation
 
 ### 🗄️ Database Documentation
 - **[docs/database/agent_schema_reference.md](docs/database/agent_schema_reference.md)** - Database schema reference
-- **[docs/database/agent_swarm_mental_model.md](docs/database/agent_swarm_mental_model.md)** - Database mental model for agents
-- **[docs/database/agent_swarm_schema.sql](docs/database/agent_swarm_schema.sql)** - Complete schema definition
+- **[docs/database/agent_first_erp_crm_mental_model.md](docs/database/agent_first_erp_crm_mental_model.md)** - Database mental model for agents
+- **[docs/database/agent_first_erp_crm_schema.sql](docs/database/agent_first_erp_crm_schema.sql)** - Complete schema definition
 - **[docs/INTERACTION_LOGGING.md](docs/INTERACTION_LOGGING.md)** - Agent interaction tracking & debugging
 - **[scripts/database/](scripts/database/)** - SQL migration scripts
 - **[blueprint/docs/](blueprint/docs/)** - Agent-friendly SQL documentation
@@ -30,7 +29,7 @@ Welcome! This guide is designed specifically for AI agents working on the Agent 
 
 ## Project Overview
 
-Agent Swarm is a database-first AI agent operating system that enables:
+Agent First ERP CRM is a database-first AI agent operating system that enables:
 - **Autonomous customer service agents** with full CRM capabilities
 - **Semantic search** using PGVector for natural language queries
 - **Tool-based architecture** where agents compose functions dynamically
@@ -42,7 +41,7 @@ Agent Swarm is a database-first AI agent operating system that enables:
 
 ### Blueprint Pattern
 The reference implementation follows a single-file LangChain agent pattern:
-- **Location**: `blueprint/bot.py` (~180 lines)
+- **Location**: `blueprint/bot.py` (~215 lines)
 - **Features**: Tool calling, conversation memory, PostgreSQL integration
 - **Purpose**: Starting point for new agent development
 
@@ -66,22 +65,24 @@ All agent state and knowledge lives in PostgreSQL:
 ### 1. Understanding the Architecture
 Start by reading:
 1. [ARCHITECTURE.md](ARCHITECTURE.md) - System overview
-2. [docs/database/agent_swarm_mental_model.md](docs/database/agent_swarm_mental_model.md) - Database concepts
+2. [docs/database/agent_first_erp_crm_mental_model.md](docs/database/agent_first_erp_crm_mental_model.md) - Database concepts
 
 ### 2. Setting Up Development Environment
 Follow [QUICKSTART.md](QUICKSTART.md) for Docker-based deployment.
 
 ### 3. Understanding Agent Tools
-- Review **[blueprint/tools/customer_tools.py](blueprint/tools/customer_tools.py)** for production tool examples
+- Review individual tool implementations in **[blueprint/tools/](blueprint/tools/)**
 - Read **[blueprint/tools/README.md](blueprint/tools/README.md)** for tool development guidelines
 - Study **[docs/agent_requirements/customer_service/customer_service.md](docs/agent_requirements/customer_service/customer_service.md)** for domain requirements
 - Review example tools in `blueprint/tools/`:
   - `customer_lookup.py` - Customer information retrieval
-  - `customer_management.py` - CRUD operations
+  - `add_customer.py` - Add new customers
+  - `update_customer.py` - Update customer information
+  - `customer_communications.py` - Communication history
   - `communication_logger.py` - Interaction logging
 
 ### 4. Database Operations
-- Schema: [docs/database/agent_swarm_schema.sql](docs/database/agent_swarm_schema.sql)
+- Schema: [docs/database/agent_first_erp_crm_schema.sql](docs/database/agent_first_erp_crm_schema.sql)
 - Customer functions: [scripts/database/09_customer_functions.sql](scripts/database/09_customer_functions.sql)
 - Audit log: [scripts/database/10_audit_log.sql](scripts/database/10_audit_log.sql)
 - **Interaction logging**: [scripts/database/11_interaction_logging.sql](scripts/database/11_interaction_logging.sql)
@@ -94,7 +95,7 @@ Follow [QUICKSTART.md](QUICKSTART.md) for Docker-based deployment.
 
 ### Adding a New Tool
 1. Review existing tools in `blueprint/tools/` for patterns
-2. Follow the production pattern in [blueprint/tools/customer_tools.py](blueprint/tools/customer_tools.py)
+2. Follow the pattern in individual tool files (e.g., [add_customer.py](blueprint/tools/add_customer.py))
 3. Add SQL function definition to appropriate migration file in `scripts/database/`
 4. Update tool registry in the agent
 
@@ -114,7 +115,7 @@ Follow [QUICKSTART.md](QUICKSTART.md) for Docker-based deployment.
 ### Testing
 1. Run tests in `blueprint/tests/` directory
 2. See [blueprint/tests/README.md](blueprint/tests/README.md) for test documentation
-3. Test database setup: `createdb agent_swarm_test`
+3. Test database setup: `createdb agent_first_erp_crm_test`
 4. Run with pytest: `pytest blueprint/tests/ -v`
 
 ---
@@ -122,7 +123,7 @@ Follow [QUICKSTART.md](QUICKSTART.md) for Docker-based deployment.
 ## File Structure
 
 ```
-agent_swarm/
+agent_first_erp_crm/
 ├── README.md                 # Project overview
 ├── ARCHITECTURE.md           # System architecture
 ├── QUICKSTART.md            # Setup guide
@@ -138,12 +139,18 @@ agent_swarm/
 │   ├── Dockerfile          # Container configuration
 │   ├── docker-compose.yml  # Docker orchestration
 │   ├── requirements.txt    # Python dependencies
-│   └── tools/              # Tool implementations
-│       ├── README.md              # Tool development guidelines
-│       ├── customer_tools.py      # Production customer tools
-│       ├── customer_lookup.py     # Example lookup tool
-│       ├── customer_management.py # Example management tool
-│       └── communication_logger.py# Example logging tool
+│   └── tools/                    # Tool implementations
+│       ├── README.md                    # Tool development guidelines
+│       ├── add_communication.py         # Log new interactions
+│       ├── add_customer.py              # Add customers
+│       ├── current_time.py              # Get current time
+│       ├── customer_communications.py   # Customer history
+│       ├── customer_lookup.py           # Customer lookup
+│       ├── entity_stats.py              # Entity statistics
+│       ├── followup_customers.py        # Follow-up lists
+│       ├── update_customer.py           # Update customers
+│       ├── communication_logger.py      # Interaction logging
+│       └── tool_logger.py               # Tool logging
 ├── blueprint/docs/          # Agent-friendly SQL documentation
 │   ├── README.md
 │   ├── schema_reference.md
@@ -162,15 +169,15 @@ agent_swarm/
 │   │       └── inventory.md
 │   └── database/            # Database documentation
 │       ├── agent_schema_reference.md
-│       ├── agent_swarm_mental_model.md
-│       ├── agent_swarm_schema.sql
+│       ├── agent_first_erp_crm_mental_model.md
+│       ├── agent_first_erp_crm_schema.sql
 │       ├── 08_create_views.sql
 │       ├── 09_customer_functions.sql
 │       └── 10_audit_log.sql
 ├── memory/                  # Memory components
 ├── scripts/                 # SQL scripts
 │   └── database/            # Migration scripts
-│       ├── agent_swarm_schema.sql
+│       ├── agent_first_erp_crm_schema.sql
 │       ├── 08_create_views.sql
 │       ├── 09_customer_functions.sql
 │       ├── 10_audit_log.sql
@@ -263,10 +270,10 @@ The project uses pgschema for database schema visualization and documentation:
 pip install pgschema
 
 # Generate schema documentation
-pgschema dump -h localhost -U postgres -d agent_swarm -o docs/schema/
+pgschema dump -h localhost -U postgres -d agent_first_erp_crm -o docs/schema/
 
 # Generate schema graph
-pgschema graph -h localhost -U postgres -d agent_swarm > schema_graph.dot
+pgschema graph -h localhost -U postgres -d agent_first_erp_crm > schema_graph.dot
 ```
 
 The `_schema_graph` table contains a knowledge graph of the entire schema for AI agent understanding.

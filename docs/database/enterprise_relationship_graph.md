@@ -1,6 +1,6 @@
 # Enterprise Relationship Graph
 
-**Purpose:** Visualize and document all relationships between tables in the Agent Swarm database.  
+**Purpose:** Visualize and document all relationships between tables in the Agent First ERP CRM database.  
 **Design Philosophy:** Enterprise-grade, mirroring SAP, Oracle, and Salesforce architectures.  
 **Status:** Complete - Entity-Contact-Communication Model
 
@@ -10,7 +10,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                           AGENT SWARM DATABASE                              │
+│                           AGENT FIRST ERP CRM DATABASE                              │
 │                                                                             │
 │  ┌─────────────┐      ┌──────────────┐      ┌──────────────────┐          │
 │  │  ENTITIES   │◄─────┤ RELATIONSHIPS│─────►│     CONTACTS     │          │
@@ -271,15 +271,15 @@ Human Session
 ### 1. Get Primary Contact for an Entity
 ```sql
 SELECT c.first_name, c.last_name, c.email, c.phone
-FROM agent_swarm.entity_relationships er
-JOIN agent_swarm.contacts c ON c.id = er.contact_id
+FROM agent_first_erp_crm.entity_relationships er
+JOIN agent_first_erp_crm.contacts c ON c.id = er.contact_id
 WHERE er.entity_id = 123 AND er.is_primary = TRUE;
 ```
 
 ### 2. Get All Communications for an Entity (Last 30 Days)
 ```sql
 SELECT c.started_at, c.communication_type, c.subject, c.summary
-FROM agent_swarm.communications c
+FROM agent_first_erp_crm.communications c
 WHERE c.entity_id = 123
   AND c.started_at >= NOW() - INTERVAL '30 days'
 ORDER BY c.started_at DESC;
@@ -287,7 +287,7 @@ ORDER BY c.started_at DESC;
 
 ### 3. Get Complete Conversation Thread
 ```sql
-SELECT * FROM agent_swarm.communications
+SELECT * FROM agent_first_erp_crm.communications
 WHERE thread_root_id = 456
 ORDER BY started_at ASC;
 ```
@@ -295,8 +295,8 @@ ORDER BY started_at ASC;
 ### 4. Find All Contacts at an Entity
 ```sql
 SELECT c.first_name, c.last_name, c.title, er.role
-FROM agent_swarm.entity_relationships er
-JOIN agent_swarm.contacts c ON c.id = er.contact_id
+FROM agent_first_erp_crm.entity_relationships er
+JOIN agent_first_erp_crm.contacts c ON c.id = er.contact_id
 WHERE er.entity_id = 123;
 ```
 
@@ -306,9 +306,9 @@ SELECT
     e.name, e.entity_type, e.status,
     c.first_name || ' ' || c.last_name as primary_contact,
     c.email, c.phone
-FROM agent_swarm.entities e
-JOIN agent_swarm.entity_relationships er ON er.entity_id = e.id AND er.is_primary = TRUE
-JOIN agent_swarm.contacts c ON c.id = er.contact_id
+FROM agent_first_erp_crm.entities e
+JOIN agent_first_erp_crm.entity_relationships er ON er.entity_id = e.id AND er.is_primary = TRUE
+JOIN agent_first_erp_crm.contacts c ON c.id = er.contact_id
 WHERE e.id = 123;
 ```
 

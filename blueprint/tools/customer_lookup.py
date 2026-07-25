@@ -13,7 +13,7 @@ load_dotenv()
 DB_CONFIG = {
     "host": os.getenv("POSTGRES_HOST", "localhost"),
     "port": int(os.getenv("POSTGRES_PORT", 5432)),
-    "database": os.getenv("POSTGRES_DB", "agent_swarm"),
+    "database": os.getenv("POSTGRES_DB", "agent_first_erp_crm"),
     "user": os.getenv("POSTGRES_USER", "postgres"),
     "password": os.getenv("POSTGRES_PASSWORD", ""),
 }
@@ -39,7 +39,7 @@ def get_customer_info(customer_name: str) -> str:
     
     try:
         with conn.cursor() as cur:
-            query = "SELECT name, email, phone, address, status FROM agent_swarm.customers WHERE name ILIKE %s LIMIT 5"
+            query = "SELECT name, email, phone, address, status FROM agent_first_erp_crm.customers WHERE name ILIKE %s LIMIT 5"
             cur.execute(query, (f"%{customer_name}%",))
             rows = cur.fetchall()
             

@@ -279,4 +279,4 @@ Functions raise descriptive errors:
 
 ---
 
-*Generated for Agent Swarm - Customer management function reference*
+*Generated for Agent First ERP CRM - Customer management function reference*

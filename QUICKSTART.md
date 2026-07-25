@@ -1,4 +1,4 @@
-# Quick Start Guide - Agent Swarm
+# Quick Start Guide - Agent First ERP CRM
 
 ## Prerequisites
 - Docker installed and running
@@ -8,9 +8,9 @@
 
 ## Step 1: Verify Database Schema
 
-Check if the `agent_swarm` schema exists:
+Check if the `agent_first_erp_crm` schema exists:
 ```bash
-psql -h {your-database-host} -U {your-username} -d {your-database-name} -c "SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'agent_swarm';"
+psql -h {your-database-host} -U {your-username} -d {your-database-name} -c "SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'agent_first_erp_crm';"
 ```
 
 If it doesn't exist, create it and run the sample data:
@@ -84,7 +84,7 @@ Send these messages to your Telegram bot:
 
 After logging a communication, check the database:
 ```bash
-psql -h {your-database-host} -U {your-username} -d {your-database-name} -c "SELECT * FROM agent_swarm.recent_communications WHERE entity_name ILIKE '%Alice%' ORDER BY started_at DESC LIMIT 5;"
+psql -h {your-database-host} -U {your-username} -d {your-database-name} -c "SELECT * FROM agent_first_erp_crm.recent_communications WHERE entity_name ILIKE '%Alice%' ORDER BY started_at DESC LIMIT 5;"
 ```
 
 ## Troubleshooting
@@ -92,7 +92,7 @@ psql -h {your-database-host} -U {your-username} -d {your-database-name} -c "SELE
 ### Database Connection Error
 - Verify PostgreSQL is running: `docker ps | grep postgres`
 - Check credentials in `.env` match your PostgreSQL setup
-- Ensure `agent_swarm` schema exists
+- Ensure `agent_first_erp_crm` schema exists
 
 ### Ollama Connection Error
 - Verify Ollama is running: `curl {your-ollama-url}/api/tags`

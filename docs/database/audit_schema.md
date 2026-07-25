@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Agent Swarm maintains a comprehensive audit trail of all human-bot interactions. This ensures:
+The Agent First ERP CRM maintains a comprehensive audit trail of all human-bot interactions. This ensures:
 - **Accountability:** Know which human commanded which bot
 - **Traceability:** Full history of all actions taken
 - **Compliance:** Meet regulatory requirements for audit trails
@@ -15,7 +15,7 @@ The Agent Swarm maintains a comprehensive audit trail of all human-bot interacti
 Tracks when humans log in and start sessions with agents.
 
 ```sql
-CREATE TABLE agent_swarm.human_sessions (
+CREATE TABLE agent_first_erp_crm.human_sessions (
     session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id VARCHAR(50) NOT NULL,           -- Human user identifier (e.g., "123456")
     user_name VARCHAR(100) NOT NULL,        -- Human's display name (e.g., "Kimmy Sue")
@@ -33,10 +33,10 @@ CREATE TABLE agent_swarm.human_sessions (
 );
 
 -- Indexes for performance
-CREATE INDEX idx_human_sessions_user_id ON agent_swarm.human_sessions(user_id);
-CREATE INDEX idx_human_sessions_bot_id ON agent_swarm.human_sessions(bot_id);
-CREATE INDEX idx_human_sessions_login_time ON agent_swarm.human_sessions(login_time);
-CREATE INDEX idx_human_sessions_status ON agent_swarm.human_sessions(session_status);
+CREATE INDEX idx_human_sessions_user_id ON agent_first_erp_crm.human_sessions(user_id);
+CREATE INDEX idx_human_sessions_bot_id ON agent_first_erp_crm.human_sessions(bot_id);
+CREATE INDEX idx_human_sessions_login_time ON agent_first_erp_crm.human_sessions(login_time);
+CREATE INDEX idx_human_sessions_status ON agent_first_erp_crm.human_sessions(session_status);
 ```
 
 ### Table: `bot_actions`
@@ -44,9 +44,9 @@ CREATE INDEX idx_human_sessions_status ON agent_swarm.human_sessions(session_sta
 Logs every action taken by a bot during a human session.
 
 ```sql
-CREATE TABLE agent_swarm.bot_actions (
+CREATE TABLE agent_first_erp_crm.bot_actions (
     action_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    session_id UUID NOT NULL REFERENCES agent_swarm.human_sessions(session_id),
+    session_id UUID NOT NULL REFERENCES agent_first_erp_crm.human_sessions(session_id),
     user_id VARCHAR(50) NOT NULL,           -- Human user who commanded the bot
     bot_id VARCHAR(50) NOT NULL,            -- Bot that performed the action
     action_type VARCHAR(50) NOT NULL,       -- Type of action (e.g., "query", "update", "export")
@@ -63,14 +63,14 @@ CREATE TABLE agent_swarm.bot_actions (
 );
 
 -- Indexes for performance
-CREATE INDEX idx_bot_actions_session_id ON agent_swarm.bot_actions(session_id);
-CREATE INDEX idx_bot_actions_user_id ON agent_swarm.bot_actions(user_id);
-CREATE INDEX idx_bot_actions_bot_id ON agent_swarm.bot_actions(bot_id);
-CREATE INDEX idx_bot_actions_timestamp ON agent_swarm.bot_actions(timestamp);
-CREATE INDEX idx_bot_actions_action_type ON agent_swarm.bot_actions(action_type);
+CREATE INDEX idx_bot_actions_session_id ON agent_first_erp_crm.bot_actions(session_id);
+CREATE INDEX idx_bot_actions_user_id ON agent_first_erp_crm.bot_actions(user_id);
+CREATE INDEX idx_bot_actions_bot_id ON agent_first_erp_crm.bot_actions(bot_id);
+CREATE INDEX idx_bot_actions_timestamp ON agent_first_erp_crm.bot_actions(timestamp);
+CREATE INDEX idx_bot_actions_action_type ON agent_first_erp_crm.bot_actions(action_type);
 
 -- Composite index for common queries
-CREATE INDEX idx_bot_actions_session_user ON agent_swarm.bot_actions(session_id, user_id);
+CREATE INDEX idx_bot_actions_session_user ON agent_first_erp_crm.bot_actions(session_id, user_id);
 ```
 
 ### Table: `audit_summary`
@@ -78,7 +78,7 @@ CREATE INDEX idx_bot_actions_session_user ON agent_swarm.bot_actions(session_id,
 Daily summary of human-bot interactions for quick reporting.
 
 ```sql
-CREATE TABLE agent_swarm.audit_summary (
+CREATE TABLE agent_first_erp_crm.audit_summary (
     summary_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     date DATE NOT NULL,
     user_id VARCHAR(50) NOT NULL,
@@ -93,8 +93,8 @@ CREATE TABLE agent_swarm.audit_summary (
     UNIQUE(date, user_id, bot_id)
 );
 
-CREATE INDEX idx_audit_summary_date ON agent_swarm.audit_summary(date);
-CREATE INDEX idx_audit_summary_user_bot ON agent_swarm.audit_summary(user_id, bot_id);
+CREATE INDEX idx_audit_summary_date ON agent_first_erp_crm.audit_summary(date);
+CREATE INDEX idx_audit_summary_user_bot ON agent_first_erp_crm.audit_summary(user_id, bot_id);
 ```
 
 ## Usage Examples
@@ -113,7 +113,7 @@ def get_db_connection():
     """Get PostgreSQL connection from environment variables."""
     return psycopg2.connect(
         host=os.getenv("POSTGRES_HOST", "localhost"),
-        database=os.getenv("POSTGRES_DB", "agent_swarm"),
+        database=os.getenv("POSTGRES_DB", "agent_first_erp_crm"),
         user=os.getenv("POSTGRES_USER", "postgres"),
         password=os.getenv("POSTGRES_PASSWORD", "")
     )
@@ -124,7 +124,7 @@ def create_human_session(user_id, user_name, bot_id, bot_type, ip_address=None, 
     cursor = conn.cursor()
     
     cursor.execute("""
-        INSERT INTO agent_swarm.human_sessions (
+        INSERT INTO agent_first_erp_crm.human_sessions (
             user_id, user_name, bot_id, bot_type, ip_address, user_agent
         ) VALUES (%s, %s, %s, %s, %s, %s)
         RETURNING session_id
@@ -159,7 +159,7 @@ def log_bot_action(session_id, user_id, bot_id, action_type, description,
     cursor = conn.cursor()
     
     cursor.execute("""
-        INSERT INTO agent_swarm.bot_actions (
+        INSERT INTO agent_first_erp_crm.bot_actions (
             session_id, user_id, bot_id, action_type, action_description,
             input_parameters, output_result, success, error_message, execution_time_ms
         ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -203,7 +203,7 @@ def close_human_session(session_id, logout_time=None):
         logout_time = datetime.utcnow()
     
     cursor.execute("""
-        UPDATE agent_swarm.human_sessions
+        UPDATE agent_first_erp_crm.human_sessions
         SET logout_time = %s, session_status = 'completed', updated_at = NOW()
         WHERE session_id = %s
     """, (logout_time, session_id))
@@ -224,7 +224,7 @@ SELECT
     ba.action_description,
     ba.success,
     ba.execution_time_ms
-FROM agent_swarm.bot_actions ba
+FROM agent_first_erp_crm.bot_actions ba
 WHERE ba.user_id = '123456' 
   AND ba.bot_id = 'cs_bot_01'
 ORDER BY ba.timestamp DESC
@@ -242,8 +242,8 @@ SELECT
     hs.logout_time,
     COUNT(ba.action_id) as total_actions,
     SUM(CASE WHEN ba.success THEN 1 ELSE 0 END) as successful_actions
-FROM agent_swarm.human_sessions hs
-LEFT JOIN agent_swarm.bot_actions ba ON hs.session_id = ba.session_id
+FROM agent_first_erp_crm.human_sessions hs
+LEFT JOIN agent_first_erp_crm.bot_actions ba ON hs.session_id = ba.session_id
 WHERE hs.user_id = '123456'
 GROUP BY hs.session_id, hs.user_name, hs.bot_id, hs.login_time, hs.logout_time
 ORDER BY hs.login_time DESC;
@@ -261,7 +261,7 @@ SELECT
     successful_actions,
     failed_actions,
     ROUND(avg_session_duration_minutes::numeric, 2) as avg_duration_min
-FROM agent_swarm.audit_summary
+FROM agent_first_erp_crm.audit_summary
 WHERE date >= CURRENT_DATE - INTERVAL '7 days'
 ORDER BY date DESC, total_actions DESC;
 ```
@@ -276,8 +276,8 @@ SELECT
     ba.action_type,
     ba.action_description,
     ba.error_message
-FROM agent_swarm.bot_actions ba
-JOIN agent_swarm.human_sessions hs ON ba.session_id = hs.session_id
+FROM agent_first_erp_crm.bot_actions ba
+JOIN agent_first_erp_crm.human_sessions hs ON ba.session_id = hs.session_id
 WHERE ba.success = FALSE
   AND ba.timestamp >= CURRENT_DATE - INTERVAL '24 hours'
 ORDER BY ba.timestamp DESC;

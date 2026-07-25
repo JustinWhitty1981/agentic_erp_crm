@@ -1,4 +1,4 @@
-# Agent Swarm Database Schema Reference
+# Agent First ERP CRM Database Schema Reference
 
 **Purpose:** Simplified schema reference for AI agents to understand and query the database.
 
@@ -158,4 +158,4 @@ LIMIT 50;
 
 ---
 
-*Generated for Agent Swarm - Simplified schema reference for AI agents*
+*Generated for Agent First ERP CRM - Simplified schema reference for AI agents*

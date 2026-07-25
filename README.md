@@ -1,9 +1,9 @@
 [![Status](https://img.shields.io/badge/Status-Alpha-orange?style=for-the-badge)](README.md#project-status-early-stage-experimental-prototype)
 
-# Agent Swarm
+# Agent First ERP CRM
 
 A **Database-First, Agent-Native** business operating system.
-**Minimalalist UI Agents + PostgreSQL + PGVector.**
+**Minimalist UI Agents + PostgreSQL + PGVector.**
 
 **Planning and architecture by Justin. Implementation primarily by Jarvis (self-hosted open-source models via Ollama/vLLM on bare metal). No commercial LLM API spend.**
 
@@ -88,7 +88,7 @@ Create a swarm of specialized AI agents to run a business where **the conversati
 
 ## Why This Approach?
 
-| Feature | Traditional ERP | Agent Swarm (Database-First) |
+| Feature | Traditional ERP | Agent First ERP CRM (Database-First) |
 | :--- | :--- | :--- |
 | **Interface** | Web UI (Clicks, Forms) | **Conversation (Natural Language)** |
 | **Speed** | Slow (API overhead, App layer) | **Instant** (Direct SQL + Vector) |

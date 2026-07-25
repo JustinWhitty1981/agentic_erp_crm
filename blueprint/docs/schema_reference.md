@@ -1,4 +1,4 @@
-# Agent Swarm Schema Reference
+# Agent First ERP CRM Schema Reference
 
 **Purpose:** Complete database schema reference for AI agents and developers.
 
@@ -8,7 +8,7 @@
 
 ## Schema Overview
 
-The Agent Swarm database is organized into the following domains:
+The Agent First ERP CRM database is organized into the following domains:
 
 1. **Party Management** - Entities, contacts, relationships, and addresses
 2. **Communications** - All interactions with threading and sentiment analysis
@@ -384,4 +384,4 @@ SELECT * FROM _schema_graph;
 
 ---
 
-*Generated for Agent Swarm - Complete schema reference for AI agents and developers*
+*Generated for Agent First ERP CRM - Complete schema reference for AI agents and developers*

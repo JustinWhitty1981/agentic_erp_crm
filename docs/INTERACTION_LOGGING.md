@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Agent Swarm system includes enterprise-grade interaction logging that captures **every** agent-human interaction in detail. This enables:
+The Agent First ERP CRM system includes enterprise-grade interaction logging that captures **every** agent-human interaction in detail. This enables:
 
 - **Debugging**: Understand exactly why an agent made a specific decision
 - **Auditing**: Full audit trail of all agent actions
@@ -65,7 +65,7 @@ log_id = log_agent_trajectory(
     conversation_id="uuid-here",
     telegram_chat_id="8551240949",
     telegram_message_id=7593,
-    bot_id="jarvis-main",
+    bot_id="agent-first-erp-crm-main",
     user_id="8551240949",
     human_input="Find Suzy Smith's contact info",
     intermediate_steps=agent_response["intermediate_steps"],

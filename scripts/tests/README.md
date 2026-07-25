@@ -1,6 +1,6 @@
 # Test Suite
 
-This directory contains the comprehensive test suite for the Agent Swarm system. These tests validate the database functions, agent behavior, and customer management tools.
+This directory contains the comprehensive test suite for the Agent First ERP CRM system. These tests validate the database functions, agent behavior, and customer management tools.
 
 ## 📂 Test Files
 
@@ -17,7 +17,7 @@ scripts/tests/
 
 ### Run All Tests
 ```bash
-cd /home/justin/.openclaw/workspace/github/agent_swarm
+cd /home/justin/.openclaw/workspace/github/agent_first_erp_crm
 python3 -m pytest scripts/tests/ -v
 ```
 
@@ -146,7 +146,7 @@ normalize_email("John.Doe@Example.COM") → "john.doe@example.com"
 ```bash
 export TEST_DATABASE_HOST=${POSTGRES_HOST:-localhost}
 export TEST_DATABASE_PORT=${POSTGRES_PORT:-5432}
-export TEST_DATABASE_NAME=${POSTGRES_DB:-agent_swarm_test}
+export TEST_DATABASE_NAME=${POSTGRES_DB:-agent_first_erp_crm_test}
 export TEST_DATABASE_USER=${POSTGRES_USER:-postgres}
 export TEST_DATABASE_PASSWORD=${POSTGRES_PASSWORD}
 ```
@@ -154,10 +154,10 @@ export TEST_DATABASE_PASSWORD=${POSTGRES_PASSWORD}
 ### Test Database Setup
 ```bash
 # Create test database
-psql -h "${POSTGRES_HOST:-localhost}" -U "${POSTGRES_USER:-postgres}" -c "CREATE DATABASE ${POSTGRES_DB:-agent_swarm_test};"
+psql -h "${POSTGRES_HOST:-localhost}" -U "${POSTGRES_USER:-postgres}" -c "CREATE DATABASE ${POSTGRES_DB:-agent_first_erp_crm_test};"
 
 # Run schema
-psql -h "${POSTGRES_HOST:-localhost}" -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-agent_swarm_test}" -f scripts/database/agent_swarm_schema.sql
+psql -h "${POSTGRES_HOST:-localhost}" -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-agent_first_erp_crm_test}" -f scripts/database/agent_first_erp_crm_schema.sql
 
 # Run functions
 python3 scripts/database/apply_functions.py
@@ -168,7 +168,7 @@ Create a `.env.test` file in the blueprint directory:
 ```env
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
-POSTGRES_DB=agent_swarm_test
+POSTGRES_DB=agent_first_erp_crm_test
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=your_test_password
 ENVIRONMENT=test
@@ -220,17 +220,17 @@ test_agent.test_add_customer()
 ### Check Database State
 ```bash
 # View test data
-psql -h "${POSTGRES_HOST:-localhost}" -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-agent_swarm_test}" -c "SELECT * FROM customers LIMIT 5;"
+psql -h "${POSTGRES_HOST:-localhost}" -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-agent_first_erp_crm_test}" -c "SELECT * FROM customers LIMIT 5;"
 
 # Check audit log
-psql -h "${POSTGRES_HOST:-localhost}" -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-agent_swarm_test}" -c "SELECT * FROM audit_log ORDER BY created_at DESC LIMIT 10;"
+psql -h "${POSTGRES_HOST:-localhost}" -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-agent_first_erp_crm_test}" -c "SELECT * FROM audit_log ORDER BY created_at DESC LIMIT 10;"
 ```
 
 ## ✅ Pre-Flight Checks
 
 Before running tests, ensure:
 1. ✅ Database is running and accessible
-2. ✅ Schema is deployed (`agent_swarm_schema.sql`)
+2. ✅ Schema is deployed (`agent_first_erp_crm_schema.sql`)
 3. ✅ Functions are deployed (`apply_functions.py`)
 4. ✅ Test data is loaded (optional but recommended)
 5. ✅ Environment variables are set

@@ -211,7 +211,7 @@ logger.log_communication(
 ```python
 # Get attachment metadata from database
 cursor.execute("""
-    SELECT attachments FROM agent_swarm.communications 
+    SELECT attachments FROM agent_first_erp_crm.communications 
     WHERE id = %s
 """, (comm_id,))
 

@@ -19,7 +19,7 @@ Views provide simplified, agent-friendly interfaces to complex database queries.
 Backward compatibility view mapping entities/contacts to legacy customer format.
 
 ```sql
-SELECT * FROM agent_swarm.customers;
+SELECT * FROM agent_first_erp_crm.customers;
 ```
 
 **Columns:**
@@ -42,7 +42,7 @@ SELECT * FROM agent_swarm.customers;
 All communications for customers with full context.
 
 ```sql
-SELECT * FROM agent_swarm.customer_communications_summary;
+SELECT * FROM agent_first_erp_crm.customer_communications_summary;
 ```
 
 **Columns:**
@@ -71,7 +71,7 @@ SELECT * FROM agent_swarm.customer_communications_summary;
 Last 7 days of all communications.
 
 ```sql
-SELECT * FROM agent_swarm.recent_communications;
+SELECT * FROM agent_first_erp_crm.recent_communications;
 ```
 
 **Columns:**
@@ -92,7 +92,7 @@ SELECT * FROM agent_swarm.recent_communications;
 All communications requiring follow-up.
 
 ```sql
-SELECT * FROM agent_swarm.pending_followups;
+SELECT * FROM agent_first_erp_crm.pending_followups;
 ```
 
 **Columns:**
@@ -114,7 +114,7 @@ SELECT * FROM agent_swarm.pending_followups;
 Aggregated communication metrics per entity.
 
 ```sql
-SELECT * FROM agent_swarm.entity_communication_stats;
+SELECT * FROM agent_first_erp_crm.entity_communication_stats;
 ```
 
 **Columns:**
@@ -136,7 +136,7 @@ SELECT * FROM agent_swarm.entity_communication_stats;
 Communications only with primary contacts.
 
 ```sql
-SELECT * FROM agent_swarm.primary_contact_communications;
+SELECT * FROM agent_first_erp_crm.primary_contact_communications;
 ```
 
 **Columns:**
@@ -158,7 +158,7 @@ SELECT * FROM agent_swarm.primary_contact_communications;
 Shows communication threading hierarchy.
 
 ```sql
-SELECT * FROM agent_swarm.communication_thread_view;
+SELECT * FROM agent_first_erp_crm.communication_thread_view;
 ```
 
 **Columns:**
@@ -181,7 +181,7 @@ SELECT * FROM agent_swarm.communication_thread_view;
 Summary of activity per bot agent.
 
 ```sql
-SELECT * FROM agent_swarm.agent_activity_summary;
+SELECT * FROM agent_first_erp_crm.agent_activity_summary;
 ```
 
 **Columns:**
@@ -201,7 +201,7 @@ SELECT * FROM agent_swarm.agent_activity_summary;
 Last 100 agent interactions with full trajectory.
 
 ```sql
-SELECT * FROM agent_swarm.v_recent_interactions;
+SELECT * FROM agent_first_erp_crm.v_recent_interactions;
 ```
 
 **Columns:**
@@ -223,7 +223,7 @@ SELECT * FROM agent_swarm.v_recent_interactions;
 All interactions that resulted in errors.
 
 ```sql
-SELECT * FROM agent_swarm.v_failed_interactions;
+SELECT * FROM agent_first_erp_crm.v_failed_interactions;
 ```
 
 **Columns:**
@@ -241,7 +241,7 @@ SELECT * FROM agent_swarm.v_failed_interactions;
 Tool usage statistics and error rates.
 
 ```sql
-SELECT * FROM agent_swarm.v_tool_performance;
+SELECT * FROM agent_first_erp_crm.v_tool_performance;
 ```
 
 **Columns:**
@@ -262,7 +262,7 @@ SELECT * FROM agent_swarm.v_tool_performance;
 Inventory value by warehouse/category.
 
 ```sql
-SELECT * FROM agent_swarm.v_inventory_valuation;
+SELECT * FROM agent_first_erp_crm.v_inventory_valuation;
 ```
 
 **Columns:**
@@ -280,7 +280,7 @@ SELECT * FROM agent_swarm.v_inventory_valuation;
 Stock levels across warehouses.
 
 ```sql
-SELECT * FROM agent_swarm.v_item_availability;
+SELECT * FROM agent_first_erp_crm.v_item_availability;
 ```
 
 **Columns:**
@@ -300,7 +300,7 @@ SELECT * FROM agent_swarm.v_item_availability;
 30-day movement patterns.
 
 ```sql
-SELECT * FROM agent_swarm.v_item_movement_summary;
+SELECT * FROM agent_first_erp_crm.v_item_movement_summary;
 ```
 
 **Columns:**
@@ -319,7 +319,7 @@ SELECT * FROM agent_swarm.v_item_movement_summary;
 Items below reorder point.
 
 ```sql
-SELECT * FROM agent_swarm.v_low_stock_alerts;
+SELECT * FROM agent_first_erp_crm.v_low_stock_alerts;
 ```
 
 **Columns:**
@@ -344,7 +344,7 @@ SELECT
     summary,
     outcome,
     sentiment_label
-FROM agent_swarm.customer_communications_summary
+FROM agent_first_erp_crm.customer_communications_summary
 WHERE entity_id = 123
 ORDER BY started_at DESC
 LIMIT 10;
@@ -359,7 +359,7 @@ SELECT
     follow_up_action,
     follow_up_date,
     priority
-FROM agent_swarm.pending_followups
+FROM agent_first_erp_crm.pending_followups
 WHERE priority IN ('high', 'critical')
 ORDER BY follow_up_date ASC;
 ```
@@ -371,7 +371,7 @@ SELECT
     bot_id,
     total_actions,
     ROUND(avg_sentiment::numeric, 2) as avg_sentiment
-FROM agent_swarm.agent_activity_summary
+FROM agent_first_erp_crm.agent_activity_summary
 ORDER BY total_actions DESC;
 ```
 
@@ -384,7 +384,7 @@ SELECT
     warehouse_name,
     quantity_available,
     stock_status
-FROM agent_swarm.v_item_availability
+FROM agent_first_erp_crm.v_item_availability
 WHERE sku = 'WIDGET-A';
 ```
 
@@ -395,15 +395,15 @@ WHERE sku = 'WIDGET-A';
 To create a new view:
 
 ```sql
-CREATE OR REPLACE VIEW agent_swarm.my_custom_view AS
+CREATE OR REPLACE VIEW agent_first_erp_crm.my_custom_view AS
 SELECT 
     e.name as entity_name,
     c.first_name || ' ' || c.last_name as contact_name,
     comm.summary
-FROM agent_swarm.entities e
-JOIN agent_swarm.entity_relationships er ON er.entity_id = e.id
-JOIN agent_swarm.contacts c ON c.id = er.contact_id
-JOIN agent_swarm.communications comm ON comm.entity_id = e.id
+FROM agent_first_erp_crm.entities e
+JOIN agent_first_erp_crm.entity_relationships er ON er.entity_id = e.id
+JOIN agent_first_erp_crm.contacts c ON c.id = er.contact_id
+JOIN agent_first_erp_crm.communications comm ON comm.entity_id = e.id
 WHERE comm.started_at >= NOW() - INTERVAL '30 days';
 ```
 
@@ -418,4 +418,4 @@ WHERE comm.started_at >= NOW() - INTERVAL '30 days';
 
 ---
 
-*Generated for Agent Swarm - Database views reference*
+*Generated for Agent First ERP CRM - Database views reference*

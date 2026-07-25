@@ -1,4 +1,4 @@
-# Agent Swarm Schema - Mental Model
+# Agent First ERP CRM Schema - Mental Model
 
 ## Core Business Domains
 

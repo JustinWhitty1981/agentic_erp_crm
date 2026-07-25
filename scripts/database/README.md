@@ -1,12 +1,12 @@
 # Database Scripts
 
-This directory contains all SQL migration scripts and Python helpers for setting up and managing the Agent Swarm database.
+This directory contains all SQL migration scripts and Python helpers for setting up and managing the Agent First ERP CRM database.
 
 ## 📂 Directory Structure
 
 ```
 scripts/database/
-├── agent_swarm_schema.sql       # Complete database schema definition
+├── agent_first_erp_crm_schema.sql       # Complete database schema definition
 ├── setup_sample_data.sql        # Sample data for testing
 ├── 08_create_views.sql          # Database views for common queries
 ├── 09_customer_functions.sql    # Customer management SQL functions
@@ -23,7 +23,7 @@ scripts/database/
 
 Run the Python deployment script:
 ```bash
-cd /home/justin/.openclaw/workspace/github/agent_swarm
+cd /home/justin/.openclaw/workspace/github/agent_first_erp_crm
 python3 scripts/database/apply_functions.py
 ```
 
@@ -40,7 +40,7 @@ If you prefer manual control:
 # Set environment variables first
 export POSTGRES_HOST=${POSTGRES_HOST:-localhost}
 export POSTGRES_PORT=${POSTGRES_PORT:-5432}
-export POSTGRES_DB=${POSTGRES_DB:-agent_swarm}
+export POSTGRES_DB=${POSTGRES_DB:-agent_first_erp_crm}
 export POSTGRES_USER=${POSTGRES_USER:-postgres}
 export POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 
@@ -48,12 +48,12 @@ export POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 psql -h "${POSTGRES_HOST}" -U "${POSTGRES_USER}" -d "${POSTGRES_DB}"
 
 # Execute scripts in order
-\i /home/justin/.openclaw/workspace/github/agent_swarm/scripts/database/agent_swarm_schema.sql
-\i /home/justin/.openclaw/workspace/github/agent_swarm/scripts/database/08_create_views.sql
-\i /home/justin/.openclaw/workspace/github/agent_swarm/scripts/database/09_customer_functions.sql
-\i /home/justin/.openclaw/workspace/github/agent_swarm/scripts/database/10_audit_log.sql
-\i /home/justin/.openclaw/workspace/github/agent_swarm/scripts/database/11_interaction_logging.sql  # NEW: Interaction tracking
-\i /home/justin/.openclaw/workspace/github/agent_swarm/scripts/database/setup_sample_data.sql
+\i /home/justin/.openclaw/workspace/github/agent_first_erp_crm/scripts/database/agent_first_erp_crm_schema.sql
+\i /home/justin/.openclaw/workspace/github/agent_first_erp_crm/scripts/database/08_create_views.sql
+\i /home/justin/.openclaw/workspace/github/agent_first_erp_crm/scripts/database/09_customer_functions.sql
+\i /home/justin/.openclaw/workspace/github/agent_first_erp_crm/scripts/database/10_audit_log.sql
+\i /home/justin/.openclaw/workspace/github/agent_first_erp_crm/scripts/database/11_interaction_logging.sql  # NEW: Interaction tracking
+\i /home/justin/.openclaw/workspace/github/agent_first_erp_crm/scripts/database/setup_sample_data.sql
 ```
 
 ### Option 3: Shell Script
@@ -65,7 +65,7 @@ psql -h "${POSTGRES_HOST}" -U "${POSTGRES_USER}" -d "${POSTGRES_DB}"
 ## 📋 Script Descriptions
 
 ### Core Schema
-- **`agent_swarm_schema.sql`**: Complete database schema including:
+- **`agent_first_erp_crm_schema.sql`**: Complete database schema including:
   - Customer tables (customers, customer_contacts, customer_addresses)
   - Conversation tracking tables
   - Audit log tables
@@ -111,7 +111,7 @@ Set these before running scripts:
 ```bash
 export POSTGRES_HOST=${POSTGRES_HOST:-localhost}
 export POSTGRES_PORT=${POSTGRES_PORT:-5432}
-export POSTGRES_DB=${POSTGRES_DB:-agent_swarm}
+export POSTGRES_DB=${POSTGRES_DB:-agent_first_erp_crm}
 export POSTGRES_USER=${POSTGRES_USER:-postgres}
 export POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 ```
@@ -123,10 +123,10 @@ Or use `.env` file in the blueprint directory.
 After setup, verify the installation:
 ```bash
 # Check if functions exist
-psql -h "${POSTGRES_HOST:-localhost}" -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-agent_swarm}" -c "\df add_customer"
+psql -h "${POSTGRES_HOST:-localhost}" -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-agent_first_erp_crm}" -c "\df add_customer"
 
 # Check views
-psql -h "${POSTGRES_HOST:-localhost}" -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-agent_swarm}" -c "\dv customer_summary"
+psql -h "${POSTGRES_HOST:-localhost}" -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-agent_first_erp_crm}" -c "\dv customer_summary"
 
 # Run test queries
 python3 scripts/database/setup_customer_functions.py --verify
@@ -149,12 +149,12 @@ DROP FUNCTION IF EXISTS add_customer CASCADE;
 ### Permission Issues
 ```bash
 # Grant necessary permissions
-psql -h "${POSTGRES_HOST:-localhost}" -U "${POSTGRES_USER:-postgres}" -c "GRANT ALL ON DATABASE ${POSTGRES_DB:-agent_swarm} TO ${POSTGRES_USER:-postgres};"
+psql -h "${POSTGRES_HOST:-localhost}" -U "${POSTGRES_USER:-postgres}" -c "GRANT ALL ON DATABASE ${POSTGRES_DB:-agent_first_erp_crm} TO ${POSTGRES_USER:-postgres};"
 ```
 
 ## 📚 Related Documentation
 
-- [Database Mental Model](../../docs/database/agent_swarm_mental_model.md)
+- [Database Mental Model](../../docs/database/agent_first_erp_crm_mental_model.md)
 - [Schema Reference](../../docs/database/agent_schema_reference.md)
 - [Blueprint Documentation](../../blueprint/README.md)
 
@@ -168,9 +168,9 @@ When working with this directory:
 
 Example safe deployment:
 ```bash
-psql -h "${POSTGRES_HOST:-localhost}" -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-agent_swarm}" << 'EOF'
+psql -h "${POSTGRES_HOST:-localhost}" -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-agent_first_erp_crm}" << 'EOF'
 BEGIN;
-\i agent_swarm_schema.sql
+\i agent_first_erp_crm_schema.sql
 \i 08_create_views.sql
 \i 09_customer_functions.sql
 \i 10_audit_log.sql

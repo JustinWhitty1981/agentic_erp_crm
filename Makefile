@@ -1,11 +1,11 @@
-# Agent Swarm Makefile
+# Agent First ERP CRM Makefile
 # Common development tasks
 
 .PHONY: help setup test lint clean db-create db-migrate db-seed
 
 # Default target
 help:
-	@echo "Agent Swarm - Available Commands"
+	@echo "Agent First ERP CRM - Available Commands"
 	@echo ""
 	@echo "Setup:"
 	@echo "  make setup          - Set up development environment"
@@ -40,23 +40,23 @@ setup:
 
 # Create PostgreSQL database
 db-create:
-	@echo "Creating database 'agent_swarm'..."
-	@createdb agent_swarm || echo "Database may already exist"
+	@echo "Creating database 'agent_first_erp_crm'..."
+	@createdb agent_first_erp_crm || echo "Database may already exist"
 
 # Apply database schema
 db-migrate:
 	@echo "Applying database schema..."
-	@psql -d agent_swarm -f scripts/database/agent_swarm_schema.sql
-	@psql -d agent_swarm -f scripts/database/08_create_views.sql
-	@psql -d agent_swarm -f scripts/database/09_customer_functions.sql
-	@psql -d agent_swarm -f scripts/database/10_audit_log.sql
-	@psql -d agent_swarm -f scripts/database/11_interaction_logging.sql
+	@psql -d agent_first_erp_crm -f scripts/database/agent_first_erp_crm_schema.sql
+	@psql -d agent_first_erp_crm -f scripts/database/08_create_views.sql
+	@psql -d agent_first_erp_crm -f scripts/database/09_customer_functions.sql
+	@psql -d agent_first_erp_crm -f scripts/database/10_audit_log.sql
+	@psql -d agent_first_erp_crm -f scripts/database/11_interaction_logging.sql
 	@echo "Schema migration complete."
 
 # Load sample data
 db-seed:
 	@echo "Loading sample data..."
-	@psql -d agent_swarm -f scripts/database/setup_sample_data.sql
+	@psql -d agent_first_erp_crm -f scripts/database/setup_sample_data.sql
 	@echo "Sample data loaded."
 
 # Run all tests
@@ -84,21 +84,21 @@ format:
 db-reset:
 	@echo "WARNING: This will destroy all data in the database!"
 	@read -p "Are you sure? (y/N) " confirm && [ "$$confirm" = "y" ] || exit 1
-	@dropdb agent_swarm || true
-	@createdb agent_swarm
+	@dropdb agent_first_erp_crm || true
+	@createdb agent_first_erp_crm
 	@make db-migrate
 
 # Backup database
 db-backup:
-	@echo "Backing up database to backup/agent_swarm_$$(date +%Y%m%d_%H%M%S).sql..."
+	@echo "Backing up database to backup/agent_first_erp_crm_$$(date +%Y%m%d_%H%M%S).sql..."
 	@mkdir -p backup
-	@pg_dump agent_swarm > backup/agent_swarm_$$(date +%Y%m%d_%H%M%S).sql
+	@pg_dump agent_first_erp_crm > backup/agent_first_erp_crm_$$(date +%Y%m%d_%H%M%S).sql
 
 # Restore database from backup
 db-restore:
 	@echo "Restoring database from backup..."
 	@read -p "Enter backup file name: " backup_file && \
-		psql agent_swarm < backup/$$backup_file
+		psql agent_first_erp_crm < backup/$$backup_file
 
 # Generate documentation
 docs:
@@ -112,8 +112,8 @@ docs:
 docs-schema:
 	@echo "Generating schema documentation with pgschema..."
 	@pip install pgschema
-	@pgschema dump -h localhost -U postgres -d agent_swarm -o docs/schema/
-	@pgschema graph -h localhost -U postgres -d agent_swarm > schema_graph.dot
+	@pgschema dump -h localhost -U postgres -d agent_first_erp_crm -o docs/schema/
+	@pgschema graph -h localhost -U postgres -d agent_first_erp_crm > schema_graph.dot
 
 # Clean temporary files
 clean:

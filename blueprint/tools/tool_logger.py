@@ -1,5 +1,5 @@
 """
-Tool Logger for Agent Swarm
+Tool Logger for Agent First ERP CRM
 
 This module provides a wrapper for LangChain tools that logs all tool calls
 and observations to PostgreSQL for full interaction tracing.
@@ -26,7 +26,7 @@ class ToolLogger:
             cls._connection_cache = psycopg2.connect(
                 host=os.getenv("POSTGRES_HOST", "localhost"),
                 port=int(os.getenv("POSTGRES_PORT", 5432)),
-                database=os.getenv("POSTGRES_DB", "agent_swarm"),
+                database=os.getenv("POSTGRES_DB", "agent_first_erp_crm"),
                 user=os.getenv("POSTGRES_USER", "postgres"),
                 password=os.getenv("POSTGRES_PASSWORD", ""),
             )
@@ -51,7 +51,7 @@ class ToolLogger:
             
             # Ensure the table exists
             cur.execute("""
-                CREATE TABLE IF NOT EXISTS agent_swarm.agent_tool_calls (
+                CREATE TABLE IF NOT EXISTS agent_first_erp_crm.agent_tool_calls (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     conversation_id UUID NOT NULL,
                     run_id TEXT NOT NULL,
@@ -63,13 +63,13 @@ class ToolLogger:
                     timestamp TIMESTAMPTZ DEFAULT NOW()
                 )
             """)
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_tool_conv ON agent_swarm.agent_tool_calls(conversation_id)")
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_tool_run ON agent_swarm.agent_tool_calls(run_id)")
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_tool_name ON agent_swarm.agent_tool_calls(tool_name)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_tool_conv ON agent_first_erp_crm.agent_tool_calls(conversation_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_tool_run ON agent_first_erp_crm.agent_tool_calls(run_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_tool_name ON agent_first_erp_crm.agent_tool_calls(tool_name)")
             
             # Insert the tool call
             cur.execute("""
-                INSERT INTO agent_swarm.agent_tool_calls
+                INSERT INTO agent_first_erp_crm.agent_tool_calls
                 (conversation_id, run_id, tool_name, tool_input, tool_output, duration_ms, error_message)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
             """, (

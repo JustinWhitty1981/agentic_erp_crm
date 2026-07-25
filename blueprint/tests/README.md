@@ -1,12 +1,12 @@
-# Agent Swarm Test Suite
+# Agent First ERP CRM Test Suite
 
-**Purpose:** Comprehensive test suite for the Agent Swarm blueprint.
+**Purpose:** Comprehensive test suite for the Agent First ERP CRM blueprint.
 
 ---
 
 ## Overview
 
-This test suite validates the core functionality of the Agent Swarm system, including:
+This test suite validates the core functionality of the Agent First ERP CRM system, including:
 
 - Database function testing
 - Agent behavior validation
@@ -96,7 +96,7 @@ python verify_functions.py
 
 ### Prerequisites
 
-1. PostgreSQL database with Agent Swarm schema
+1. PostgreSQL database with Agent First ERP CRM schema
 2. Environment variables configured (see `.env.example`)
 3. Python dependencies installed:
    ```bash
@@ -121,7 +121,7 @@ pytest blueprint/tests/ --cov=blueprint
 ```bash
 export POSTGRES_HOST=localhost
 export POSTGRES_PORT=5432
-export POSTGRES_DB=agent_swarm
+export POSTGRES_DB=agent_first_erp_crm
 export POSTGRES_USER=postgres
 export POSTGRES_PASSWORD=your_password
 
@@ -135,23 +135,23 @@ python blueprint/tests/test_functions.py
 ### Create Test Database
 
 ```sql
-CREATE DATABASE agent_swarm_test;
+CREATE DATABASE agent_first_erp_crm_test;
 ```
 
 ### Apply Schema
 
 ```bash
-psql -h localhost -U postgres -d agent_swarm_test -f scripts/database/agent_swarm_schema.sql
-psql -h localhost -U postgres -d agent_swarm_test -f scripts/database/08_create_views.sql
-psql -h localhost -U postgres -d agent_swarm_test -f scripts/database/09_customer_functions.sql
-psql -h localhost -U postgres -d agent_swarm_test -f scripts/database/10_audit_log.sql
-psql -h localhost -U postgres -d agent_swarm_test -f scripts/database/11_interaction_logging.sql
+psql -h localhost -U postgres -d agent_first_erp_crm_test -f scripts/database/agent_first_erp_crm_schema.sql
+psql -h localhost -U postgres -d agent_first_erp_crm_test -f scripts/database/08_create_views.sql
+psql -h localhost -U postgres -d agent_first_erp_crm_test -f scripts/database/09_customer_functions.sql
+psql -h localhost -U postgres -d agent_first_erp_crm_test -f scripts/database/10_audit_log.sql
+psql -h localhost -U postgres -d agent_first_erp_crm_test -f scripts/database/11_interaction_logging.sql
 ```
 
 ### Load Sample Data
 
 ```bash
-psql -h localhost -U postgres -d agent_swarm_test -f scripts/database/setup_sample_data.sql
+psql -h localhost -U postgres -d agent_first_erp_crm_test -f scripts/database/setup_sample_data.sql
 ```
 
 ---
@@ -188,7 +188,7 @@ class TestCustomerFunctions(unittest.TestCase):
         """Set up test database connection."""
         self.conn = psycopg2.connect(
             host=os.getenv("POSTGRES_HOST", "localhost"),
-            database=os.getenv("POSTGRES_DB", "agent_swarm_test"),
+            database=os.getenv("POSTGRES_DB", "agent_first_erp_crm_test"),
             user=os.getenv("POSTGRES_USER", "postgres"),
             password=os.getenv("POSTGRES_PASSWORD", "")
         )
@@ -232,7 +232,7 @@ jobs:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_DB: agent_swarm_test
+          POSTGRES_DB: agent_first_erp_crm_test
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: test
         options: >-
@@ -243,7 +243,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: setup-python@v2
         with:
           python-version: '3.11'
       - name: Install dependencies
@@ -253,7 +253,7 @@ jobs:
         env:
           POSTGRES_HOST: localhost
           POSTGRES_PORT: 5432
-          POSTGRES_DB: agent_swarm_test
+          POSTGRES_DB: agent_first_erp_crm_test
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: test
         run: |
@@ -286,12 +286,12 @@ psql -f scripts/database/09_customer_functions.sql
 ### Test Database Missing
 
 ```
-psycopg2.errors.InvalidCatalogName: database agent_swarm_test does not exist
+psycopg2.errors.InvalidCatalogName: database agent_first_erp_crm_test does not exist
 ```
 
 **Solution:** Create the test database:
 ```bash
-createdb agent_swarm_test
+createdb agent_first_erp_crm_test
 ```
 
 ---
@@ -306,4 +306,4 @@ Open `htmlcov/index.html` in a browser to view coverage.
 
 ---
 
-*Generated for Agent Swarm - Test suite documentation*
+*Generated for Agent First ERP CRM - Test suite documentation*
