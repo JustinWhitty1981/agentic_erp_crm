@@ -6,7 +6,7 @@ Welcome! This guide is designed specifically for AI agents working on the Agent 
 
 ### 📚 Core Documentation
 - **[README.md](README.md)** - Project overview and getting started
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** - System architecture and agent roles
+- **[architecture.md](architecture.md)** - System architecture and agent roles
 - **[QUICKSTART.md](QUICKSTART.md)** - Deployment and setup instructions
 - **[PLAN.md](PLAN.md)** - Development roadmap and priorities
 
@@ -64,7 +64,7 @@ All agent state and knowledge lives in PostgreSQL:
 
 ### 1. Understanding the Architecture
 Start by reading:
-1. [ARCHITECTURE.md](ARCHITECTURE.md) - System overview
+1. [architecture.md](architecture.md) - System overview
 2. [docs/database/agent_first_erp_crm_mental_model.md](docs/database/agent_first_erp_crm_mental_model.md) - Database concepts
 
 ### 2. Setting Up Development Environment
