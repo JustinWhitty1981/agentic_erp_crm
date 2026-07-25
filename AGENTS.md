@@ -64,7 +64,7 @@ All agent state and knowledge lives in PostgreSQL:
 
 ### 1. Understanding the Architecture
 Start by reading:
-1. [architecture.md](architecture.md) - System overview
+1. [ARCHITECTURE.md](ARCHITECTURE.md) - System overview
 2. [docs/database/agent_first_erp_crm_mental_model.md](docs/database/agent_first_erp_crm_mental_model.md) - Database concepts
 
 ### 2. Setting Up Development Environment
