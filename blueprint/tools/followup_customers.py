@@ -13,7 +13,7 @@ load_dotenv()
 DB_CONFIG = {
     "host": os.getenv("POSTGRES_HOST", "localhost"),
     "port": int(os.getenv("POSTGRES_PORT", 5432)),
-    "database": os.getenv("POSTGRES_DB", "agent_swarm"),
+    "database": os.getenv("POSTGRES_DB", "agent_first_erp_crm"),
     "user": os.getenv("POSTGRES_USER", "postgres"),
     "password": os.getenv("POSTGRES_PASSWORD", ""),
 }
@@ -47,7 +47,7 @@ def get_followup_customers_tool(days_threshold: int = 7) -> str:
         with conn.cursor() as cur:
             query = """
                 SELECT entity_id, name, email, phone, last_communication_date, follow_up_reason
-                FROM agent_swarm.get_followup_customers(%s)
+                FROM agent_first_erp_crm.get_followup_customers(%s)
                 ORDER BY last_communication_date ASC NULLS LAST
             """
             cur.execute(query, (days_threshold,))

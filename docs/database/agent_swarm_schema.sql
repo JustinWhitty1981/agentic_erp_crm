@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS _schema_graph (
 );
 
 
-COMMENT ON TABLE _schema_graph IS 'Knowledge graph of the agent_swarm schema for AI agent understanding. Query this table to understand the entire system structure.';
+COMMENT ON TABLE _schema_graph IS 'Knowledge graph of the agent_first_erp_crm schema for AI agent understanding. Query this table to understand the entire system structure.';
 
 --
 -- Name: agent_interactions; Type: TABLE; Schema: -; Owner: -
@@ -945,7 +945,7 @@ BEGIN
     -- Check for duplicate email
     IF p_email IS NOT NULL AND p_email != '' THEN
         SELECT COUNT(*) INTO v_existing_count
-        FROM agent_swarm.contacts
+        FROM agent_first_erp_crm.contacts
         WHERE email ILIKE p_email;
 
         IF v_existing_count > 0 THEN
@@ -958,7 +958,7 @@ BEGIN
     -- Check for duplicate phone
     IF p_phone IS NOT NULL AND p_phone != '' THEN
         SELECT COUNT(*) INTO v_existing_count
-        FROM agent_swarm.contacts
+        FROM agent_first_erp_crm.contacts
         WHERE phone = p_phone;
 
         IF v_existing_count > 0 THEN
@@ -969,22 +969,22 @@ BEGIN
     END IF;
 
     -- Create the entity
-    INSERT INTO agent_swarm.entities (entity_type, name, status, created_at, updated_at)
+    INSERT INTO agent_first_erp_crm.entities (entity_type, name, status, created_at, updated_at)
     VALUES ('customer', trim(p_first_name || ' ' || p_last_name), p_status, NOW(), NOW())
     RETURNING id INTO v_entity_id;
 
     -- Create the contact
-    INSERT INTO agent_swarm.contacts (first_name, last_name, email, phone, status, created_at, updated_at)
+    INSERT INTO agent_first_erp_crm.contacts (first_name, last_name, email, phone, status, created_at, updated_at)
     VALUES (p_first_name, p_last_name, p_email, p_phone, 'active', NOW(), NOW())
     RETURNING id INTO v_contact_id;
 
     -- Create the entity relationship (primary)
-    INSERT INTO agent_swarm.entity_relationships (entity_id, contact_id, role, is_primary, created_at)
+    INSERT INTO agent_first_erp_crm.entity_relationships (entity_id, contact_id, role, is_primary, created_at)
     VALUES (v_entity_id, v_contact_id, 'Customer', TRUE, NOW());
 
     -- Create address if provided
     IF p_street IS NOT NULL OR p_city IS NOT NULL OR p_state IS NOT NULL OR p_postal_code IS NOT NULL THEN
-        INSERT INTO agent_swarm.addresses (
+        INSERT INTO agent_first_erp_crm.addresses (
             entity_id, contact_id, address_type,
             street, city, state, postal_code, country, is_primary, created_at
         ) VALUES (
@@ -1064,7 +1064,7 @@ BEGIN
     -- Check for duplicate email (if provided)
     IF p_email IS NOT NULL AND p_email != '' THEN
         SELECT COUNT(*) INTO v_existing_email_count
-        FROM agent_swarm.contacts
+        FROM agent_first_erp_crm.contacts
         WHERE email ILIKE p_email;
 
         IF v_existing_email_count > 0 THEN
@@ -1077,7 +1077,7 @@ BEGIN
     -- Check for duplicate phone (if provided)
     IF p_phone IS NOT NULL AND p_phone != '' THEN
         SELECT COUNT(*) INTO v_existing_phone_count
-        FROM agent_swarm.contacts
+        FROM agent_first_erp_crm.contacts
         WHERE phone = p_phone;
 
         IF v_existing_phone_count > 0 THEN
@@ -1089,18 +1089,18 @@ BEGIN
 
     -- Create the entity
     IF p_entity_type = 'business' THEN
-        INSERT INTO agent_swarm.entities (entity_type, name, status, created_at, updated_at)
+        INSERT INTO agent_first_erp_crm.entities (entity_type, name, status, created_at, updated_at)
         VALUES ('customer', trim(p_organization_name), p_status, NOW(), NOW())
         RETURNING id INTO v_entity_id;
     ELSE
-        INSERT INTO agent_swarm.entities (entity_type, name, status, created_at, updated_at)
+        INSERT INTO agent_first_erp_crm.entities (entity_type, name, status, created_at, updated_at)
         VALUES ('customer', trim(p_first_name || ' ' || p_last_name), p_status, NOW(), NOW())
         RETURNING id INTO v_entity_id;
     END IF;
 
     -- Create the contact
     IF p_entity_type = 'individual' OR (p_entity_type = 'business' AND (p_first_name IS NOT NULL OR p_last_name IS NOT NULL)) THEN
-        INSERT INTO agent_swarm.contacts (first_name, last_name, email, phone, status, created_at, updated_at)
+        INSERT INTO agent_first_erp_crm.contacts (first_name, last_name, email, phone, status, created_at, updated_at)
         VALUES (
             COALESCE(p_first_name, ''),
             COALESCE(p_last_name, ''),
@@ -1112,20 +1112,20 @@ BEGIN
         )
         RETURNING id INTO v_contact_id;
 
-        INSERT INTO agent_swarm.entity_relationships (entity_id, contact_id, role, is_primary, created_at)
+        INSERT INTO agent_first_erp_crm.entity_relationships (entity_id, contact_id, role, is_primary, created_at)
         VALUES (v_entity_id, v_contact_id, 'Customer', TRUE, NOW());
     ELSE
-        INSERT INTO agent_swarm.contacts (first_name, last_name, email, phone, status, created_at, updated_at)
+        INSERT INTO agent_first_erp_crm.contacts (first_name, last_name, email, phone, status, created_at, updated_at)
         VALUES ('', '', p_email, p_phone, 'active', NOW(), NOW())
         RETURNING id INTO v_contact_id;
 
-        INSERT INTO agent_swarm.entity_relationships (entity_id, contact_id, role, is_primary, created_at)
+        INSERT INTO agent_first_erp_crm.entity_relationships (entity_id, contact_id, role, is_primary, created_at)
         VALUES (v_entity_id, v_contact_id, 'Business Contact', TRUE, NOW());
     END IF;
 
     -- Create address if provided
     IF p_street IS NOT NULL OR p_city IS NOT NULL OR p_state IS NOT NULL OR p_postal_code IS NOT NULL THEN
-        INSERT INTO agent_swarm.addresses (
+        INSERT INTO agent_first_erp_crm.addresses (
             entity_id, contact_id, address_type,
             street, city, state, postal_code, country, is_primary, created_at
         ) VALUES (
@@ -1236,15 +1236,15 @@ BEGIN
             c.email,
             c.phone,
             e.status
-        FROM agent_swarm.entities e
-        JOIN agent_swarm.entity_relationships er ON e.id = er.entity_id AND er.is_primary = TRUE
-        JOIN agent_swarm.contacts c ON er.contact_id = c.id
+        FROM agent_first_erp_crm.entities e
+        JOIN agent_first_erp_crm.entity_relationships er ON e.id = er.entity_id AND er.is_primary = TRUE
+        JOIN agent_first_erp_crm.contacts c ON er.contact_id = c.id
         WHERE e.entity_type = 'customer'
     LOOP
         -- Get last communication date and outcome
         SELECT MAX(created_at)
         INTO last_comm_date
-        FROM agent_swarm.communications comm
+        FROM agent_first_erp_crm.communications comm
         WHERE comm.entity_id = rec.ent_id;
 
         -- Check follow-up criteria
@@ -1396,9 +1396,9 @@ DECLARE
 BEGIN
     -- Find the customer
     SELECT e.id, c.id INTO v_entity_id, v_contact_id
-    FROM agent_swarm.entities e
-    JOIN agent_swarm.entity_relationships er ON e.id = er.entity_id AND er.is_primary = TRUE
-    JOIN agent_swarm.contacts c ON er.contact_id = c.id
+    FROM agent_first_erp_crm.entities e
+    JOIN agent_first_erp_crm.entity_relationships er ON e.id = er.entity_id AND er.is_primary = TRUE
+    JOIN agent_first_erp_crm.contacts c ON er.contact_id = c.id
     WHERE e.name ILIKE '%' || p_search_name || '%'
     AND (p_search_email IS NULL OR c.email ILIKE p_search_email)
     AND (p_search_phone IS NULL OR c.phone = p_search_phone)
@@ -1412,7 +1412,7 @@ BEGIN
     -- Check for email conflicts (if updating email)
     IF p_email IS NOT NULL AND p_email != '' THEN
         SELECT COUNT(*) INTO v_existing_email_count
-        FROM agent_swarm.contacts
+        FROM agent_first_erp_crm.contacts
         WHERE email ILIKE p_email AND id != v_contact_id;
 
         IF v_existing_email_count > 0 THEN
@@ -1425,7 +1425,7 @@ BEGIN
     -- Check for phone conflicts (if updating phone)
     IF p_phone IS NOT NULL AND p_phone != '' THEN
         SELECT COUNT(*) INTO v_existing_phone_count
-        FROM agent_swarm.contacts
+        FROM agent_first_erp_crm.contacts
         WHERE phone = p_phone AND id != v_contact_id;
 
         IF v_existing_phone_count > 0 THEN
@@ -1437,7 +1437,7 @@ BEGIN
 
     -- Update contact information if provided
     IF p_first_name IS NOT NULL OR p_last_name IS NOT NULL OR p_email IS NOT NULL OR p_phone IS NOT NULL THEN
-        UPDATE agent_swarm.contacts
+        UPDATE agent_first_erp_crm.contacts
         SET first_name = COALESCE(p_first_name, first_name),
             last_name = COALESCE(p_last_name, last_name),
             email = COALESCE(p_email, email),
@@ -1448,7 +1448,7 @@ BEGIN
 
     -- Update entity information if provided
     IF p_first_name IS NOT NULL OR p_last_name IS NOT NULL OR p_status IS NOT NULL THEN
-        UPDATE agent_swarm.entities
+        UPDATE agent_first_erp_crm.entities
         SET name = CASE
             WHEN p_first_name IS NOT NULL OR p_last_name IS NOT NULL
             THEN COALESCE(p_first_name, '') || ' ' || COALESCE(p_last_name, '')
@@ -1462,7 +1462,7 @@ BEGIN
     -- Handle address updates with FIXED logic
     IF p_street IS NOT NULL OR p_city IS NOT NULL OR p_state IS NOT NULL OR p_postal_code IS NOT NULL OR p_country IS NOT NULL THEN
         -- Step 1: Try to update the primary address
-        UPDATE agent_swarm.addresses addr
+        UPDATE agent_first_erp_crm.addresses addr
         SET street = COALESCE(p_street, addr.street),
             city = COALESCE(p_city, addr.city),
             state = COALESCE(p_state, addr.state),
@@ -1475,13 +1475,13 @@ BEGIN
         IF v_address_id IS NULL THEN
             -- Find any existing address for this entity
             SELECT addr.id INTO v_address_id
-            FROM agent_swarm.addresses addr
+            FROM agent_first_erp_crm.addresses addr
             WHERE addr.entity_id = v_entity_id
             LIMIT 1;
 
             -- If an address exists (even if not primary), update it and mark as primary
             IF v_address_id IS NOT NULL THEN
-                UPDATE agent_swarm.addresses addr
+                UPDATE agent_first_erp_crm.addresses addr
                 SET street = COALESCE(p_street, addr.street),
                     city = COALESCE(p_city, addr.city),
                     state = COALESCE(p_state, addr.state),
@@ -1491,7 +1491,7 @@ BEGIN
                 WHERE addr.id = v_address_id;
             ELSE
                 -- Step 3: No addresses exist, create a new one
-                INSERT INTO agent_swarm.addresses (
+                INSERT INTO agent_first_erp_crm.addresses (
                     entity_id, contact_id, address_type,
                     street, city, state, postal_code, country, is_primary, created_at
                 ) VALUES (

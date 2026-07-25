@@ -13,7 +13,7 @@ This is a **simple single-agent** customer service bot that:
 - Can add, update, and lookup customers
 - Logs communications automatically
 
-**Key Design Principle**: Simplicity. No agent swarms, no complex orchestration. Just one agent doing one job well.
+**Key Design Principle**: Simplicity. No agent swarms (multi-agent systems), no complex orchestration. Just one agent doing one job well.
 
 ---
 
@@ -89,7 +89,7 @@ Three specialized tools for customer management:
 
 ## Database Schema
 
-The agent uses the `agent_swarm` schema in PostgreSQL:
+The agent uses the `agent_first_erp_crm` schema in PostgreSQL:
 
 **Core Tables**:
 - `entities` - Customer entities (companies, individuals)
@@ -125,8 +125,8 @@ OLLAMA_MODEL=ornith:35b
 # PostgreSQL
 POSTGRES_HOST={your-postgres-host}
 POSTGRES_PORT=5432
-POSTGRES_DB=jarvis_data
-POSTGRES_USER=jarvis
+POSTGRES_DB=agent_first_erp_crm
+POSTGRES_USER=agent_first_erp_crm
 POSTGRES_PASSWORD={yourpasswordhere}
 
 # Logging
@@ -209,7 +209,7 @@ To create a similar agent:
 
 ## Related Files
 
-- `docs/database/agent_swarm_schema.sql` - Full database schema
+- `docs/database/agent_first_erp_crm_schema.sql` - Full database schema
 - `docs/database/09_customer_functions.sql` - Customer functions
 - `docs/database/10_audit_log.sql` - Audit log schema
 - `docs/database/agent_schema_reference.md` - Schema reference

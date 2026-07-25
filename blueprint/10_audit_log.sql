@@ -2,9 +2,9 @@
 -- This table provides an immutable log of all agent actions for validation and compliance
 -- Required for the CAO (Chief Agent Officer) validation layer
 
-DROP TABLE IF EXISTS agent_swarm.audit_log CASCADE;
+DROP TABLE IF EXISTS agent_first_erp_crm.audit_log CASCADE;
 
-CREATE TABLE agent_swarm.audit_log (
+CREATE TABLE agent_first_erp_crm.audit_log (
     id BIGSERIAL PRIMARY KEY,
     agent_id TEXT NOT NULL,                    -- e.g., 'customer_service', 'inventory_agent'
     action TEXT NOT NULL,                      -- e.g., 'create_ticket', 'update_customer', 'add_communication'
@@ -20,10 +20,10 @@ CREATE TABLE agent_swarm.audit_log (
 );
 
 -- Indexes for performance
-CREATE INDEX idx_audit_log_agent_id ON agent_swarm.audit_log(agent_id);
-CREATE INDEX idx_audit_log_created_at ON agent_swarm.audit_log(created_at);
-CREATE INDEX idx_audit_log_validation_status ON agent_swarm.audit_log(validation_status);
-CREATE INDEX idx_audit_log_target ON agent_swarm.audit_log(target_table, target_id);
+CREATE INDEX idx_audit_log_agent_id ON agent_first_erp_crm.audit_log(agent_id);
+CREATE INDEX idx_audit_log_created_at ON agent_first_erp_crm.audit_log(created_at);
+CREATE INDEX idx_audit_log_validation_status ON agent_first_erp_crm.audit_log(validation_status);
+CREATE INDEX idx_audit_log_target ON agent_first_erp_crm.audit_log(target_table, target_id);
 
 -- Function to log agent actions
 CREATE OR REPLACE FUNCTION log_agent_action(
@@ -37,7 +37,7 @@ CREATE OR REPLACE FUNCTION log_agent_action(
 DECLARE
     v_audit_id BIGINT;
 BEGIN
-    INSERT INTO agent_swarm.audit_log (
+    INSERT INTO agent_first_erp_crm.audit_log (
         agent_id, action, target_table, target_id, old_value, new_value
     ) VALUES (
         p_agent_id, p_action, p_target_table, p_target_id, p_old_value, p_new_value
@@ -58,7 +58,7 @@ BEGIN
         RAISE EXCEPTION 'Invalid validation status: %', p_validation_status;
     END IF;
     
-    UPDATE agent_swarm.audit_log
+    UPDATE agent_first_erp_crm.audit_log
     SET 
         validation_status = p_validation_status,
         validated_at = NOW(),
@@ -68,13 +68,13 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Grant permissions
-GRANT SELECT ON agent_swarm.audit_log TO jarvis;
-GRANT INSERT ON agent_swarm.audit_log TO jarvis;
-GRANT EXECUTE ON FUNCTION log_agent_action TO jarvis;
-GRANT EXECUTE ON FUNCTION validate_audit_action TO jarvis;
+GRANT SELECT ON agent_first_erp_crm.audit_log TO agent_first_erp_crm;
+GRANT INSERT ON agent_first_erp_crm.audit_log TO agent_first_erp_crm;
+GRANT EXECUTE ON FUNCTION log_agent_action TO agent_first_erp_crm;
+GRANT EXECUTE ON FUNCTION validate_audit_action TO agent_first_erp_crm;
 
 -- Comments for documentation
-COMMENT ON TABLE agent_swarm.audit_log IS 'Immutable log of all agent actions for CAO validation';
-COMMENT ON COLUMN agent_swarm.audit_log.validation_status IS 'Status: pending (awaiting validation), passed (verified), failed (validation failed)';
+COMMENT ON TABLE agent_first_erp_crm.audit_log IS 'Immutable log of all agent actions for CAO validation';
+COMMENT ON COLUMN agent_first_erp_crm.audit_log.validation_status IS 'Status: pending (awaiting validation), passed (verified), failed (validation failed)';
 COMMENT ON FUNCTION log_agent_action IS 'Logs a new agent action to the audit trail';
 COMMENT ON FUNCTION validate_audit_action IS 'Validates an audit log entry by the CAO agent';

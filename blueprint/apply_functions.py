@@ -11,7 +11,7 @@ from pathlib import Path
 DB_CONFIG = {
     "host": os.getenv("POSTGRES_HOST", "localhost"),
     "port": int(os.getenv("POSTGRES_PORT", "5432")),
-    "database": os.getenv("POSTGRES_DB", "agent_swarm"),
+    "database": os.getenv("POSTGRES_DB", "agent_first_erp_crm"),
     "user": os.getenv("POSTGRES_USER", "postgres"),
     "password": os.getenv("POSTGRES_PASSWORD", ""),
 }
@@ -41,7 +41,7 @@ def main():
             cur.execute("""
                 SELECT routine_name 
                 FROM information_schema.routines 
-                WHERE routine_schema = 'agent_swarm' 
+                WHERE routine_schema = 'agent_first_erp_crm' 
                 AND routine_name IN ('add_customer', 'update_customer', 'get_followup_customers')
                 ORDER BY routine_name;
             """)

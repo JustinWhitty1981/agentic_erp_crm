@@ -2,7 +2,7 @@
 
 **Status:** Accepted  
 **Date:** July 2026  
-**Authors:** Agent Swarm Team
+**Authors:** Agent First ERP CRM Team
 
 ---
 
@@ -58,10 +58,10 @@ We will use **PostgreSQL as the single source of truth** for all agent state, kn
 
 ## References
 
-- [Database Mental Model](../docs/database/agent_swarm_mental_model.md)
+- [Database Mental Model](../docs/database/agent_first_erp_crm_mental_model.md)
 - [Schema Reference](../docs/database/agent_schema_reference.md)
 - [blueprint/docs/schema_reference.md](../blueprint/docs/schema_reference.md)
 
 ---
 
-*This ADR is part of the Agent Swarm Architecture Decision Records.*
+*This ADR is part of the Agent First ERP CRM Architecture Decision Records.*

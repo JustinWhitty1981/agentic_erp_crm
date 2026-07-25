@@ -1,10 +1,10 @@
--- Create Views for Agent Swarm
+-- Create Views for Agent First ERP CRM
 -- This script creates all the views documented in README_VIEWS.md
 -- Run after setup_sample_data.sql
 
 -- View 1: customers (Backward Compatibility)
 -- Already created in setup_sample_data.sql, but ensure it exists
-CREATE OR REPLACE VIEW agent_swarm.customers AS
+CREATE OR REPLACE VIEW agent_first_erp_crm.customers AS
 SELECT 
     e.id,
     e.name,
@@ -18,14 +18,14 @@ SELECT
     e.created_at,
     e.updated_at,
     e.embedding
-FROM agent_swarm.entities e
-LEFT JOIN agent_swarm.entity_relationships er ON e.id = er.entity_id AND er.is_primary = TRUE
-LEFT JOIN agent_swarm.contacts c ON er.contact_id = c.id
-LEFT JOIN agent_swarm.addresses a ON e.id = a.entity_id AND a.is_primary = TRUE
+FROM agent_first_erp_crm.entities e
+LEFT JOIN agent_first_erp_crm.entity_relationships er ON e.id = er.entity_id AND er.is_primary = TRUE
+LEFT JOIN agent_first_erp_crm.contacts c ON er.contact_id = c.id
+LEFT JOIN agent_first_erp_crm.addresses a ON e.id = a.entity_id AND a.is_primary = TRUE
 WHERE e.entity_type IN ('customer', 'prospect');
 
 -- View 2: customer_communications_summary
-CREATE OR REPLACE VIEW agent_swarm.customer_communications_summary AS
+CREATE OR REPLACE VIEW agent_first_erp_crm.customer_communications_summary AS
 SELECT 
     c.id,
     e.name AS entity_name,
@@ -45,13 +45,13 @@ SELECT
     c.follow_up_date,
     c.started_at,
     c.created_at
-FROM agent_swarm.communications c
-JOIN agent_swarm.entities e ON c.entity_id = e.id
-LEFT JOIN agent_swarm.contacts ct ON c.contact_id = ct.id;
+FROM agent_first_erp_crm.communications c
+JOIN agent_first_erp_crm.entities e ON c.entity_id = e.id
+LEFT JOIN agent_first_erp_crm.contacts ct ON c.contact_id = ct.id;
 
 -- View 3: recent_communications (Last 7 days)
 -- Already created in setup_sample_data.sql, but ensure it exists
-CREATE OR REPLACE VIEW agent_swarm.recent_communications AS
+CREATE OR REPLACE VIEW agent_first_erp_crm.recent_communications AS
 SELECT 
     c.id,
     e.name AS entity_name,
@@ -65,14 +65,14 @@ SELECT
     c.outcome,
     c.sentiment_label,
     c.started_at
-FROM agent_swarm.communications c
-JOIN agent_swarm.entities e ON c.entity_id = e.id
-LEFT JOIN agent_swarm.contacts ct ON c.contact_id = ct.id
+FROM agent_first_erp_crm.communications c
+JOIN agent_first_erp_crm.entities e ON c.entity_id = e.id
+LEFT JOIN agent_first_erp_crm.contacts ct ON c.contact_id = ct.id
 WHERE c.started_at >= NOW() - INTERVAL '7 days'
 ORDER BY c.started_at DESC;
 
 -- View 4: pending_followups
-CREATE OR REPLACE VIEW agent_swarm.pending_followups AS
+CREATE OR REPLACE VIEW agent_first_erp_crm.pending_followups AS
 SELECT 
     c.id,
     e.name AS entity_name,
@@ -91,9 +91,9 @@ SELECT
     c.follow_up_required,
     c.follow_up_date,
     c.started_at
-FROM agent_swarm.communications c
-JOIN agent_swarm.entities e ON c.entity_id = e.id
-LEFT JOIN agent_swarm.contacts ct ON c.contact_id = ct.id
+FROM agent_first_erp_crm.communications c
+JOIN agent_first_erp_crm.entities e ON c.entity_id = e.id
+LEFT JOIN agent_first_erp_crm.contacts ct ON c.contact_id = ct.id
 WHERE c.follow_up_required = TRUE
   AND (c.outcome = 'pending' OR c.outcome = 'escalated')
 ORDER BY 
@@ -108,7 +108,7 @@ ORDER BY
 
 -- View 5: entity_communication_stats
 -- Already created in setup_sample_data.sql, but ensure it exists
-CREATE OR REPLACE VIEW agent_swarm.entity_communication_stats AS
+CREATE OR REPLACE VIEW agent_first_erp_crm.entity_communication_stats AS
 SELECT 
     e.id AS entity_id,
     e.name AS entity_name,
@@ -120,12 +120,12 @@ SELECT
     COUNT(CASE WHEN c.outcome = 'pending' THEN 1 END) AS pending_count,
     ROUND(AVG(c.sentiment_score)::numeric, 2) AS avg_sentiment,
     MAX(c.started_at) AS last_contact_date
-FROM agent_swarm.entities e
-LEFT JOIN agent_swarm.communications c ON e.id = c.entity_id
+FROM agent_first_erp_crm.entities e
+LEFT JOIN agent_first_erp_crm.communications c ON e.id = c.entity_id
 GROUP BY e.id, e.name, e.entity_type, e.status;
 
 -- View 6: primary_contact_communications
-CREATE OR REPLACE VIEW agent_swarm.primary_contact_communications AS
+CREATE OR REPLACE VIEW agent_first_erp_crm.primary_contact_communications AS
 SELECT 
     c.id,
     e.name AS entity_name,
@@ -140,15 +140,15 @@ SELECT
     c.outcome,
     c.sentiment_label,
     c.started_at
-FROM agent_swarm.communications c
-JOIN agent_swarm.entities e ON c.entity_id = e.id
-JOIN agent_swarm.entity_relationships er ON e.id = er.entity_id AND er.is_primary = TRUE
-JOIN agent_swarm.contacts ct ON er.contact_id = ct.id
+FROM agent_first_erp_crm.communications c
+JOIN agent_first_erp_crm.entities e ON c.entity_id = e.id
+JOIN agent_first_erp_crm.entity_relationships er ON e.id = er.entity_id AND er.is_primary = TRUE
+JOIN agent_first_erp_crm.contacts ct ON er.contact_id = ct.id
 WHERE c.contact_id = ct.id
 ORDER BY c.started_at DESC;
 
 -- View 7: communication_thread_view
-CREATE OR REPLACE VIEW agent_swarm.communication_thread_view AS
+CREATE OR REPLACE VIEW agent_first_erp_crm.communication_thread_view AS
 WITH RECURSIVE thread_hierarchy AS (
     -- Base case: root communications (no parent)
     SELECT 
@@ -164,7 +164,7 @@ WITH RECURSIVE thread_hierarchy AS (
         c.outcome,
         c.started_at,
         0 AS depth
-    FROM agent_swarm.communications c
+    FROM agent_first_erp_crm.communications c
     WHERE c.parent_id IS NULL
     
     UNION ALL
@@ -183,7 +183,7 @@ WITH RECURSIVE thread_hierarchy AS (
         c.outcome,
         c.started_at,
         th.depth + 1 AS depth
-    FROM agent_swarm.communications c
+    FROM agent_first_erp_crm.communications c
     JOIN thread_hierarchy th ON c.parent_id = th.id
 )
 SELECT 
@@ -200,12 +200,12 @@ SELECT
     th.started_at,
     th.depth
 FROM thread_hierarchy th
-JOIN agent_swarm.entities e ON th.entity_id = e.id
-LEFT JOIN agent_swarm.contacts ct ON th.contact_id = ct.id
+JOIN agent_first_erp_crm.entities e ON th.entity_id = e.id
+LEFT JOIN agent_first_erp_crm.contacts ct ON th.contact_id = ct.id
 ORDER BY th.thread_root_id, th.started_at;
 
 -- View 8: agent_activity_summary
-CREATE OR REPLACE VIEW agent_swarm.agent_activity_summary AS
+CREATE OR REPLACE VIEW agent_first_erp_crm.agent_activity_summary AS
 SELECT 
     COALESCE(t.agent_id, 'unknown') AS agent_id,
     COUNT(DISTINCT c.entity_id) AS unique_entities,
@@ -214,14 +214,14 @@ SELECT
     COUNT(CASE WHEN c.outcome = 'escalated' THEN 1 END) AS escalated_count,
     ROUND(AVG(c.sentiment_score)::numeric, 2) AS avg_sentiment,
     MAX(c.started_at) AS last_activity
-FROM agent_swarm.communications c
-LEFT JOIN agent_swarm.tickets t ON c.id = t.id
+FROM agent_first_erp_crm.communications c
+LEFT JOIN agent_first_erp_crm.tickets t ON c.id = t.id
 GROUP BY COALESCE(t.agent_id, 'unknown');
 
 -- Create additional helpful views
 
 -- View: entity_contact_details (Complete entity + primary contact info)
-CREATE OR REPLACE VIEW agent_swarm.entity_contact_details AS
+CREATE OR REPLACE VIEW agent_first_erp_crm.entity_contact_details AS
 SELECT 
     e.id AS entity_id,
     e.name AS entity_name,
@@ -245,13 +245,13 @@ SELECT
     a.state,
     a.postal_code,
     a.country
-FROM agent_swarm.entities e
-LEFT JOIN agent_swarm.entity_relationships er ON e.id = er.entity_id AND er.is_primary = TRUE
-LEFT JOIN agent_swarm.contacts ct ON er.contact_id = ct.id
-LEFT JOIN agent_swarm.addresses a ON e.id = a.entity_id AND a.is_primary = TRUE;
+FROM agent_first_erp_crm.entities e
+LEFT JOIN agent_first_erp_crm.entity_relationships er ON e.id = er.entity_id AND er.is_primary = TRUE
+LEFT JOIN agent_first_erp_crm.contacts ct ON er.contact_id = ct.id
+LEFT JOIN agent_first_erp_crm.addresses a ON e.id = a.entity_id AND a.is_primary = TRUE;
 
 -- View: communication_timeline (Chronological view with full context)
-CREATE OR REPLACE VIEW agent_swarm.communication_timeline AS
+CREATE OR REPLACE VIEW agent_first_erp_crm.communication_timeline AS
 SELECT 
     c.id,
     c.started_at,
@@ -271,9 +271,9 @@ SELECT
         WHEN c.direction = 'inbound' THEN 'Received from ' || COALESCE(ct.first_name, e.name)
         ELSE 'Sent to ' || COALESCE(ct.first_name, e.name)
     END AS narrative
-FROM agent_swarm.communications c
-JOIN agent_swarm.entities e ON c.entity_id = e.id
-LEFT JOIN agent_swarm.contacts ct ON c.contact_id = ct.id
+FROM agent_first_erp_crm.communications c
+JOIN agent_first_erp_crm.entities e ON c.entity_id = e.id
+LEFT JOIN agent_first_erp_crm.contacts ct ON c.contact_id = ct.id
 ORDER BY c.started_at DESC;
 
 -- Verify all views created
@@ -282,5 +282,5 @@ SELECT
     schemaname,
     viewname
 FROM pg_views 
-WHERE schemaname = 'agent_swarm' 
+WHERE schemaname = 'agent_first_erp_crm' 
 ORDER BY viewname;

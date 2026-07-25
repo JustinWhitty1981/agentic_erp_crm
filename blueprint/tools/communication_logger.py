@@ -17,8 +17,8 @@ load_dotenv()
 DB_CONFIG = {
     "host": os.getenv("POSTGRES_HOST", "{your-postgres-host}"),
     "port": int(os.getenv("POSTGRES_PORT", 5432)),
-    "database": os.getenv("POSTGRES_DB", "jarvis_data"),
-    "user": os.getenv("POSTGRES_USER", "jarvis"),
+    "database": os.getenv("POSTGRES_DB", "agent_first_erp_crm"),
+    "user": os.getenv("POSTGRES_USER", "agent_first_erp_crm"),
     "password": os.getenv("POSTGRES_PASSWORD", "{yourpasswordhere}"),
 }
 
@@ -70,7 +70,7 @@ def log_communication(
         with conn.cursor() as cur:
             # First, get the entity_id from the customers view
             cur.execute(
-                "SELECT id FROM agent_swarm.customers WHERE name ILIKE %s LIMIT 1",
+                "SELECT id FROM agent_first_erp_crm.customers WHERE name ILIKE %s LIMIT 1",
                 (f"%{customer_name}%",)
             )
             entity_row = cur.fetchone()
@@ -84,8 +84,8 @@ def log_communication(
             contact_id = None
             cur.execute("""
                 SELECT c.id 
-                FROM agent_swarm.contacts c
-                JOIN agent_swarm.entity_relationships er ON c.id = er.contact_id
+                FROM agent_first_erp_crm.contacts c
+                JOIN agent_first_erp_crm.entity_relationships er ON c.id = er.contact_id
                 WHERE er.entity_id = %s AND er.is_primary = TRUE
                 LIMIT 1
             """, (entity_id,))
@@ -102,7 +102,7 @@ def log_communication(
             
             # Insert into communications table
             cur.execute("""
-                INSERT INTO agent_swarm.communications 
+                INSERT INTO agent_first_erp_crm.communications 
                 (entity_id, contact_id, communication_type, direction, subject, summary, 
                  outcome, sentiment_label, follow_up_required, follow_up_date, created_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -274,16 +274,16 @@ def get_communication_history(
 
     try:
         with conn.cursor() as cur:
-            query = """
-                SELECT id, started_at, communication_type, direction, subject, summary,
-                       outcome, sentiment_label, follow_up_required, follow_up_date
-                FROM agent_swarm.communications c
-                JOIN agent_swarm.entities e ON c.entity_id = e.id
-                WHERE e.name ILIKE %s 
-                AND c.started_at >= NOW() - INTERVAL '%s days'
-                ORDER BY c.started_at DESC
-                LIMIT %s
-            """
+                query = """
+                    SELECT id, started_at, communication_type, direction, subject, summary,
+                           outcome, sentiment_label, follow_up_required, follow_up_date
+                    FROM agent_first_erp_crm.communications c
+                    JOIN agent_first_erp_crm.entities e ON c.entity_id = e.id
+                    WHERE e.name ILIKE %s 
+                    AND c.started_at >= NOW() - INTERVAL '%s days'
+                    ORDER BY c.started_at DESC
+                    LIMIT %s
+                """
             cur.execute(query, (f"%{customer_name}%", days, limit))
             rows = cur.fetchall()
             
@@ -334,8 +334,8 @@ def get_follow_ups(due_date: Optional[str] = None, status: str = "pending") -> s
                 query = """
                     SELECT c.id, e.name as entity_name, c.started_at, 
                            c.communication_type, c.summary, c.follow_up_date
-                    FROM agent_swarm.communications c
-                    JOIN agent_swarm.entities e ON c.entity_id = e.id
+                    FROM agent_first_erp_crm.communications c
+                    JOIN agent_first_erp_crm.entities e ON c.entity_id = e.id
                     WHERE c.follow_up_required = TRUE
                     AND c.follow_up_date = %s
                     ORDER BY c.follow_up_date, c.started_at DESC
@@ -345,8 +345,8 @@ def get_follow_ups(due_date: Optional[str] = None, status: str = "pending") -> s
                 query = """
                     SELECT c.id, e.name as entity_name, c.started_at,
                            c.communication_type, c.summary, c.follow_up_date
-                    FROM agent_swarm.communications c
-                    JOIN agent_swarm.entities e ON c.entity_id = e.id
+                    FROM agent_first_erp_crm.communications c
+                    JOIN agent_first_erp_crm.entities e ON c.entity_id = e.id
                     WHERE c.follow_up_required = TRUE
                     AND c.follow_up_date >= CURRENT_DATE
                     ORDER BY c.follow_up_date, c.started_at DESC

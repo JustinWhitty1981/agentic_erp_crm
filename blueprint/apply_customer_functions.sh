@@ -11,6 +11,6 @@ docker run --rm \
   -e PGPASSWORD="${POSTGRES_PASSWORD}" \
   -v "$(pwd)/09_add_update_customer_functions.sql:/tmp/functions.sql:ro" \
   postgres:15 \
-  psql -h "${POSTGRES_HOST:-localhost}" -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-agent_swarm}" -f /tmp/functions.sql
+  psql -h "${POSTGRES_HOST:-localhost}" -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-agent_first_erp_crm}" -f /tmp/functions.sql
 
 echo "Customer management functions applied successfully!"

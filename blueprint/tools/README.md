@@ -1,6 +1,6 @@
 # Tools Library
 
-This folder contains individual tool modules for the Agent Swarm customer service agent. Each tool is a separate file, making them reusable and discoverable across different agents.
+This folder contains individual tool modules for the Agent First ERP CRM customer service agent. Each tool is a separate file, making them reusable and discoverable across different agents.
 
 ---
 

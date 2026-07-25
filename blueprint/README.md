@@ -6,13 +6,13 @@ A simple, single-file customer service bot built with LangChain v1, Ollama, and 
 
 - **Tool Calling**: Automatically decides when to check customer info, log communications, or manage customers
 - **Conversation Memory**: Remembers context within a chat session
-- **PostgreSQL Integration**: Queries your existing `jarvis_data` database
+- **PostgreSQL Integration**: Queries your existing `agent_first_erp_crm` database
 - **Clean Docker Environment**: Isolated dependencies, no conflicts with your main system
 
 ## Prerequisites
 
 - Docker installed on your VM
-- PostgreSQL database `jarvis_data` running at `{your-postgres-host}:5432`
+- PostgreSQL database `agent_first_erp_crm` running at `{your-postgres-host}:5432`
 - Ollama running with `ornith:35b` at `{your-ollama-host}:11434`
 - Telegram bot token (already configured in `.env`)
 
@@ -29,7 +29,7 @@ cp .env.example .env
 ### 2. Run with Docker
 
 ```bash
-cd /home/justin/agent_swarm/blueprint
+cd /home/justin/agentic_erp_crm/blueprint
 docker-compose up --build
 ```
 
@@ -54,18 +54,18 @@ Send a message to your Telegram bot:
 
 ## Database Schema
 
-The bot uses the `agent_swarm` schema in your `jarvis_data` database with these tables/views:
+The bot uses the `agent_first_erp_crm` schema in your `agent_first_erp_crm` database with these tables/views:
 
 | Table/View | Purpose |
 |------------|---------|
-| `agent_swarm.customers` | Customer information (name, email, phone, address, status) |
-| `agent_swarm.communications` | Communication history (entity_id, type, direction, summary, timestamp) |
-| `agent_swarm.entity_communication_stats` | Aggregated stats per entity |
-| `agent_swarm.recent_communications` | Recent communication view (last 7 days) |
-| `agent_swarm.entities` | Entity records |
-| `agent_swarm.entity_relationships` | Entity-contact relationships |
-| `agent_swarm.contacts` | Contact details |
-| `agent_swarm.addresses` | Address information |
+| `agent_first_erp_crm.customers` | Customer information (name, email, phone, address, status) |
+| `agent_first_erp_crm.communications` | Communication history (entity_id, type, direction, summary, timestamp) |
+| `agent_first_erp_crm.entity_communication_stats` | Aggregated stats per entity |
+| `agent_first_erp_crm.recent_communications` | Recent communication view (last 7 days) |
+| `agent_first_erp_crm.entities` | Entity records |
+| `agent_first_erp_crm.entity_relationships` | Entity-contact relationships |
+| `agent_first_erp_crm.contacts` | Contact details |
+| `agent_first_erp_crm.addresses` | Address information |
 
 ### Database Functions
 
@@ -101,7 +101,7 @@ This is a **simple agent** pattern:
 | `update_customer_tool` | Update an existing customer's information |
 | `get_followup_customers_tool` | Get customers requiring follow-up |
 
-No agent swarms, no multi-agent debates, no complex orchestration. Just a straightforward bot that does what it's supposed to do.
+No agent swarms (multi-agent systems), no multi-agent debates, no complex orchestration. Just a straightforward bot that does what it's supposed to do.
 
 ## Stopping the Bot
 
@@ -149,7 +149,7 @@ blueprint/
 
 ## Related Documentation
 
-- `docs/database/agent_swarm_schema.sql` - Full database schema
+- `docs/database/agent_first_erp_crm_schema.sql` - Full database schema
 - `docs/database/agent_schema_reference.md` - Schema reference for agents
 - `docs/database/09_customer_functions.sql` - Customer management functions
 - `docs/database/10_audit_log.sql` - Audit log schema

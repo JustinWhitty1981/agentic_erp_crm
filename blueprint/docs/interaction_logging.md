@@ -53,7 +53,7 @@ The interaction logging system captures **every** agent-human interaction in det
 ### agent_interactions Table
 
 ```sql
-CREATE TABLE agent_swarm.agent_interactions (
+CREATE TABLE agent_first_erp_crm.agent_interactions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     conversation_id UUID NOT NULL,
     run_id TEXT NOT NULL,
@@ -100,7 +100,7 @@ log_id = log_agent_trajectory(
     conversation_id="uuid-here",
     telegram_chat_id="8551240949",
     telegram_message_id=7593,
-    bot_id="jarvis-main",
+    bot_id="agent-first-erp-crm-main",
     user_id="8551240949",
     human_input="Find Suzy Smith's contact info",
     intermediate_steps=agent_response["intermediate_steps"],
@@ -149,7 +149,7 @@ SELECT
     human_input, 
     final_output, 
     timestamp
-FROM agent_swarm.agent_interactions 
+FROM agent_first_erp_crm.agent_interactions 
 WHERE to_tsvector('english', human_input) @@ to_tsquery('Suzy & Smith')
 ORDER BY timestamp DESC;
 ```
@@ -162,7 +162,7 @@ SELECT
     actions_taken,
     error_message,
     timestamp
-FROM agent_swarm.agent_interactions 
+FROM agent_first_erp_crm.agent_interactions 
 WHERE error_message IS NOT NULL
 ORDER BY timestamp DESC;
 ```
@@ -175,7 +175,7 @@ SELECT
     COUNT(*) as call_count,
     AVG(duration_ms) as avg_duration_ms,
     SUM(CASE WHEN error_message IS NOT NULL THEN 1 ELSE 0 END) as error_count
-FROM agent_swarm.agent_interactions,
+FROM agent_first_erp_crm.agent_interactions,
      jsonb_array_elements(actions_taken) as actions_taken
 GROUP BY tool_name
 ORDER BY call_count DESC;
@@ -189,7 +189,7 @@ SELECT
     intent_classification,
     confidence_score,
     final_output
-FROM agent_swarm.agent_interactions 
+FROM agent_first_erp_crm.agent_interactions 
 WHERE confidence_score < 0.7
 ORDER BY confidence_score ASC;
 ```
@@ -203,7 +203,7 @@ SELECT
     actions_taken,
     tool_observations,
     final_output
-FROM agent_swarm.agent_interactions 
+FROM agent_first_erp_crm.agent_interactions 
 WHERE id = 'interaction-uuid-here';
 ```
 
@@ -216,7 +216,7 @@ WHERE id = 'interaction-uuid-here';
 Last 100 interactions with full context:
 
 ```sql
-SELECT * FROM agent_swarm.v_recent_interactions LIMIT 10;
+SELECT * FROM agent_first_erp_crm.v_recent_interactions LIMIT 10;
 ```
 
 ### v_failed_interactions
@@ -224,7 +224,7 @@ SELECT * FROM agent_swarm.v_recent_interactions LIMIT 10;
 All interactions that resulted in errors:
 
 ```sql
-SELECT * FROM agent_swarm.v_failed_interactions LIMIT 20;
+SELECT * FROM agent_first_erp_crm.v_failed_interactions LIMIT 20;
 ```
 
 ### v_tool_performance
@@ -232,7 +232,7 @@ SELECT * FROM agent_swarm.v_failed_interactions LIMIT 20;
 Tool usage statistics and error rates:
 
 ```sql
-SELECT * FROM agent_swarm.v_tool_performance;
+SELECT * FROM agent_first_erp_crm.v_tool_performance;
 ```
 
 ---
@@ -330,4 +330,4 @@ Logging is asynchronous and shouldn't impact response times. If you notice slowd
 
 ---
 
-*Generated for Agent Swarm - Interaction logging system documentation*
+*Generated for Agent First ERP CRM - Interaction logging system documentation*

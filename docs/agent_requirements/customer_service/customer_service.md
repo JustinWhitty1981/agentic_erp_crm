@@ -55,10 +55,10 @@ The customer service agent is implemented in `blueprint/bot.py` with:
 ### Tools
 | Tool | Purpose | Database Query |
 |------|---------|----------------|
-| `get_customer_info` | Look up customer by name | `SELECT name, email, phone, address, status FROM agent_swarm.customers WHERE name ILIKE %s` |
-| `get_customer_communications` | Get recent interactions | `SELECT started_at, entity_name, communication_type, direction, summary FROM agent_swarm.recent_communications` |
-| `get_entity_stats` | View communication metrics | `SELECT entity_name, entity_type, status, total_communications, resolved_count, pending_count FROM agent_swarm.entity_communication_stats` |
-| `add_communication` | Log new interaction | `INSERT INTO agent_swarm.communications (entity_id, communication_type, direction, summary, started_at)` |
+| `get_customer_info` | Look up customer by name | `SELECT name, email, phone, address, status FROM agent_first_erp_crm.customers WHERE name ILIKE %s` |
+| `get_customer_communications` | Get recent interactions | `SELECT started_at, entity_name, communication_type, direction, summary FROM agent_first_erp_crm.recent_communications` |
+| `get_entity_stats` | View communication metrics | `SELECT entity_name, entity_type, status, total_communications, resolved_count, pending_count FROM agent_first_erp_crm.entity_communication_stats` |
+| `add_communication` | Log new interaction | `INSERT INTO agent_first_erp_crm.communications (entity_id, communication_type, direction, summary, started_at)` |
 | `current_time` | Get current date/time | No database query |
 | `get_followup_customers` | Get customers needing contact | `SELECT * FROM get_followup_customers(days_threshold)` |
 
@@ -71,7 +71,7 @@ The customer service agent is implemented in `blueprint/bot.py` with:
 ### Deployment
 - **Run:** `python bot.py` in `/home/justin/.openclaw/workspace/customer-service-bot` (background process)
 - **Model:** `ornith:35b` via Ollama at `http://{your-ollama-host}:11434`
-- **Database:** PostgreSQL at `{your-postgres-host}:5432` (database: `jarvis_data`, schema: `agent_swarm`)
+- **Database:** PostgreSQL at `{your-postgres-host}:5432` (database: `agent_first_erp_crm`, schema: `agent_first_erp_crm`)
 - **Telegram:** Bot token from `.env` file
 - **Note:** Not Docker-based. Runs as a native Python process.
 

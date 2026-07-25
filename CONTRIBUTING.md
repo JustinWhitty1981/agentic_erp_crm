@@ -1,6 +1,6 @@
-# Contributing to Agent Swarm
+# Contributing to Agent First ERP CRM
 
-Thank you for your interest in contributing to Agent Swarm! This document provides guidelines and instructions for contributing to the project.
+Thank you for your interest in contributing to Agent First ERP CRM! This document provides guidelines and instructions for contributing to the project.
 
 ## Table of Contents
 
@@ -38,8 +38,8 @@ Thank you for your interest in contributing to Agent Swarm! This document provid
 
 2. **Clone your fork**
    ```bash
-   git clone https://github.com/your-username/agent_swarm.git
-   cd agent_swarm
+   git clone https://github.com/your-username/agent_first_erp_crm.git
+   cd agent_first_erp_crm
    ```
 
 3. **Set up Python environment**
@@ -58,14 +58,14 @@ Thank you for your interest in contributing to Agent Swarm! This document provid
 5. **Set up PostgreSQL database**
    ```bash
    # Create the database
-   createdb agent_swarm
+   createdb agent_first_erp_crm
    
    # Apply schema
-   psql -d agent_swarm -f scripts/database/agent_swarm_schema.sql
-   psql -d agent_swarm -f scripts/database/08_create_views.sql
-   psql -d agent_swarm -f scripts/database/09_customer_functions.sql
-   psql -d agent_swarm -f scripts/database/10_audit_log.sql
-   psql -d agent_swarm -f scripts/database/11_interaction_logging.sql
+   psql -d agent_first_erp_crm -f scripts/database/agent_first_erp_crm_schema.sql
+   psql -d agent_first_erp_crm -f scripts/database/08_create_views.sql
+   psql -d agent_first_erp_crm -f scripts/database/09_customer_functions.sql
+   psql -d agent_first_erp_crm -f scripts/database/10_audit_log.sql
+   psql -d agent_first_erp_crm -f scripts/database/11_interaction_logging.sql
    ```
 
 6. **Run tests**
@@ -263,4 +263,4 @@ By contributing, you agree that your contributions will be licensed under the MI
 
 ---
 
-*Thank you for contributing to Agent Swarm!*
+*Thank you for contributing to Agent First ERP CRM!*

@@ -2,7 +2,7 @@
 
 **Status:** Accepted  
 **Date:** July 2026  
-**Authors:** Agent Swarm Team
+**Authors:** Agent First ERP CRM Team
 
 ---
 
@@ -71,4 +71,4 @@ Example views:
 
 ---
 
-*This ADR is part of the Agent Swarm Architecture Decision Records.*
+*This ADR is part of the Agent First ERP CRM Architecture Decision Records.*

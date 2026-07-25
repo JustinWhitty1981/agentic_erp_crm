@@ -1,5 +1,5 @@
 """
-Interaction Logger for Agent Swarm
+Interaction Logger for Agent First ERP CRM
 
 This module provides enterprise-grade logging for all agent-human interactions.
 It captures the full "trajectory" of an agent's reasoning, actions, and outcomes
@@ -12,7 +12,7 @@ Usage:
         conversation_id="uuid-here",
         telegram_chat_id="8551240949",
         telegram_message_id=7593,
-        bot_id="jarvis-main",
+        bot_id="agent-first-erp-crm-main",
         user_id="8551240949",
         human_input="Find Suzy Smith's contact info",
         intermediate_steps=agent_response["intermediate_steps"],
@@ -47,7 +47,7 @@ def get_db_connection():
     return psycopg2.connect(
         host=os.getenv("POSTGRES_HOST", "localhost"),
         port=int(os.getenv("POSTGRES_PORT", 5432)),
-        database=os.getenv("POSTGRES_DB", "agent_swarm"),
+        database=os.getenv("POSTGRES_DB", "agent_first_erp_crm"),
         user=os.getenv("POSTGRES_USER", "postgres"),
         password=os.getenv("POSTGRES_PASSWORD", ""),
     )
@@ -85,7 +85,7 @@ def log_agent_trajectory(
         conversation_id: UUID linking related messages in a conversation
         telegram_chat_id: The Telegram chat ID (e.g., "8551240949")
         telegram_message_id: The specific message ID that triggered this interaction
-        bot_id: Identifier for the bot instance (e.g., "jarvis-main")
+        bot_id: Identifier for the bot instance (e.g., "agent-first-erp-crm-main")
         user_id: The user's Telegram ID
         human_input: The original user prompt
         intermediate_steps: List of (AgentAction, observation) tuples from LangChain
@@ -106,7 +106,7 @@ def log_agent_trajectory(
         ...     conversation_id="abc-123",
         ...     telegram_chat_id="8551240949",
         ...     telegram_message_id=7593,
-        ...     bot_id="jarvis-main",
+        ...     bot_id="agent-first-erp-crm-main",
         ...     user_id="8551240949",
         ...     human_input="Find Suzy Smith",
         ...     intermediate_steps=[(action1, obs1), (action2, obs2)],
@@ -307,7 +307,7 @@ if __name__ == "__main__":
         conversation_id=str(uuid.uuid4()),
         telegram_chat_id="8551240949",
         telegram_message_id=7593,
-        bot_id="jarvis-main",
+        bot_id="agent-first-erp-crm-main",
         user_id="8551240949",
         human_input="Test interaction logging",
         intermediate_steps=[],

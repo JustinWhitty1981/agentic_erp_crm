@@ -15,7 +15,7 @@ load_dotenv()
 DB_CONFIG = {
     "host": os.getenv("POSTGRES_HOST", "localhost"),
     "port": int(os.getenv("POSTGRES_PORT", 5432)),
-    "database": os.getenv("POSTGRES_DB", "agent_swarm"),
+    "database": os.getenv("POSTGRES_DB", "agent_first_erp_crm"),
     "user": os.getenv("POSTGRES_USER", "postgres"),
     "password": os.getenv("POSTGRES_PASSWORD", ""),
 }
@@ -59,7 +59,7 @@ def add_communication(
         with conn.cursor() as cur:
             # First, get the entity_id from the customers view
             cur.execute(
-                "SELECT id FROM agent_swarm.customers WHERE name ILIKE %s LIMIT 1",
+                "SELECT id FROM agent_first_erp_crm.customers WHERE name ILIKE %s LIMIT 1",
                 (f"%{customer_name}%",)
             )
             entity_row = cur.fetchone()
@@ -77,7 +77,7 @@ def add_communication(
             
             # Insert into communications table
             cur.execute("""
-                INSERT INTO agent_swarm.communications 
+                INSERT INTO agent_first_erp_crm.communications 
                 (entity_id, communication_type, direction, summary, started_at)
                 VALUES (%s, %s, %s, %s, %s)
                 RETURNING id

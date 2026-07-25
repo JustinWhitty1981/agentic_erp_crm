@@ -27,18 +27,18 @@ class PostgresAgentLogger(BaseCallbackHandler):
         return psycopg2.connect(
             host=os.getenv("POSTGRES_HOST", "localhost"),
             port=int(os.getenv("POSTGRES_PORT", 5432)),
-            database=os.getenv("POSTGRES_DB", "agent_swarm"),
+            database=os.getenv("POSTGRES_DB", "agent_first_erp_crm"),
             user=os.getenv("POSTGRES_USER", "postgres"),
             password=os.getenv("POSTGRES_PASSWORD", ""),
         )
     
     def _create_table_if_not_exists(self):
-        """Create the agent_interactions table in agent_swarm schema if it doesn't exist."""
+        """Create the agent_interactions table in agent_first_erp_crm schema if it doesn't exist."""
         conn = self.get_db_connection()
         try:
             with conn.cursor() as cur:
                 cur.execute("""
-                    CREATE TABLE IF NOT EXISTS agent_swarm.agent_interactions (
+                    CREATE TABLE IF NOT EXISTS agent_first_erp_crm.agent_interactions (
                         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                         conversation_id UUID NOT NULL,
                         run_id TEXT NOT NULL,
@@ -63,10 +63,10 @@ class PostgresAgentLogger(BaseCallbackHandler):
                         created_at TIMESTAMPTZ DEFAULT NOW()
                     )
                 """)
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_conv ON agent_swarm.agent_interactions(conversation_id)")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_user ON agent_swarm.agent_interactions(user_id)")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON agent_swarm.agent_interactions(timestamp DESC)")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_actions ON agent_swarm.agent_interactions USING GIN(actions_taken)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_conv ON agent_first_erp_crm.agent_interactions(conversation_id)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_user ON agent_first_erp_crm.agent_interactions(user_id)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON agent_first_erp_crm.agent_interactions(timestamp DESC)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_actions ON agent_first_erp_crm.agent_interactions USING GIN(actions_taken)")
             conn.commit()
         finally:
             conn.close()
@@ -88,12 +88,12 @@ class PostgresAgentLogger(BaseCallbackHandler):
         try:
             with conn.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO agent_swarm.agent_interactions 
+                    INSERT INTO agent_first_erp_crm.agent_interactions 
                     (conversation_id, run_id, final_output, duration_ms, model_used)
                     VALUES (%s, %s, %s, %s, %s)
                 """, (self.conversation_id, self.run_id, final_output, duration_ms, "ornith:35b"))
             conn.commit()
-            print(f"✅ Logged interaction {self.run_id} to agent_swarm.agent_interactions")
+            print(f"✅ Logged interaction {self.run_id} to agent_first_erp_crm.agent_interactions")
         except Exception as e:
             print(f"❌ Error logging to database: {e}")
         finally:
@@ -105,7 +105,7 @@ class PostgresAgentLogger(BaseCallbackHandler):
         try:
             with conn.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO agent_swarm.agent_interactions 
+                    INSERT INTO agent_first_erp_crm.agent_interactions 
                     (conversation_id, run_id, error_message)
                     VALUES (%s, %s, %s)
                 """, (self.conversation_id, self.run_id, str(error)))

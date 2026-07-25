@@ -1,4 +1,4 @@
-# Agent Swarm Architecture
+# Agent First ERP CRM Architecture
 
 ## 📚 Documentation Navigation
 
@@ -99,10 +99,10 @@ The core is a **PostgreSQL database with PGVector** extension.
 See **[docs/database/agent_schema_reference.md](docs/database/agent_schema_reference.md)** for the complete enterprise schema design.
 
 **Current Implementation (Customer Service):**
-- `agent_swarm.customers` - Entity/customer information
-- `agent_swarm.communications` - Interaction history
-- `agent_swarm.recent_communications` - View for recent interactions
-- `agent_swarm.entity_communication_stats` - Aggregated statistics
+- `agent_first_erp_crm.customers` - Entity/customer information
+- `agent_first_erp_crm.communications` - Interaction history
+- `agent_first_erp_crm.recent_communications` - View for recent interactions
+- `agent_first_erp_crm.entity_communication_stats` - Aggregated statistics
 
 **Planned Tables:**
 - `orders` - Order details and status

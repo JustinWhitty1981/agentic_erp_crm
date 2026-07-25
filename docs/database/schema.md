@@ -1,6 +1,6 @@
 # Database Schema Design (Enterprise Edition v2.0)
 
-This document outlines the PostgreSQL schema with PGVector support for the Agent Swarm.
+This document outlines the PostgreSQL schema with PGVector support for the Agent First ERP CRM.
 **Design Philosophy:** Enterprise-grade, mirroring SAP/Oracle/Infor patterns.
 
 ## Core Concepts
@@ -13,7 +13,7 @@ This document outlines the PostgreSQL schema with PGVector support for the Agent
 ### 1. `entities` (Replaces `customers`)
 Stores business entities (companies or individuals) that transact with us.
 ```sql
-CREATE TABLE agent_swarm.entities (
+CREATE TABLE agent_first_erp_crm.entities (
     id SERIAL PRIMARY KEY,
     entity_type VARCHAR(50) NOT NULL,       -- 'customer', 'vendor', 'prospect', 'employee'
     name TEXT NOT NULL,                     -- Display name (Company Name or Full Name)
@@ -31,7 +31,7 @@ CREATE TABLE agent_swarm.entities (
 ### 2. `contacts`
 Stores individual human beings.
 ```sql
-CREATE TABLE agent_swarm.contacts (
+CREATE TABLE agent_first_erp_crm.contacts (
     id SERIAL PRIMARY KEY,
     first_name TEXT NOT NULL,
     last_name TEXT NOT NULL,
@@ -49,10 +49,10 @@ CREATE TABLE agent_swarm.contacts (
 ### 3. `entity_relationships`
 Defines how contacts relate to entities.
 ```sql
-CREATE TABLE agent_swarm.entity_relationships (
+CREATE TABLE agent_first_erp_crm.entity_relationships (
     id SERIAL PRIMARY KEY,
-    entity_id INTEGER NOT NULL REFERENCES agent_swarm.entities(id),
-    contact_id INTEGER NOT NULL REFERENCES agent_swarm.contacts(id),
+    entity_id INTEGER NOT NULL REFERENCES agent_first_erp_crm.entities(id),
+    contact_id INTEGER NOT NULL REFERENCES agent_first_erp_crm.contacts(id),
     role VARCHAR(100),                      -- "Procurement Manager", "Owner"
     is_primary BOOLEAN DEFAULT FALSE,       -- Main point of contact?
     start_date DATE,
@@ -62,17 +62,17 @@ CREATE TABLE agent_swarm.entity_relationships (
     UNIQUE(entity_id, contact_id)
 );
 
-CREATE INDEX idx_primary_contact ON agent_swarm.entity_relationships(entity_id) 
+CREATE INDEX idx_primary_contact ON agent_first_erp_crm.entity_relationships(entity_id) 
 WHERE is_primary = TRUE;
 ```
 
 ### 4. `addresses`
 Supports multiple addresses per entity or contact (billing, shipping, HQ).
 ```sql
-CREATE TABLE agent_swarm.addresses (
+CREATE TABLE agent_first_erp_crm.addresses (
     id SERIAL PRIMARY KEY,
-    entity_id INTEGER REFERENCES agent_swarm.entities(id),
-    contact_id INTEGER REFERENCES agent_swarm.contacts(id), -- Optional: Address for a specific person
+    entity_id INTEGER REFERENCES agent_first_erp_crm.entities(id),
+    contact_id INTEGER REFERENCES agent_first_erp_crm.contacts(id), -- Optional: Address for a specific person
     address_type VARCHAR(50),               -- 'billing', 'shipping', 'headquarters', 'mailing'
     street TEXT,
     city TEXT,
@@ -83,16 +83,16 @@ CREATE TABLE agent_swarm.addresses (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_addresses_entity ON agent_swarm.addresses(entity_id);
-CREATE INDEX idx_addresses_contact ON agent_swarm.addresses(contact_id);
+CREATE INDEX idx_addresses_entity ON agent_first_erp_crm.addresses(entity_id);
+CREATE INDEX idx_addresses_contact ON agent_first_erp_crm.addresses(contact_id);
 ```
 
 ### 5. `orders` (Placeholder for future implementation)
 Stores order details and context.
 ```sql
-CREATE TABLE agent_swarm.orders (
+CREATE TABLE agent_first_erp_crm.orders (
     id SERIAL PRIMARY KEY,
-    entity_id INTEGER REFERENCES agent_swarm.entities(id), -- Changed from customer_id
+    entity_id INTEGER REFERENCES agent_first_erp_crm.entities(id), -- Changed from customer_id
     status TEXT DEFAULT 'pending',
     total NUMERIC(10, 2),
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -104,7 +104,7 @@ CREATE TABLE agent_swarm.orders (
 ### 6. `products`
 Product catalog with inventory tracking.
 ```sql
-CREATE TABLE agent_swarm.products (
+CREATE TABLE agent_first_erp_crm.products (
     id SERIAL PRIMARY KEY,
     name TEXT NOT NULL,
     sku TEXT UNIQUE,
@@ -121,17 +121,17 @@ CREATE TABLE agent_swarm.products (
 ### 7. `communications`
 Conversation logs and support tickets.
 ```sql
-CREATE TABLE agent_swarm.communications (
+CREATE TABLE agent_first_erp_crm.communications (
     id BIGSERIAL PRIMARY KEY,
-    entity_id INTEGER NOT NULL REFERENCES agent_swarm.entities(id),
-    contact_id INTEGER REFERENCES agent_swarm.contacts(id),
+    entity_id INTEGER NOT NULL REFERENCES agent_first_erp_crm.entities(id),
+    contact_id INTEGER REFERENCES agent_first_erp_crm.contacts(id),
     communication_type VARCHAR(50), -- 'email', 'call', 'meeting', 'ticket', 'chat', 'note'
     direction VARCHAR(20),          -- 'inbound', 'outbound', 'internal'
     subject TEXT,
     summary TEXT NOT NULL,          -- AI-generated summary
     full_content TEXT,              -- Full transcript (optional)
     attachments JSONB,              -- Array of file references (NOT BLOBs)
-    parent_id BIGINT REFERENCES agent_swarm.communications(id), -- Threading
+    parent_id BIGINT REFERENCES agent_first_erp_crm.communications(id), -- Threading
     thread_root_id BIGINT,          -- Root of conversation thread
     sentiment_score FLOAT,
     sentiment_label VARCHAR(20),
@@ -143,19 +143,19 @@ CREATE TABLE agent_swarm.communications (
     embedding VECTOR(1536) -- For semantic search on content
 );
 
-CREATE INDEX idx_communications_entity ON agent_swarm.communications(entity_id);
-CREATE INDEX idx_communications_contact ON agent_swarm.communications(contact_id);
-CREATE INDEX idx_communications_thread_root ON agent_swarm.communications(thread_root_id);
-CREATE INDEX idx_communications_embedding ON agent_swarm.communications USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+CREATE INDEX idx_communications_entity ON agent_first_erp_crm.communications(entity_id);
+CREATE INDEX idx_communications_contact ON agent_first_erp_crm.communications(contact_id);
+CREATE INDEX idx_communications_thread_root ON agent_first_erp_crm.communications(thread_root_id);
+CREATE INDEX idx_communications_embedding ON agent_first_erp_crm.communications USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
 ```
 
 ### 8. `tickets`
 Support ticket tracking.
 ```sql
-CREATE TABLE agent_swarm.tickets (
+CREATE TABLE agent_first_erp_crm.tickets (
     id BIGSERIAL PRIMARY KEY,
-    entity_id INTEGER REFERENCES agent_swarm.entities(id),
-    contact_id INTEGER REFERENCES agent_swarm.contacts(id),
+    entity_id INTEGER REFERENCES agent_first_erp_crm.entities(id),
+    contact_id INTEGER REFERENCES agent_first_erp_crm.contacts(id),
     agent_id TEXT, -- e.g., 'cs_agent_01', 'inventory_agent'
     subject TEXT,
     message TEXT,
@@ -170,7 +170,7 @@ CREATE TABLE agent_swarm.tickets (
 ### 9. `agents`
 Registry of all agents, their roles, and permissions.
 ```sql
-CREATE TABLE agent_swarm.agents (
+CREATE TABLE agent_first_erp_crm.agents (
     id SERIAL PRIMARY KEY,
     name TEXT NOT NULL, -- e.g., 'Customer Service', 'Inventory'
     role TEXT NOT NULL,
@@ -185,7 +185,7 @@ CREATE TABLE agent_swarm.agents (
 Tracks when human agents log in and start sessions with bots.
 
 ```sql
-CREATE TABLE agent_swarm.human_sessions (
+CREATE TABLE agent_first_erp_crm.human_sessions (
     session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id VARCHAR(50) NOT NULL,
     user_name VARCHAR(100) NOT NULL,
@@ -200,18 +200,18 @@ CREATE TABLE agent_swarm.human_sessions (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE INDEX idx_human_sessions_user_id ON agent_swarm.human_sessions(user_id);
-CREATE INDEX idx_human_sessions_bot_id ON agent_swarm.human_sessions(bot_id);
-CREATE INDEX idx_human_sessions_login_time ON agent_swarm.human_sessions(login_time);
+CREATE INDEX idx_human_sessions_user_id ON agent_first_erp_crm.human_sessions(user_id);
+CREATE INDEX idx_human_sessions_bot_id ON agent_first_erp_crm.human_sessions(bot_id);
+CREATE INDEX idx_human_sessions_login_time ON agent_first_erp_crm.human_sessions(login_time);
 ```
 
 ### 11. `bot_actions` (Audit Logging)
 Logs every action taken by a bot during a human session.
 
 ```sql
-CREATE TABLE agent_swarm.bot_actions (
+CREATE TABLE agent_first_erp_crm.bot_actions (
     action_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    session_id UUID NOT NULL REFERENCES agent_swarm.human_sessions(session_id),
+    session_id UUID NOT NULL REFERENCES agent_first_erp_crm.human_sessions(session_id),
     user_id VARCHAR(50) NOT NULL,
     bot_id VARCHAR(50) NOT NULL,
     action_type VARCHAR(50) NOT NULL,
@@ -225,17 +225,17 @@ CREATE TABLE agent_swarm.bot_actions (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE INDEX idx_bot_actions_session_id ON agent_swarm.bot_actions(session_id);
-CREATE INDEX idx_bot_actions_user_id ON agent_swarm.bot_actions(user_id);
-CREATE INDEX idx_bot_actions_bot_id ON agent_swarm.bot_actions(bot_id);
-CREATE INDEX idx_bot_actions_timestamp ON agent_swarm.bot_actions(timestamp);
+CREATE INDEX idx_bot_actions_session_id ON agent_first_erp_crm.bot_actions(session_id);
+CREATE INDEX idx_bot_actions_user_id ON agent_first_erp_crm.bot_actions(user_id);
+CREATE INDEX idx_bot_actions_bot_id ON agent_first_erp_crm.bot_actions(bot_id);
+CREATE INDEX idx_bot_actions_timestamp ON agent_first_erp_crm.bot_actions(timestamp);
 ```
 
 ### 12. `audit_summary` (Daily Aggregation)
 Daily summary of human-bot interactions for quick reporting.
 
 ```sql
-CREATE TABLE agent_swarm.audit_summary (
+CREATE TABLE agent_first_erp_crm.audit_summary (
     summary_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     date DATE NOT NULL,
     user_id VARCHAR(50) NOT NULL,
@@ -249,15 +249,15 @@ CREATE TABLE agent_swarm.audit_summary (
     UNIQUE(date, user_id, bot_id)
 );
 
-CREATE INDEX idx_audit_summary_date ON agent_swarm.audit_summary(date);
-CREATE INDEX idx_audit_summary_user_bot ON agent_swarm.audit_summary(user_id, bot_id);
+CREATE INDEX idx_audit_summary_date ON agent_first_erp_crm.audit_summary(date);
+CREATE INDEX idx_audit_summary_user_bot ON agent_first_erp_crm.audit_summary(user_id, bot_id);
 ```
 
 ### 13. `agent_interactions` (Full Trajectory Logging)
 Complete agent trajectory logging for debugging and analysis.
 
 ```sql
-CREATE TABLE agent_swarm.agent_interactions (
+CREATE TABLE agent_first_erp_crm.agent_interactions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     conversation_id UUID NOT NULL,
     telegram_chat_id VARCHAR(50),
@@ -281,26 +281,26 @@ CREATE TABLE agent_swarm.agent_interactions (
     timestamp TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_agent_interactions_conversation ON agent_swarm.agent_interactions(conversation_id);
-CREATE INDEX idx_agent_interactions_user_bot ON agent_swarm.agent_interactions(user_id, bot_id);
-CREATE INDEX idx_agent_interactions_timestamp ON agent_swarm.agent_interactions(timestamp);
-CREATE INDEX idx_agent_interactions_human_input ON agent_swarm.agent_interactions USING gin(to_tsvector('english', human_input));
+CREATE INDEX idx_agent_interactions_conversation ON agent_first_erp_crm.agent_interactions(conversation_id);
+CREATE INDEX idx_agent_interactions_user_bot ON agent_first_erp_crm.agent_interactions(user_id, bot_id);
+CREATE INDEX idx_agent_interactions_timestamp ON agent_first_erp_crm.agent_interactions(timestamp);
+CREATE INDEX idx_agent_interactions_human_input ON agent_first_erp_crm.agent_interactions USING gin(to_tsvector('english', human_input));
 ```
 
 ## Indexes for Performance
 
 ```sql
 -- PGVector indexes for semantic search
-CREATE INDEX idx_entities_embedding ON agent_swarm.entities USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
-CREATE INDEX idx_contacts_embedding ON agent_swarm.contacts USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
-CREATE INDEX idx_orders_embedding ON agent_swarm.orders USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
-CREATE INDEX idx_products_embedding ON agent_swarm.products USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
-CREATE INDEX idx_tickets_embedding ON agent_swarm.tickets USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+CREATE INDEX idx_entities_embedding ON agent_first_erp_crm.entities USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+CREATE INDEX idx_contacts_embedding ON agent_first_erp_crm.contacts USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+CREATE INDEX idx_orders_embedding ON agent_first_erp_crm.orders USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+CREATE INDEX idx_products_embedding ON agent_first_erp_crm.products USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+CREATE INDEX idx_tickets_embedding ON agent_first_erp_crm.tickets USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
 
 -- Standard indexes for performance
-CREATE INDEX idx_orders_entity_id ON agent_swarm.orders(entity_id);
-CREATE INDEX idx_tickets_entity_id ON agent_swarm.tickets(entity_id);
-CREATE INDEX idx_tickets_customer_id ON agent_swarm.tickets(contact_id);
+CREATE INDEX idx_orders_entity_id ON agent_first_erp_crm.orders(entity_id);
+CREATE INDEX idx_tickets_entity_id ON agent_first_erp_crm.tickets(entity_id);
+CREATE INDEX idx_tickets_customer_id ON agent_first_erp_crm.tickets(contact_id);
 ```
 
 ## Triggers for Auto-Update
@@ -314,22 +314,22 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER update_entities_updated_at BEFORE UPDATE ON agent_swarm.entities
+CREATE TRIGGER update_entities_updated_at BEFORE UPDATE ON agent_first_erp_crm.entities
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_contacts_updated_at BEFORE UPDATE ON agent_swarm.contacts
+CREATE TRIGGER update_contacts_updated_at BEFORE UPDATE ON agent_first_erp_crm.contacts
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_orders_updated_at BEFORE UPDATE ON agent_swarm.orders
+CREATE TRIGGER update_orders_updated_at BEFORE UPDATE ON agent_first_erp_crm.orders
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_products_updated_at BEFORE UPDATE ON agent_swarm.products
+CREATE TRIGGER update_products_updated_at BEFORE UPDATE ON agent_first_erp_crm.products
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_communications_updated_at BEFORE UPDATE ON agent_swarm.communications
+CREATE TRIGGER update_communications_updated_at BEFORE UPDATE ON agent_first_erp_crm.communications
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_tickets_updated_at BEFORE UPDATE ON agent_swarm.tickets
+CREATE TRIGGER update_tickets_updated_at BEFORE UPDATE ON agent_first_erp_crm.tickets
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 ```
 

@@ -1,7 +1,7 @@
 """
 Simple Customer Service Agent using LangChain v1, Ollama, and PostgreSQL.
 Based on the freeCodeCamp tutorial pattern.
-Uses agent_swarm schema for customer data.
+Uses agent_first_erp_crm schema for customer data.
 """
 
 import asyncio
@@ -66,14 +66,14 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "ornith:35b")
 DB_CONFIG = {
     "host": os.getenv("POSTGRES_HOST", "{your-postgres-host}"),
     "port": int(os.getenv("POSTGRES_PORT", 5432)),
-    "database": os.getenv("POSTGRES_DB", "jarvis_data"),
-    "user": os.getenv("POSTGRES_USER", "jarvis"),
+    "database": os.getenv("POSTGRES_DB", "agent_first_erp_crm"),
+    "user": os.getenv("POSTGRES_USER", "agent_first_erp_crm"),
     "password": os.getenv("POSTGRES_PASSWORD", "{yourpasswordhere}"),
 }
 
 # System Prompt
 SYSTEM_PROMPT = (
-    "You are a helpful customer service assistant with access to the agent_swarm database. "
+    "You are a helpful customer service assistant with access to the agent_first_erp_crm database. "
     "You have tools to:\n"
     "- Look up customer information and communication history\n"
     "- View customer statistics\n"

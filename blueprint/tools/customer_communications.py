@@ -13,7 +13,7 @@ load_dotenv()
 DB_CONFIG = {
     "host": os.getenv("POSTGRES_HOST", "localhost"),
     "port": int(os.getenv("POSTGRES_PORT", 5432)),
-    "database": os.getenv("POSTGRES_DB", "agent_swarm"),
+    "database": os.getenv("POSTGRES_DB", "agent_first_erp_crm"),
     "user": os.getenv("POSTGRES_USER", "postgres"),
     "password": os.getenv("POSTGRES_PASSWORD", ""),
 }
@@ -41,7 +41,7 @@ def get_customer_communications(customer_name: str) -> str:
         with conn.cursor() as cur:
             query = """
                 SELECT started_at, entity_name, communication_type, direction, summary 
-                FROM agent_swarm.recent_communications 
+                FROM agent_first_erp_crm.recent_communications 
                 WHERE entity_name ILIKE %s 
                 ORDER BY started_at DESC 
                 LIMIT 5

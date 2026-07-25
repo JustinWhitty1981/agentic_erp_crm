@@ -1,4 +1,4 @@
-# Agent Swarm Documentation
+# Agent First ERP CRM Documentation
 
 **Purpose:** Agent-friendly SQL and database documentation.
 
@@ -36,4 +36,4 @@
 
 ---
 
-*Generated for Agent Swarm - Agent-friendly documentation*
+*Generated for Agent First ERP CRM - Agent-friendly documentation*

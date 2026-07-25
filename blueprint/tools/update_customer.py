@@ -16,7 +16,7 @@ load_dotenv()
 DB_CONFIG = {
     "host": os.getenv("POSTGRES_HOST", "localhost"),
     "port": int(os.getenv("POSTGRES_PORT", 5432)),
-    "database": os.getenv("POSTGRES_DB", "agent_swarm"),
+    "database": os.getenv("POSTGRES_DB", "agent_first_erp_crm"),
     "user": os.getenv("POSTGRES_USER", "postgres"),
     "password": os.getenv("POSTGRES_PASSWORD", ""),
 }
@@ -116,7 +116,7 @@ def update_customer_tool(
         with conn.cursor() as cur:
             # Call the update_customer function
             query = """
-                SELECT * FROM agent_swarm.update_customer(
+                SELECT * FROM agent_first_erp_crm.update_customer(
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
             """
@@ -132,7 +132,7 @@ def update_customer_tool(
             if success:
                 # Log the update to communications
                 cur.execute("""
-                    INSERT INTO agent_swarm.communications 
+                    INSERT INTO agent_first_erp_crm.communications 
                     (entity_id, contact_id, communication_type, direction, summary, created_at)
                     VALUES (%s, %s, %s, %s, %s, %s)
                 """, (
