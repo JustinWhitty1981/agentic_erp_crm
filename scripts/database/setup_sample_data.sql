@@ -141,7 +141,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON agent_first_erp_crm.audit
 -- Create views for backward compatibility and easier queries
 
 -- View: customers (backward compatibility)
-CREATE OR REPLACE VIEW agent_first_erp_crm.customers AS
+CREATE OR REPLACE VIEW agent_first_erp_crm.vw_customers AS
 SELECT 
     e.id,
     e.name,
@@ -159,7 +159,7 @@ LEFT JOIN agent_first_erp_crm.addresses a ON e.id = a.entity_id AND a.is_primary
 WHERE e.entity_type IN ('customer', 'prospect');
 
 -- View: recent_communications
-CREATE OR REPLACE VIEW agent_first_erp_crm.recent_communications AS
+CREATE OR REPLACE VIEW agent_first_erp_crm.vw_recent_communications AS
 SELECT 
     c.id,
     e.name AS entity_name,
@@ -176,7 +176,7 @@ WHERE c.started_at >= NOW() - INTERVAL '7 days'
 ORDER BY c.started_at DESC;
 
 -- View: entity_communication_stats
-CREATE OR REPLACE VIEW agent_first_erp_crm.entity_communication_stats AS
+CREATE OR REPLACE VIEW agent_first_erp_crm.vw_entity_communication_stats AS
 SELECT 
     e.id AS entity_id,
     e.name AS entity_name,

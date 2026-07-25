@@ -71,18 +71,18 @@ INVENTORY_MOVEMENTS ──► UPDATES ──► INVENTORY_ON_HAND
 
 | View | Purpose | Use When |
 |------|---------|----------|
-| `customers` | Backward compatibility view | Need legacy customer format |
-| `customer_communications_summary` | Customer communications with full context | Querying customer interactions |
-| `recent_communications` | Last 7 days of all communications | Activity feeds, monitoring |
-| `pending_followups` | Tasks requiring follow-up | Finding action items |
-| `entity_communication_stats` | Aggregated metrics per entity | Customer health scoring |
-| `primary_contact_communications` | Only primary contact interactions | Executive-level tracking |
-| `communication_thread_view` | Conversation threading | Reconstructing conversations |
-| `agent_activity_summary` | Per-agent activity metrics | Performance monitoring |
-| `v_inventory_valuation` | Inventory value by warehouse/category | Financial reporting |
-| `v_item_availability` | Stock levels across warehouses | Checking item availability |
-| `v_item_movement_summary` | 30-day movement patterns | Analyzing item movement |
-| `v_low_stock_alerts` | Items below reorder point | Replenishment tasks |
+| `vw_customers` | Backward compatibility view | Need legacy customer format |
+| `vw_customer_communications_summary` | Customer communications with full context | Querying customer interactions |
+| `vw_recent_communications` | Last 7 days of all communications | Activity feeds, monitoring |
+| `vw_pending_followups` | Tasks requiring follow-up | Finding action items |
+| `vw_entity_communication_stats` | Aggregated metrics per entity | Customer health scoring |
+| `vw_primary_contact_communications` | Only primary contact interactions | Executive-level tracking |
+| `vw_communication_thread` | Conversation threading | Reconstructing conversations |
+| `vw_agent_activity_summary` | Per-agent activity metrics | Performance monitoring |
+| `vw_inventory_valuation` | Inventory value by warehouse/category | Financial reporting |
+| `vw_item_availability` | Stock levels across warehouses | Checking item availability |
+| `vw_item_movement_summary` | 30-day movement patterns | Analyzing item movement |
+| `vw_low_stock_alerts` | Items below reorder point | Replenishment tasks |
 
 ---
 

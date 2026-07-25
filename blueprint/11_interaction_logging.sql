@@ -72,7 +72,7 @@ CREATE INDEX IF NOT EXISTS idx_interactions_bot
 -- ============================================================================
 
 -- View: Recent interactions with full context
-CREATE OR REPLACE VIEW v_recent_interactions AS
+CREATE OR REPLACE VIEW vw_recent_interactions AS
 SELECT 
     id,
     telegram_chat_id,
@@ -88,7 +88,7 @@ ORDER BY timestamp DESC
 LIMIT 100;
 
 -- View: Failed interactions
-CREATE OR REPLACE VIEW v_failed_interactions AS
+CREATE OR REPLACE VIEW vw_failed_interactions AS
 SELECT 
     id,
     telegram_chat_id,
@@ -102,7 +102,7 @@ WHERE error_message IS NOT NULL
 ORDER BY timestamp DESC;
 
 -- View: Tool performance summary
-CREATE OR REPLACE VIEW v_tool_performance AS
+CREATE OR REPLACE VIEW vw_tool_performance AS
 SELECT 
     (actions_taken_elem->>'tool') as tool_name,
     COUNT(*) as call_count,

@@ -39,7 +39,7 @@ def get_customer_info(customer_name: str) -> str:
     
     try:
         with conn.cursor() as cur:
-            query = "SELECT name, email, phone, address, status FROM agent_first_erp_crm.customers WHERE name ILIKE %s LIMIT 5"
+            query = "SELECT name, email, phone, address, status FROM agent_first_erp_crm.vw_customers WHERE name ILIKE %s LIMIT 5"
             cur.execute(query, (f"%{customer_name}%",))
             rows = cur.fetchall()
             

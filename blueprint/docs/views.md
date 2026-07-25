@@ -14,12 +14,12 @@ Views provide simplified, agent-friendly interfaces to complex database queries.
 
 ## Customer-Facing Views
 
-### customers
+### vw_customers
 
 Backward compatibility view mapping entities/contacts to legacy customer format.
 
 ```sql
-SELECT * FROM agent_first_erp_crm.customers;
+SELECT * FROM agent_first_erp_crm.vw_customers;
 ```
 
 **Columns:**
@@ -37,12 +37,12 @@ SELECT * FROM agent_first_erp_crm.customers;
 
 ---
 
-### customer_communications_summary
+### vw_customer_communications_summary
 
 All communications for customers with full context.
 
 ```sql
-SELECT * FROM agent_first_erp_crm.customer_communications_summary;
+SELECT * FROM agent_first_erp_crm.vw_customer_communications_summary;
 ```
 
 **Columns:**
@@ -66,12 +66,12 @@ SELECT * FROM agent_first_erp_crm.customer_communications_summary;
 
 ---
 
-### recent_communications
+### vw_recent_communications
 
 Last 7 days of all communications.
 
 ```sql
-SELECT * FROM agent_first_erp_crm.recent_communications;
+SELECT * FROM agent_first_erp_crm.vw_recent_communications;
 ```
 
 **Columns:**
@@ -87,12 +87,12 @@ SELECT * FROM agent_first_erp_crm.recent_communications;
 
 ---
 
-### pending_followups
+### vw_pending_followups
 
 All communications requiring follow-up.
 
 ```sql
-SELECT * FROM agent_first_erp_crm.pending_followups;
+SELECT * FROM agent_first_erp_crm.vw_pending_followups;
 ```
 
 **Columns:**
@@ -109,12 +109,12 @@ SELECT * FROM agent_first_erp_crm.pending_followups;
 
 ---
 
-### entity_communication_stats
+### vw_entity_communication_stats
 
 Aggregated communication metrics per entity.
 
 ```sql
-SELECT * FROM agent_first_erp_crm.entity_communication_stats;
+SELECT * FROM agent_first_erp_crm.vw_entity_communication_stats;
 ```
 
 **Columns:**
@@ -131,12 +131,12 @@ SELECT * FROM agent_first_erp_crm.entity_communication_stats;
 
 ---
 
-### primary_contact_communications
+### vw_primary_contact_communications
 
 Communications only with primary contacts.
 
 ```sql
-SELECT * FROM agent_first_erp_crm.primary_contact_communications;
+SELECT * FROM agent_first_erp_crm.vw_primary_contact_communications;
 ```
 
 **Columns:**
@@ -153,12 +153,12 @@ SELECT * FROM agent_first_erp_crm.primary_contact_communications;
 
 ---
 
-### communication_thread_view
+### vw_communication_thread
 
 Shows communication threading hierarchy.
 
 ```sql
-SELECT * FROM agent_first_erp_crm.communication_thread_view;
+SELECT * FROM agent_first_erp_crm.vw_communication_thread;
 ```
 
 **Columns:**
@@ -176,12 +176,12 @@ SELECT * FROM agent_first_erp_crm.communication_thread_view;
 
 ## Agent Activity Views
 
-### agent_activity_summary
+### vw_agent_activity_summary
 
 Summary of activity per bot agent.
 
 ```sql
-SELECT * FROM agent_first_erp_crm.agent_activity_summary;
+SELECT * FROM agent_first_erp_crm.vw_agent_activity_summary;
 ```
 
 **Columns:**
@@ -196,12 +196,12 @@ SELECT * FROM agent_first_erp_crm.agent_activity_summary;
 
 ---
 
-### v_recent_interactions
+### vw_recent_interactions
 
 Last 100 agent interactions with full trajectory.
 
 ```sql
-SELECT * FROM agent_first_erp_crm.v_recent_interactions;
+SELECT * FROM agent_first_erp_crm.vw_recent_interactions;
 ```
 
 **Columns:**
@@ -218,12 +218,12 @@ SELECT * FROM agent_first_erp_crm.v_recent_interactions;
 
 ---
 
-### v_failed_interactions
+### vw_failed_interactions
 
 All interactions that resulted in errors.
 
 ```sql
-SELECT * FROM agent_first_erp_crm.v_failed_interactions;
+SELECT * FROM agent_first_erp_crm.vw_failed_interactions;
 ```
 
 **Columns:**
@@ -236,12 +236,12 @@ SELECT * FROM agent_first_erp_crm.v_failed_interactions;
 
 ---
 
-### v_tool_performance
+### vw_tool_performance
 
 Tool usage statistics and error rates.
 
 ```sql
-SELECT * FROM agent_first_erp_crm.v_tool_performance;
+SELECT * FROM agent_first_erp_crm.vw_tool_performance;
 ```
 
 **Columns:**
@@ -257,12 +257,12 @@ SELECT * FROM agent_first_erp_crm.v_tool_performance;
 
 ## Inventory Views
 
-### v_inventory_valuation
+### vw_inventory_valuation
 
 Inventory value by warehouse/category.
 
 ```sql
-SELECT * FROM agent_first_erp_crm.v_inventory_valuation;
+SELECT * FROM agent_first_erp_crm.vw_inventory_valuation;
 ```
 
 **Columns:**
@@ -275,12 +275,12 @@ SELECT * FROM agent_first_erp_crm.v_inventory_valuation;
 
 ---
 
-### v_item_availability
+### vw_item_availability
 
 Stock levels across warehouses.
 
 ```sql
-SELECT * FROM agent_first_erp_crm.v_item_availability;
+SELECT * FROM agent_first_erp_crm.vw_item_availability;
 ```
 
 **Columns:**
@@ -295,12 +295,12 @@ SELECT * FROM agent_first_erp_crm.v_item_availability;
 
 ---
 
-### v_item_movement_summary
+### vw_item_movement_summary
 
 30-day movement patterns.
 
 ```sql
-SELECT * FROM agent_first_erp_crm.v_item_movement_summary;
+SELECT * FROM agent_first_erp_crm.vw_item_movement_summary;
 ```
 
 **Columns:**
@@ -314,12 +314,12 @@ SELECT * FROM agent_first_erp_crm.v_item_movement_summary;
 
 ---
 
-### v_low_stock_alerts
+### vw_low_stock_alerts
 
 Items below reorder point.
 
 ```sql
-SELECT * FROM agent_first_erp_crm.v_low_stock_alerts;
+SELECT * FROM agent_first_erp_crm.vw_low_stock_alerts;
 ```
 
 **Columns:**
@@ -384,7 +384,7 @@ SELECT
     warehouse_name,
     quantity_available,
     stock_status
-FROM agent_first_erp_crm.v_item_availability
+FROM agent_first_erp_crm.vw_item_availability
 WHERE sku = 'WIDGET-A';
 ```
 
@@ -395,7 +395,7 @@ WHERE sku = 'WIDGET-A';
 To create a new view:
 
 ```sql
-CREATE OR REPLACE VIEW agent_first_erp_crm.my_custom_view AS
+CREATE OR REPLACE VIEW agent_first_erp_crm.vw_my_custom_view AS
 SELECT 
     e.name as entity_name,
     c.first_name || ' ' || c.last_name as contact_name,

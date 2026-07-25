@@ -3,7 +3,7 @@
 ## Core Identity
 - **Role:** First-line support for customer inquiries.
 - **Interface:** Telegram (Natural Language).
-- **Database Access:** Read/Write to `customers`, `communications`, `entity_communication_stats`.
+- **Database Access:** Read/Write to `customers`, `communications`, `vw_entity_communication_stats`.
 - **Implementation:** Follows the blueprint pattern (`blueprint/bot.py`).
 
 ## Functional Requirements
@@ -55,9 +55,9 @@ The customer service agent is implemented in `blueprint/bot.py` with:
 ### Tools
 | Tool | Purpose | Database Query |
 |------|---------|----------------|
-| `get_customer_info` | Look up customer by name | `SELECT name, email, phone, address, status FROM agent_first_erp_crm.customers WHERE name ILIKE %s` |
-| `get_customer_communications` | Get recent interactions | `SELECT started_at, entity_name, communication_type, direction, summary FROM agent_first_erp_crm.recent_communications` |
-| `get_entity_stats` | View communication metrics | `SELECT entity_name, entity_type, status, total_communications, resolved_count, pending_count FROM agent_first_erp_crm.entity_communication_stats` |
+| `get_customer_info` | Look up customer by name | `SELECT name, email, phone, address, status FROM agent_first_erp_crm.vw_customers WHERE name ILIKE %s` |
+| `get_customer_communications` | Get recent interactions | `SELECT started_at, entity_name, communication_type, direction, summary FROM agent_first_erp_crm.vw_recent_communications` |
+| `get_entity_stats` | View communication metrics | `SELECT entity_name, entity_type, status, total_communications, resolved_count, pending_count FROM agent_first_erp_crm.vw_entity_communication_stats` |
 | `add_communication` | Log new interaction | `INSERT INTO agent_first_erp_crm.communications (entity_id, communication_type, direction, summary, started_at)` |
 | `current_time` | Get current date/time | No database query |
 | `get_followup_customers` | Get customers needing contact | `SELECT * FROM get_followup_customers(days_threshold)` |

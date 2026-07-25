@@ -1576,7 +1576,7 @@ CREATE OR REPLACE TRIGGER update_human_sessions_updated_at
 -- Name: agent_activity_summary; Type: VIEW; Schema: -; Owner: -
 --
 
-CREATE OR REPLACE VIEW agent_activity_summary AS
+CREATE OR REPLACE VIEW vw_agent_activity_summary AS
  SELECT agent_id,
     count(*) AS total_actions,
     count(DISTINCT entity_id) AS unique_entities,
@@ -1606,7 +1606,7 @@ COMMENT ON VIEW agent_activity_summary IS 'Summary of communication activity per
 -- Name: communication_thread_view; Type: VIEW; Schema: -; Owner: -
 --
 
-CREATE OR REPLACE VIEW communication_thread_view AS
+CREATE OR REPLACE VIEW vw_communication_thread AS
  SELECT c.id,
     c.parent_id,
     c.thread_root_id,
@@ -1628,7 +1628,7 @@ COMMENT ON VIEW communication_thread_view IS 'Shows communication threading hier
 -- Name: customer_communications_summary; Type: VIEW; Schema: -; Owner: -
 --
 
-CREATE OR REPLACE VIEW customer_communications_summary AS
+CREATE OR REPLACE VIEW vw_customer_communications_summary AS
  SELECT c.id,
     c.started_at,
     e.id AS entity_id,
@@ -1666,7 +1666,7 @@ COMMENT ON VIEW customer_communications_summary IS 'All communications for custo
 -- Name: customers; Type: VIEW; Schema: -; Owner: -
 --
 
-CREATE OR REPLACE VIEW customers AS
+CREATE OR REPLACE VIEW vw_customers AS
  SELECT e.id,
     e.name,
     c.email,
@@ -1692,7 +1692,7 @@ COMMENT ON VIEW customers IS 'Backward compatibility view: Maps entities/contact
 -- Name: entity_communication_stats; Type: VIEW; Schema: -; Owner: -
 --
 
-CREATE OR REPLACE VIEW entity_communication_stats AS
+CREATE OR REPLACE VIEW vw_entity_communication_stats AS
  SELECT e.id AS entity_id,
     e.name AS entity_name,
     e.entity_type,
@@ -1738,7 +1738,7 @@ COMMENT ON VIEW entity_communication_stats IS 'Aggregated communication metrics 
 -- Name: pending_followups; Type: VIEW; Schema: -; Owner: -
 --
 
-CREATE OR REPLACE VIEW pending_followups AS
+CREATE OR REPLACE VIEW vw_pending_followups AS
  SELECT f.id,
     f.entity_id,
     f.contact_id,
@@ -1762,7 +1762,7 @@ CREATE OR REPLACE VIEW pending_followups AS
 -- Name: primary_contact_communications; Type: VIEW; Schema: -; Owner: -
 --
 
-CREATE OR REPLACE VIEW primary_contact_communications AS
+CREATE OR REPLACE VIEW vw_primary_contact_communications AS
  SELECT c.id,
     c.started_at,
     e.id AS entity_id,
@@ -1790,7 +1790,7 @@ COMMENT ON VIEW primary_contact_communications IS 'Communications exclusively wi
 -- Name: recent_communications; Type: VIEW; Schema: -; Owner: -
 --
 
-CREATE OR REPLACE VIEW recent_communications AS
+CREATE OR REPLACE VIEW vw_recent_communications AS
  SELECT c.id,
     c.started_at,
     e.id AS entity_id,
@@ -1818,7 +1818,7 @@ COMMENT ON VIEW recent_communications IS 'All communications from the last 7 day
 -- Name: v_inventory_valuation; Type: VIEW; Schema: -; Owner: -
 --
 
-CREATE OR REPLACE VIEW v_inventory_valuation AS
+CREATE OR REPLACE VIEW vw_inventory_valuation AS
  SELECT w.warehouse_id,
     w.name AS warehouse_name,
     w.warehouse_type,
@@ -1839,7 +1839,7 @@ CREATE OR REPLACE VIEW v_inventory_valuation AS
 -- Name: v_item_availability; Type: VIEW; Schema: -; Owner: -
 --
 
-CREATE OR REPLACE VIEW v_item_availability AS
+CREATE OR REPLACE VIEW vw_item_availability AS
  SELECT i.item_id,
     i.sku,
     i.name,
@@ -1887,7 +1887,7 @@ COMMENT ON VIEW v_item_availability IS 'Agent-friendly view for checking item av
 -- Name: v_item_movement_summary; Type: VIEW; Schema: -; Owner: -
 --
 
-CREATE OR REPLACE VIEW v_item_movement_summary AS
+CREATE OR REPLACE VIEW vw_item_movement_summary AS
  SELECT item_id,
     date_trunc('day'::text, performed_at) AS movement_date,
     movement_type,
@@ -1912,7 +1912,7 @@ CREATE OR REPLACE VIEW v_item_movement_summary AS
 -- Name: v_low_stock_alerts; Type: VIEW; Schema: -; Owner: -
 --
 
-CREATE OR REPLACE VIEW v_low_stock_alerts AS
+CREATE OR REPLACE VIEW vw_low_stock_alerts AS
  SELECT i.item_id,
     i.sku,
     i.name,

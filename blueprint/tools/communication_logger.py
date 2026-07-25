@@ -70,7 +70,7 @@ def log_communication(
         with conn.cursor() as cur:
             # First, get the entity_id from the customers view
             cur.execute(
-                "SELECT id FROM agent_first_erp_crm.customers WHERE name ILIKE %s LIMIT 1",
+                "SELECT id FROM agent_first_erp_crm.vw_customers WHERE name ILIKE %s LIMIT 1",
                 (f"%{customer_name}%",)
             )
             entity_row = cur.fetchone()

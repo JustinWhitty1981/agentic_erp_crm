@@ -41,7 +41,7 @@ def get_customer_communications(customer_name: str) -> str:
         with conn.cursor() as cur:
             query = """
                 SELECT started_at, entity_name, communication_type, direction, summary 
-                FROM agent_first_erp_crm.recent_communications 
+                FROM agent_first_erp_crm.vw_recent_communications 
                 WHERE entity_name ILIKE %s 
                 ORDER BY started_at DESC 
                 LIMIT 5

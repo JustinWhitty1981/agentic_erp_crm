@@ -4,7 +4,7 @@
 
 -- View 1: customers (Backward Compatibility)
 -- Already created in setup_sample_data.sql, but ensure it exists
-CREATE OR REPLACE VIEW agent_first_erp_crm.customers AS
+CREATE OR REPLACE VIEW agent_first_erp_crm.vw_customers AS
 SELECT 
     e.id,
     e.name,
@@ -25,7 +25,7 @@ LEFT JOIN agent_first_erp_crm.addresses a ON e.id = a.entity_id AND a.is_primary
 WHERE e.entity_type IN ('customer', 'prospect');
 
 -- View 2: customer_communications_summary
-CREATE OR REPLACE VIEW agent_first_erp_crm.customer_communications_summary AS
+CREATE OR REPLACE VIEW agent_first_erp_crm.vw_customer_communications_summary AS
 SELECT 
     c.id,
     e.name AS entity_name,
@@ -51,7 +51,7 @@ LEFT JOIN agent_first_erp_crm.contacts ct ON c.contact_id = ct.id;
 
 -- View 3: recent_communications (Last 7 days)
 -- Already created in setup_sample_data.sql, but ensure it exists
-CREATE OR REPLACE VIEW agent_first_erp_crm.recent_communications AS
+CREATE OR REPLACE VIEW agent_first_erp_crm.vw_recent_communications AS
 SELECT 
     c.id,
     e.name AS entity_name,
@@ -72,7 +72,7 @@ WHERE c.started_at >= NOW() - INTERVAL '7 days'
 ORDER BY c.started_at DESC;
 
 -- View 4: pending_followups
-CREATE OR REPLACE VIEW agent_first_erp_crm.pending_followups AS
+CREATE OR REPLACE VIEW agent_first_erp_crm.vw_pending_followups AS
 SELECT 
     c.id,
     e.name AS entity_name,
@@ -108,7 +108,7 @@ ORDER BY
 
 -- View 5: entity_communication_stats
 -- Already created in setup_sample_data.sql, but ensure it exists
-CREATE OR REPLACE VIEW agent_first_erp_crm.entity_communication_stats AS
+CREATE OR REPLACE VIEW agent_first_erp_crm.vw_entity_communication_stats AS
 SELECT 
     e.id AS entity_id,
     e.name AS entity_name,
@@ -125,7 +125,7 @@ LEFT JOIN agent_first_erp_crm.communications c ON e.id = c.entity_id
 GROUP BY e.id, e.name, e.entity_type, e.status;
 
 -- View 6: primary_contact_communications
-CREATE OR REPLACE VIEW agent_first_erp_crm.primary_contact_communications AS
+CREATE OR REPLACE VIEW agent_first_erp_crm.vw_primary_contact_communications AS
 SELECT 
     c.id,
     e.name AS entity_name,
@@ -147,8 +147,8 @@ JOIN agent_first_erp_crm.contacts ct ON er.contact_id = ct.id
 WHERE c.contact_id = ct.id
 ORDER BY c.started_at DESC;
 
--- View 7: communication_thread_view
-CREATE OR REPLACE VIEW agent_first_erp_crm.communication_thread_view AS
+-- View 7: communication_thread
+CREATE OR REPLACE VIEW agent_first_erp_crm.vw_communication_thread AS
 WITH RECURSIVE thread_hierarchy AS (
     -- Base case: root communications (no parent)
     SELECT 
@@ -205,7 +205,7 @@ LEFT JOIN agent_first_erp_crm.contacts ct ON th.contact_id = ct.id
 ORDER BY th.thread_root_id, th.started_at;
 
 -- View 8: agent_activity_summary
-CREATE OR REPLACE VIEW agent_first_erp_crm.agent_activity_summary AS
+CREATE OR REPLACE VIEW agent_first_erp_crm.vw_agent_activity_summary AS
 SELECT 
     COALESCE(t.agent_id, 'unknown') AS agent_id,
     COUNT(DISTINCT c.entity_id) AS unique_entities,
@@ -221,7 +221,7 @@ GROUP BY COALESCE(t.agent_id, 'unknown');
 -- Create additional helpful views
 
 -- View: entity_contact_details (Complete entity + primary contact info)
-CREATE OR REPLACE VIEW agent_first_erp_crm.entity_contact_details AS
+CREATE OR REPLACE VIEW agent_first_erp_crm.vw_entity_contact_details AS
 SELECT 
     e.id AS entity_id,
     e.name AS entity_name,
@@ -251,7 +251,7 @@ LEFT JOIN agent_first_erp_crm.contacts ct ON er.contact_id = ct.id
 LEFT JOIN agent_first_erp_crm.addresses a ON e.id = a.entity_id AND a.is_primary = TRUE;
 
 -- View: communication_timeline (Chronological view with full context)
-CREATE OR REPLACE VIEW agent_first_erp_crm.communication_timeline AS
+CREATE OR REPLACE VIEW agent_first_erp_crm.vw_communication_timeline AS
 SELECT 
     c.id,
     c.started_at,
