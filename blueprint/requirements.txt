@@ -1,0 +1,19 @@
+# Customer Service Bot Dependencies
+# Pin versions for reproducibility
+
+# LangChain ecosystem
+langchain>=0.1.0
+langchain-ollama>=0.1.0
+langgraph>=0.1.0
+
+# PostgreSQL
+psycopg2-binary>=2.9.9
+
+# Environment management
+python-dotenv>=1.0.0
+
+# Telegram bot
+python-telegram-bot>=20.7
+
+# Utilities
+asyncio>=3.4.3
