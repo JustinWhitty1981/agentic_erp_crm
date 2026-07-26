@@ -60,7 +60,7 @@ Create a swarm of specialized AI agents to run a business where **the conversati
 
 ## Architecture Overview
 
-- **CAO (Chief Agent Officer):** Jarvis – the gatekeeper, orchestrator, and validator.
+- **CAO (Chief Agent Officer):** Jarvis – the gatekeeper, orchestrator, and validator. (currently in test, not ready for peer review)
 - **Specialized Agents:** Independent bots (Customer Service, Inventory, Accounting, etc.) that read/write directly to the database.
 - **Shared Memory:** PostgreSQL with **PGVector** for semantic search, context-aware memory, and hybrid queries.
 - **Interface:** Telegram, Teams, Slack, lightweight UI → Natural Language → SQL/Vector Queries → Response.
