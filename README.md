@@ -61,8 +61,11 @@ Create a swarm of specialized AI agents to run a business where **the conversati
 ## Architecture Overview
 
 - **CAO (Chief Agent Officer):** Jarvis – the gatekeeper, orchestrator, and validator. (currently in test, not ready for peer review)
+   - Heremes/OpenClaw, or BYO (build your own)
 - **Specialized Agents:** Independent bots (Customer Service, Inventory, Accounting, etc.) that read/write directly to the database.
 - **Shared Memory:** PostgreSQL with **PGVector** for semantic search, context-aware memory, and hybrid queries.
+  - [Reference (JARVIS Blueprint)](https://github.com/JustinWhitty1981/openclaw_blueprint/blob/main/JARVIS_BLUEPRINT_OODA.md) - Built and in use, not yet ready for peer review
+  - [Performance Audit (14-Day)](https://github.com/JustinWhitty1981/openclaw_blueprint/blob/main/14-DAY_PERFORMANCE_AUDIT.md) - Demonstrates benefits of shared memory architecture
 - **Interface:** Telegram, Teams, Slack, lightweight UI → Natural Language → SQL/Vector Queries → Response.
 - **Validation:** Every agent action is logged and verified.
 
@@ -76,6 +79,7 @@ Create a swarm of specialized AI agents to run a business where **the conversati
 | [PLAN.md](PLAN.md) | Development roadmap and priorities |
 | [blueprint/AGENT_SUMMARY.md](blueprint/AGENT_SUMMARY.md) | Blueprint pattern reference |
 | [docs/database/](docs/database/) | Database schema and documentation |
+| [OpenClaw Blueprint (Precursor)](https://github.com/JustinWhitty1981/openclaw_blueprint/tree/main) | Reference implementation and performance benchmarks |
 
 ## Tech Stack
 
@@ -98,4 +102,4 @@ Create a swarm of specialized AI agents to run a business where **the conversati
 
 ---
 
-*The blueprint pattern ensures simplicity and maintainability across all agents.*
+*The blueprint pattern ensures simplicity and maintainability across all agents.  Agent orchestration is difficult enough!*
