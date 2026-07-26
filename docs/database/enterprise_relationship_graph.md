@@ -379,4 +379,4 @@ WHERE e.id = 123;
 
 *Last Updated: July 11, 2026*  
 *Version: 2.0 (Enterprise Edition)*  
-*Author: Jarvis (Agent-Swarm Team)*
+*Author: Jarvis (Agent First Team)*
