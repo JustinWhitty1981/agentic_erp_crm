@@ -47,7 +47,7 @@ A **Database-First, Agent-Native** business operating system.
 
 If you're an AI agent working on this project, start here:
 - **[AGENTS.md](AGENTS.md)** - Complete guide for AI agents navigating this project
-- **[blueprint/bot.py](blueprint/bot.py)** - Reference implementation (~180 lines)
+- **[blueprint/bot.py](blueprint/bot.py)** - Reference implementation
 - **[QUICKSTART.md](QUICKSTART.md)** - Setup and deployment instructions
 
 ## Vision
