@@ -130,12 +130,15 @@ Follow [QUICKSTART.md](QUICKSTART.md) for Docker-based deployment.
 ## File Structure
 
 ```
-agent_first_erp_crm/
+agentic_erp_crm/
 ├── README.md                 # Project overview
 ├── architecture.md           # System architecture
 ├── QUICKSTART.md            # Setup guide
 ├── PLAN.md                  # Development roadmap
 ├── AGENTS.md                # This file - agent guide
+├── CONTRIBUTING.md          # Contribution guidelines
+├── LICENSE                  # License file
+├── Makefile                 # Build automation
 ├── MIGRATION_SUMMARY.md     # Migration history
 ├── ARCHITECTURE_DECISION_RECORDS/  # Architectural decisions
 │   ├── ADR-001_why_log_every_tool_call.md
@@ -143,7 +146,6 @@ agent_first_erp_crm/
 │   ├── ADR-003_view_based_tool_design.md
 │   ├── ADR-004_agent_first_interface.md
 │   └── ADR-005_idempotent_agent_operations.md
-├── agents/                  # Agent implementations
 ├── blueprint/               # Reference implementation
 │   ├── bot.py              # Main agent entry point
 │   ├── QUICKSTART.md       # Blueprint-specific setup
@@ -152,51 +154,86 @@ agent_first_erp_crm/
 │   ├── Dockerfile          # Container configuration
 │   ├── docker-compose.yml  # Docker orchestration
 │   ├── requirements.txt    # Python dependencies
-│   └── tools/                    # Tool implementations
-│       ├── README.md                    # Tool development guidelines
-│       ├── add_communication.py         # Log new interactions
-│       ├── add_customer.py              # Add customers
-│       ├── current_time.py              # Get current time
-│       ├── customer_communications.py   # Customer history
-│       ├── customer_lookup.py           # Customer lookup
-│       ├── entity_stats.py              # Entity statistics
-│       ├── followup_customers.py        # Follow-up lists
-│       ├── update_customer.py           # Update customers
-│       ├── communication_logger.py      # Interaction logging
-│       └── tool_logger.py               # Tool logging
-├── blueprint/docs/          # Agent-friendly SQL documentation
-│   ├── README.md
-│   ├── schema_reference.md
-│   ├── customer_functions.md
-│   ├── audit_log.md
-│   ├── interaction_logging.md
-│   ├── sample_data.md
-│   └── views.md
+│   ├── 08_create_views.sql
+│   ├── 09_add_update_customer_functions.sql
+│   ├── 10_audit_log.sql
+│   ├── 11_interaction_logging.sql
+│   ├── agent_swarm_schema.sql
+│   ├── apply_customer_functions.sh
+│   ├── apply_functions.py
+│   ├── interaction_logger.py
+│   ├── postgres_callback.py
+│   ├── setup_customer_functions.py
+│   ├── setup_sample_data.sql
+│   ├── docs/               # Agent-friendly SQL documentation
+│   │   ├── README.md
+│   │   ├── schema_reference.md
+│   │   ├── customer_functions.md
+│   │   ├── audit_log.md
+│   │   ├── interaction_logging.md
+│   │   ├── sample_data.md
+│   │   └── views.md
+│   ├── tests/              # Test suite
+│   │   ├── README.md
+│   │   ├── test_agent.py
+│   │   ├── test_create_functions.py
+│   │   ├── test_functions.py
+│   │   ├── test_update_function.py
+│   │   └── verify_functions.py
+│   └── tools/              # Tool implementations
+│       ├── README.md
+│       ├── add_communication.py
+│       ├── add_customer.py
+│       ├── communication_logger.py
+│       ├── current_time.py
+│       ├── customer_communications.py
+│       ├── customer_lookup.py
+│       ├── entity_stats.py
+│       ├── followup_customers.py
+│       ├── tool_logger.py
+│       └── update_customer.py
 ├── docs/                    # Documentation
-│   ├── ATTACHMENT_SYSTEM.md # Attachment system docs
-│   ├── agent_requirements/  # Domain requirements
+│   ├── ATTACHMENT_SYSTEM.md
+│   ├── INTERACTION_LOGGING.md
+│   ├── agent_requirements/
 │   │   ├── customer_service/
 │   │   │   └── customer_service.md
 │   │   └── inventory/
 │   │       └── inventory.md
-│   └── database/            # Database documentation
-│       ├── agent_schema_reference.md
-│       ├── agent_first_erp_crm_mental_model.md
-│       ├── agent_first_erp_crm_schema.sql
-│       ├── 08_create_views.sql
-│       ├── 09_customer_functions.sql
-│       └── 10_audit_log.sql
-├── memory/                  # Memory components
-├── scripts/                 # SQL scripts
-│   └── database/            # Migration scripts
-│       ├── agent_first_erp_crm_schema.sql
-│       ├── 08_create_views.sql
-│       ├── 09_customer_functions.sql
-│       ├── 10_audit_log.sql
-│       └── setup_sample_data.sql
-├── tools/                   # Utility tools
-│   └── interaction_logger.py
-└── .tmp/                    # Temporary files (gitignored)
+│   ├── database/
+│   │   ├── 09_add_update_customer_functions.sql
+│   │   ├── agent_first_erp_crm_mental_model.md
+│   │   ├── agent_first_erp_crm_schema.sql
+│   │   ├── agent_schema_reference.md
+│   │   ├── audit_schema.md
+│   │   ├── enterprise_relationship_graph.md
+│   │   ├── README_VIEWS.md
+│   │   ├── schema.md
+│   │   └── setup_sample_data.sql
+│   └── history/
+│       ├── MISALIGNMENT_FIXES.md
+│       └── STABILITY_IMPROVEMENTS.md
+└── scripts/                 # SQL scripts
+    ├── 08_create_views.sql
+    ├── database/
+    │   ├── 08_create_views.sql
+    │   ├── 09_customer_functions.sql
+    │   ├── 10_audit_log.sql
+    │   ├── 11_interaction_logging.sql
+    │   ├── agent_swarm_schema.sql
+    │   ├── apply_customer_functions.sh
+    │   ├── apply_functions.py
+    │   ├── FIX_SUMMARY.md
+    │   ├── README.md
+    │   ├── setup_customer_functions.py
+    │   └── setup_sample_data.sql
+    └── tests/
+        ├── README.md
+        ├── test_agent.py
+        ├── test_create_functions.py
+        ├── test_functions.py
+        ├── test_update_function.py
+        └── verify_functions.py
 ```
 
 ---
