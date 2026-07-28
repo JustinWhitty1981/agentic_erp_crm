@@ -1,6 +1,6 @@
 # ADR-005: Idempotent Agent Operations
 
-**Status:** Accepted 
+**Status:** Accepted   
 **Date:** 2026-07-28  
 **Authors:** Justin Whitty  
 
