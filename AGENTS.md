@@ -15,7 +15,14 @@ Welcome! This guide is designed specifically for AI agents working on the Agent 
 - **[blueprint/tools/README.md](blueprint/tools/README.md)** - Tool development guidelines
 - **[docs/agent_requirements/customer_service/customer_service.md](docs/agent_requirements/customer_service/customer_service.md)** - Customer service agent requirements
 - **[docs/agent_requirements/inventory/inventory.md](docs/agent_requirements/inventory/inventory.md)** - Inventory agent requirements
-- **[docs/attachments/ATTACHMENT_SYSTEM.md](docs/attachments/ATTACHMENT_SYSTEM.md)** - Attachment system documentation
+- **[docs/ATTACHMENT_SYSTEM.md](docs/ATTACHMENT_SYSTEM.md)** - Attachment system documentation
+
+### 🏛️ Architecture Decision Records
+- **[ARCHITECTURE_DECISION_RECORDS/ADR-001_why_log_every_tool_call.md](ARCHITECTURE_DECISION_RECORDS/ADR-001_why_log_every_tool_call.md)** - Why log every tool call
+- **[ARCHITECTURE_DECISION_RECORDS/ADR-002_database_first_architecture.md](ARCHITECTURE_DECISION_RECORDS/ADR-002_database_first_architecture.md)** - Database-first architecture rationale
+- **[ARCHITECTURE_DECISION_RECORDS/ADR-003_view_based_tool_design.md](ARCHITECTURE_DECISION_RECORDS/ADR-003_view_based_tool_design.md)** - View-based tool design pattern
+- **[ARCHITECTURE_DECISION_RECORDS/ADR-004_agent_first_interface.md](ARCHITECTURE_DECISION_RECORDS/ADR-004_agent_first_interface.md)** - Agent-first interface design
+- **[ARCHITECTURE_DECISION_RECORDS/ADR-005_idempotent_agent_operations.md](ARCHITECTURE_DECISION_RECORDS/ADR-005_idempotent_agent_operations.md)** - Idempotent operations for safe retries
 
 ### 🗄️ Database Documentation
 - **[docs/database/agent_schema_reference.md](docs/database/agent_schema_reference.md)** - Database schema reference
@@ -130,6 +137,12 @@ agent_first_erp_crm/
 ├── PLAN.md                  # Development roadmap
 ├── AGENTS.md                # This file - agent guide
 ├── MIGRATION_SUMMARY.md     # Migration history
+├── ARCHITECTURE_DECISION_RECORDS/  # Architectural decisions
+│   ├── ADR-001_why_log_every_tool_call.md
+│   ├── ADR-002_database_first_architecture.md
+│   ├── ADR-003_view_based_tool_design.md
+│   ├── ADR-004_agent_first_interface.md
+│   └── ADR-005_idempotent_agent_operations.md
 ├── agents/                  # Agent implementations
 ├── blueprint/               # Reference implementation
 │   ├── bot.py              # Main agent entry point
@@ -160,8 +173,7 @@ agent_first_erp_crm/
 │   ├── sample_data.md
 │   └── views.md
 ├── docs/                    # Documentation
-│   ├── attachments/         # Attachment system docs
-│   │   └── ATTACHMENT_SYSTEM.md
+│   ├── ATTACHMENT_SYSTEM.md # Attachment system docs
 │   ├── agent_requirements/  # Domain requirements
 │   │   ├── customer_service/
 │   │   │   └── customer_service.md
@@ -372,8 +384,8 @@ Dedicated validation agent for:
 
 ## Getting Help
 
-- Review [docs/MISALIGNMENT_FIXES.md](docs/MISALIGNMENT_FIXES.md) for known issues
-- Check [docs/STABILITY_IMPROVEMENTS.md](docs/STABILITY_IMPROVEMENTS.md) for best practices
+- Review [docs/history/MISALIGNMENT_FIXES.md](docs/history/MISALIGNMENT_FIXES.md) for known issues
+- Check [docs/history/STABILITY_IMPROVEMENTS.md](docs/history/STABILITY_IMPROVEMENTS.md) for best practices
 - Refer to [PLAN.md](PLAN.md) for current priorities and roadmap
 
 ---
