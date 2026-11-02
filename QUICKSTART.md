@@ -8,6 +8,21 @@
 
 ## Step 1: Verify Database Schema
 
+> **Superseded on this development server.** Do not run `setup_sample_data.sql` to create
+> the schema: its first statement creates a second copy of eight tables inside a schema
+> named `agent_first_erp_crm`, and that fork is the root cause of
+> [docs/database/DATABASE_REVIEW.md](docs/database/DATABASE_REVIEW.md) §3.1. The schema now
+> lives in `db/migrations/` and loads into `public`. Use:
+>
+> ```bash
+> scripts/db/db up      # starts the container, provisions it, applies migrations
+> scripts/db/db verify  # structural assertions; scripts/db/db test for the functions
+> ```
+>
+> See [dev/README.md](dev/README.md) for audit access and [db/README.md](db/README.md)
+> for which files are superseded. The steps below are kept for reference until the
+> documentation sweep in the remediation plan lands.
+
 Check if the `agent_first_erp_crm` schema exists:
 ```bash
 psql -h {your-database-host} -U {your-username} -d {your-database-name} -c "SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'agent_first_erp_crm';"

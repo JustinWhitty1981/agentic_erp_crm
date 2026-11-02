@@ -1,0 +1,53 @@
+# Local development state. This repository documents a database that is meant to
+# persist, so what lives here is either generated per machine or must never be shared.
+
+# Credentials. dev/.env holds POSTGRES_PASSWORD and the per-role passwords generated
+# by scripts/db/db. There is deliberately no committed copy of it, and no default that
+# a developer might reuse against a real server.
+.env
+.env.*
+!.env.example
+dev/.env
+dev/.env.*
+!dev/.env.example
+
+# TLS material. init.sh keeps the private CA key and the server key in the afpc_tls
+# docker volume, never on this checkout; the exported CA certificate (dev/tls/*.crt)
+# is the public half and IS committed, because auditors need it for sslmode=verify-full.
+*.key
+*.pem
+*.p12
+*.pfx
+dev/tls/*.key
+dev/tls/*.csr
+dev/tls/*.srl
+
+# Database dumps: pg_dump output can contain customer PII.
+backup/
+*.dump
+*.sql.gz
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+.pytest_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+*.egg-info/
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local scratch that agents in this project have historically written next to
+# themselves. Anything under a name that implies throwaway should not be tracked.
+tmp/
+.cache/
+*.log

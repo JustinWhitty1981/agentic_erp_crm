@@ -25,6 +25,10 @@ Welcome! This guide is designed specifically for AI agents working on the Agent 
 - **[ARCHITECTURE_DECISION_RECORDS/ADR-005_idempotent_agent_operations.md](ARCHITECTURE_DECISION_RECORDS/ADR-005_idempotent_agent_operations.md)** - Idempotent operations for safe retries
 
 ### 🗄️ Database Documentation
+- **[db/README.md](db/README.md)** - **single source of truth for schema**; which legacy SQL directories are superseded
+- **[db/MIGRATIONS.md](db/MIGRATIONS.md)** - finding-to-migration mapping the verification harnesses read
+- **[dev/README.md](dev/README.md)** - this development server: container, audit access, TLS, gotchas
+- **[docs/database/DATABASE_REVIEW.md](docs/database/DATABASE_REVIEW.md)** - full data-model review driving the remediation
 - **[docs/database/agent_schema_reference.md](docs/database/agent_schema_reference.md)** - Database schema reference
 - **[docs/database/agent_first_erp_crm_mental_model.md](docs/database/agent_first_erp_crm_mental_model.md)** - Database mental model for agents
 - **[docs/database/agent_first_erp_crm_schema.sql](docs/database/agent_first_erp_crm_schema.sql)** - Complete schema definition
