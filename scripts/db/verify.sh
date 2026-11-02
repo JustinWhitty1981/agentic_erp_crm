@@ -161,12 +161,21 @@ check "B18 5.9  domain answers are complete" "0007_domain_constraints" \
      ) x WHERE NOT EXISTS (SELECT 1 FROM vw_domain_vocabulary v2 \
                             WHERE v2.table_name||'.'||v2.column_name = x.col))" \
     "domain columns outside vw_domain_vocabulary, or listed twice (a second membership CHECK on one column contradicts the first)"
+# 0008 retains exactly one CASCADE - locations -> warehouses - as composition rather than
+# destruction, so the check is two-sided: nothing that holds a fact may cascade, and nothing
+# ELSE may cascade either. A silent flip of the retained edge to RESTRICT would zero this
+# count and pass, which is why probe D in the migration attempts the bin cascade for real;
+# the retained edge is asserted by behaviour, not by its absence here.
 check "B3 5.10 no CASCADE into stock" "0008_delete_safety" \
-    "SELECT count(*) FROM pg_constraint c JOIN pg_class r ON r.oid=c.conrelid
-      JOIN pg_namespace n ON n.oid=r.relnamespace
-      WHERE n.nspname='public' AND c.contype='f' AND c.confdeltype='c'
-        AND r.relname IN ('inventory_on_hand','inventory_reservations','locations','movements')" \
-    "CASCADE edges that destroy stock rows"
+    "SELECT (SELECT count(*) FROM pg_constraint c JOIN pg_class r ON r.oid=c.conrelid
+        JOIN pg_namespace n ON n.oid=r.relnamespace
+       WHERE n.nspname='public' AND c.contype='f' AND c.confdeltype='c'
+         AND r.relname IN ('inventory_on_hand','inventory_reservations',
+                           'inventory_movements','bot_actions'))
+      + (SELECT count(*) FROM pg_constraint c
+       WHERE c.contype='f' AND c.confdeltype='c' AND c.connamespace='public'::regnamespace
+         AND NOT (c.conrelid='locations'::regclass AND c.confrelid='warehouses'::regclass))" \
+    "CASCADE edges that destroy stock rows, plus any CASCADE beyond the one retained edge"
 
 # 4.2 from the catalog side. Deliberately a different assertion from the one in 0004:
 # the migration proves the arbiter is inferable (behaviour), this proves the constraint

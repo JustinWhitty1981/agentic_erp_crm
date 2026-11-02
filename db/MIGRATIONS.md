@@ -14,7 +14,7 @@ bearing; changing one without the other turns a green row red.
 | `0005_key_types` | 5.1–5.4 | integer key columns → bigint (19 widened, derived from `pg_constraint` **plus** the name rule, because `thread_root_id` has no constraint to derive it from — the finding's own subject would otherwise be skipped), **and their 6 owned sequences raised to bigint with it**, since `ALTER COLUMN TYPE` leaves the sequence's ceiling alone; `thread_root_id` gets the FK it never had; `afpc_uuid_v7()` replaces `gen_random_uuid()` on all 13 UUID primary keys; the four functions that returned `entity_id integer` are widened, because widening the table and not the API only moves the ceiling |
 | `0006_index_hygiene` | 5.5, 5.6 | drop 6 redundant indexes (3 identical pairs + 3 prefix pairs — the prefix form is the same defect, the review only counted identical column lists), give leading coverage to the 14 foreign key columns that had none, and index what the CRM actually queries: trigram GINs for the two `ILIKE '%…%'` paths (a btree cannot answer those at all), `entities.tax_id`/`contacts.phone` for equality, and an `addresses` composite that also removes `vw_customers`' per-row address sort. Creates `vw_index_redundancy` so the question has one definition instead of three. `inventory_movements.transaction_id` is **left alone** — unindexed today, not a foreign key, queried by nothing; 6.1 argues it into a dedup key, which is `0011`'s decision with its access method attached |
 | `0007_domain_constraints` | 5.9 | 20 membership CHECKs, 6 columns pointed at two new master-data tables (`units_of_measure`, `costing_methods`), and `vw_domain_vocabulary`, which publishes what every domain column accepts and names the 4 left free on purpose with the reason. Which mechanism a column gets is a rule, not a preference — see the header of the migration |
-| `0008_delete_safety` | 5.10 | CASCADE to RESTRICT on stock edges, explicit close-out functions |
+| `0008_delete_safety` | 5.10 | flip 5 CASCADE edges to RESTRICT (on-hand and reservations to items/warehouses, `bot_actions` to sessions) plus `inventory_on_hand.location_id`'s SET NULL — measured: a parent delete really did destroy stock and the audit trail whenever nothing had ever MOVED, because the edges that looked safe were protected by accident of the movement FKs. Retains `locations -> warehouses` CASCADE as composition, proved by a probe that attempts it. Adds the close-out path the review prescribes: `decommission_warehouse()` / `retire_item()`, which refuse with the actual stock counts and close out by `is_active` |
 | `0009_rls_enforcement` | 5.7 | ENABLE+FORCE on all business tables, tenant policies, drop inert `app.current_agent` ones |
 | `0010_timestamp_triggers` | 6.3 | one `BEFORE INSERT OR UPDATE` trigger, `created_at` on the two tables lacking it |
 | `0011_idempotency` | 6.1 | `idempotency_keys` plus version-bumping triggers — ADR-005 implemented |
@@ -33,17 +33,18 @@ bearing; changing one without the other turns a green row red.
 `verify.sh` prints these counts every run, so the deltas are visible rather than
 remembered.
 
-| Count | Before 0003 | After 0004 | After 0005 | After 0006 | After 0007 | Why |
-|---|---|---|---|---|---|---|
-| FKs | 30 | 47 | 48 | 48 | 54 | `tenant_id` FKs, RESTRICT, on 17 tables; then `thread_root_id`, which 5.2 found had no constraint at all; then 6 to the master-data tables, which is why B17 had to be re-run against them |
-| tenant-coded tables | 0 | 18 | 18 | 18 | 18 | the review's "0 rows returned" for 5.8 |
-| FKs with no index anywhere | 12 | 11 | 11 | **0** | 0 | the corrected measure (see below): a column in no key position of any index. Unchanged by 0005 — `idx_comms_thread_root` already covers the new FK. 0006 indexes all of them |
+| Count | Before 0003 | After 0004 | After 0005 | After 0006 | After 0007 | After 0008 | Why |
+|---|---|---|---|---|---|---|---|
+| FKs | 30 | 47 | 48 | 48 | 54 | 54 | `tenant_id` FKs, RESTRICT, on 17 tables; then `thread_root_id`, which 5.2 found had no constraint at all; then 6 to the master-data tables, which is why B17 had to be re-run against them |
+| tenant-coded tables | 0 | 18 | 18 | 18 | 18 | 18 | the review's "0 rows returned" for 5.8 |
+| FKs with no index anywhere | 12 | 11 | 11 | **0** | 0 | 0 | the corrected measure (see below): a column in no key position of any index. Unchanged by 0005 — `idx_comms_thread_root` already covers the new FK. 0006 indexes all of them |
 | FK columns leading no index | — | 14 | 14 | **0** | 0 | 0006's invariant, now asserted. The judgment 0003 left to be confirmed resolved **against** the tenant-led composites: an FK existence check carries no tenant predicate, so `(tenant_id, col)` cannot serve it — measured, 47 buffers/0.193 ms as a seq scan versus 6 buffers/0.017 ms index-only. Both shapes are kept where both query shapes exist, which is not the duplicate case 5.6 is about |
 | redundant index pairs (identical + prefix) | 8 | 3 | 3 | **0** | 0 | 4 pairs became single indexes when 0003 replaced the global natural key with a tenant-scoped unique; `0004` removed `idx_on_hand_available`/`idx_on_hand_low_stock`. The remaining 3 are pre-existing `idx_comm_*`/`idx_comms_*` pairs in `communications` (correction C1). 0006 found **3 more of the same defect that the review's measure could not see**: indexes whose column list is a strict leading prefix of another index on the same table (`audit_summary`, `locations`, `inventory_reservations`) — so the honest count of 5.6 is 6, not 3 |
 | integer key columns | 19 | 19 | **0** | 0 | 0 | 5.1/5.3: four serial PKs and fifteen referencing columns, widened together |
 | key columns narrower than their ceiling | 4 | 4 | **0** | 0 | 0 | bigint keys fed by an integer sequence — see B14 |
-| domain columns with no published answer | 30 | 30 | 30 | 30 | **0** | 5.9's count, restated as a question the database can answer. 26 are constrained, 4 are free text with a recorded reason |
-| tables | 18 | 19 | 19 | 19 | 21 | the two master-data tables, `units_of_measure` and `costing_methods` |
+| domain columns with no published answer | 30 | 30 | 30 | 30 | **0** | 0 | 5.9's count, restated as a question the database can answer. 26 are constrained, 4 are free text with a recorded reason |
+| tables | 18 | 19 | 19 | 19 | 21 | 21 | the two master-data tables, `units_of_measure` and `costing_methods` |
+| CASCADE edges | 6 | 6 | 6 | 6 | 6 | **1** | 5.10's count. Five flipped to RESTRICT (four inventory, one audit); `locations -> warehouses` retained — bin rows with no stock, no open reservations and no ledger reference are structure, and deleting them with the warehouse is composition, not destruction. B3 checks both sides: no CASCADE on a table that holds facts, and no CASCADE anywhere else beyond that one named edge |
 
 Also deferred from 0003, deliberately:
 
@@ -58,9 +59,59 @@ Also deferred from 0003, deliberately:
   first one. `(performed_at)` is the only index that can serve a cross-tenant range over the
   ledger, so it stays. The claim was wrong because it was reasoned from the index names
   rather than read from `indkey` — which is what `vw_index_redundancy` now does instead.
+- **Function EXECUTE is PUBLIC by default.** Thirteen business functions are callable by
+  every role, including `afpc_auditor`, because 0001 created them before 0002's grants and
+  PostgreSQL grants EXECUTE to PUBLIC at creation. The writes inside fail on table
+  privileges, so nothing leaks today, but least-privilege says the audit account should not
+  be able to *try*. `0009` owns the sweep: REVOKE from PUBLIC, GRANT to `afpc_app`, and
+  `ALTER DEFAULT PRIVILEGES ... REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC` so new functions
+  start closed. 0008 already did this for its own two functions and prints the remaining
+  count.
 - **Row-level isolation.** `tenant_id` exists and is enforced structurally, but nothing
   filters by it yet. `db/tests/5_8_tenancy.sql` block 8d demonstrates both the read and
   the write hole, and is the KNOWN-OPEN row that 0009 turns green.
+
+## Found while building 0008
+
+- **A delete graph can be protected entirely by accident, and the accident is load-bearing.**
+  Every probe where a parent delete *destroyed* stock (item with stock and no movements,
+  warehouse never in a ledger row) succeeded; every probe where history existed was already
+  refused by `inventory_movements`' RESTRICT/NO ACTION edges — which 0008 does not touch, and
+  which the review never mentions as protection. So before 0008 the schema was safe exactly for
+  the rows anyone had audited and unsafe exactly for the rows nobody had moved yet: a
+  freshly-received pallet is destroyable by deleting its warehouse, and an old one is not.
+  "RESTRICT (or soft delete)" is the review prescribing intent where only accident existed.
+- **The SET NULL on `inventory_on_hand.location_id` is the same finding in a quieter form**, and
+  it was not in 5.10's six. Measured: deleting a stocked bin either silently re-homed the
+  quantity to warehouse level, or — when a no-bin row for the same item/warehouse/lot already
+  existed — aborted inside **0004's identity index** with a 23505. The second failure mode
+  arrives as a duplicate-key error naming neither the bin nor the constraint; an operator
+  reading it would debug 0004, not the delete they issued. Two outcomes, neither an answer.
+  It flips to RESTRICT with the CASCADEs.
+- **5.10 counts 6 CASCADEs; the honest list is 5 + 1, and the retained one needs a probe.**
+  `locations -> warehouses` is a genuine part-whole relation — a bin *is* the warehouse,
+  expressed as shelves — and its blast radius after the other five flip is exactly "bins that
+  nothing has ever counted, reserved, or moved against". Retaining it is the judgment call,
+  and B3's catalog reading could not distinguish "retained on purpose" from "the migration
+  forgot", so the migration attempts the empty-bin cascade for real (probe D), and
+  `db/tests/5_10_delete_safety.sql` block F keeps attempting it as a regression guard — with
+  no harness row, because it passes pre-0008 too and a row that cannot reproduce would read
+  CLOSED through a branch that was never at risk (0006's preference-assertion lesson again).
+- **`RETURN` inside a plpgsql exception handler ends the whole block, not the handler.** The
+  first draft of block D used it to skip the ERR line after a successful refusal; the ERR
+  guard then never ran on *either* path. A boolean, set in the handler and read after
+  `END`, is the form that works. (Also caught: the documented `cond EXCEPTION;` condition-name
+  declaration — both in a DO block and in a real function — fails here with "type exception
+  does not exist", so the rollback sentinel became an explicit SQLSTATE via
+  `RAISE ... USING ERRCODE`, which is also a better sentinel because it cannot be confused
+  with an unrelated `raise_exception`.)
+- **A test fixture inside a schema that gained CHECKs and FKs in 0007 must speak the
+  vocabulary.** The first draft of these probes inserted `bot_type='langchain'` (0007 added a
+  membership check), `order_id=900001` (uuid), `movements` without `performed_by`, and
+  sessions `user_id` as both integer and string (varchar in the baseline — the two spellings
+  compare unequal: `'999777' = 999777` is a type error, not a coercion). None of those are
+  findings; they are 0008 writing against the database that exists after 0007, which is the
+  point of a sequence that replays.
 
 ## Found while building 0007
 

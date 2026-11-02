@@ -152,6 +152,15 @@ CASES=(
 "5_9_domain_values|is now constrained by|5.9|0007_domain_constraints"
 "5_9_domain_values|are undocumented|5.9|0007_domain_constraints"
 "5_5_6_index_hygiene|index pairs are redundant|5.6|0006_index_hygiene"
+# 5.10's five rows are the destructions themselves, attempted. Block F of the same file
+# deliberately has no row: the retained bin cascade succeeds before AND after 0008 alike, and
+# a phrase that cannot reproduce on a pre-0008 database would read CLOSED through a branch
+# that was never at risk. It is a regression guard, nothing more.
+"5_10_delete_safety|a warehouse delete destroyed|5.10|0008_delete_safety"
+"5_10_delete_safety|an item delete destroyed|5.10|0008_delete_safety"
+"5_10_delete_safety|a session delete destroyed|5.10|0008_delete_safety"
+"5_10_delete_safety|was not refused by its own constraint|5.10|0008_delete_safety"
+"5_10_delete_safety|no explicit close-out path exists|5.10|0008_delete_safety"
 )
 
 echo

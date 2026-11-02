@@ -184,6 +184,22 @@ to drop an index it believed was uncovered.
 a clone of it whose indexes had been recreated in the other order. Add a tiebreak only to a
 branch that is otherwise symmetric.
 
+**`RETURN` inside a plpgsql exception handler ends the enclosing block, not the handler.**
+A probe that catches "the destruction was refused" and then `RETURN`s to skip its own failure
+line silently skips whatever came after the BEGIN/EXCEPTION block too. Set a boolean in the
+handler and read it after `END`. Related: the documented `cond EXCEPTION;` condition-name
+declaration fails in this build ("type exception does not exist", in DO blocks and functions
+alike), so the rollback-sentinel pattern uses `RAISE ... USING ERRCODE = 'P8xxx'` and
+`WHEN SQLSTATE 'P8xxx'` - which is sturdier anyway, since an unrelated `raise_exception`
+cannot be mistaken for the pass signal.
+
+**A cascaded delete can raise an error that names neither the table you deleted from nor the
+constraint you changed.** Before 0008, `DELETE FROM locations` on a stocked bin sometimes died
+with `duplicate key value violates unique constraint "inventory_on_hand_key"` - 0004's identity
+index - because the edge was `SET NULL` and the re-homed row collided with an existing
+no-bin row. The delete's own constraint appeared nowhere. If a delete fails with a violation
+on a *different* table, look at the referencing edges' `confdeltype`, not at the named index.
+
 **`pg_get_constraintdef()` has two renderings of a membership test, and a filter that spells one
 misses the other.** `= ANY ((ARRAY['a'::character varying, ...])::text[])` is what a constraint
 written with an explicit array cast prints as; `= ANY (ARRAY['a'::text, ...])` is what the same kind
