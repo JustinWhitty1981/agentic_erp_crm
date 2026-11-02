@@ -62,6 +62,30 @@ SELECT datname, usename, client_addr, state, backend_start
   FROM pg_stat_activity ORDER BY backend_start;                             -- who is connected now
 ```
 
+From 0009 on, the structural question has a view:
+
+```sql
+SELECT table_name, rls_forced, read_predicate, write_predicate, verdict
+  FROM public.vw_rls_status ORDER BY verdict, table_name;   -- what row security actually does
+```
+
+One thing to know before believing any query result here: **row security binds a role, not a
+schema.** Connected as `afpc_app` the same `SELECT count(*) FROM warehouses` sees one tenant;
+connected as `postgres` it sees every tenant, because a superuser bypasses row security however
+the tables are configured - `FORCE` binds an owner, not a superuser. So auditing *as the
+auditor* is the only way to see what the agents see, and `SET ROLE afpc_app` inside an owner
+session is the way to check a specific tenant's view of the data without a password:
+
+```sql
+SET ROLE afpc_app; SET app.tenant_id = '<uuid>';  -- now you are one tenant
+RESET ROLE;                                        -- SET LOCAL ROLE does not revert by itself
+```
+
+The audit account reads across tenants by policy (`audit_read_all`, `USING (true)`), so every
+domain view now carries a `tenant_id` column to tell the rows apart, and the aggregate views
+group by it - otherwise `vw_agent_activity_summary` would add two tenants' bots together under
+one name.
+
 The server log carries `user=`, `db=` and `host=` on every line, which is how the
 masquerading in the next section was established rather than assumed.
 
@@ -111,7 +135,42 @@ directly (for example `--network host`), and they document intent.
 postmaster-context, so a reload is not enough; if the server fails to come back after a
 TLS change, `init.sh` reverts `ssl` rather than leaving a persistent database unbootable.
 
-## Two things that will bite you if you do not know them
+## Things that will bite you if you do not know them
+
+Eleven of these, and every one was learned by a check failing on a rehearsal rather than
+by reading documentation about the database. Keep the pattern: when a migration surprises
+you, the surprise goes here, and the check that would have caught it goes in verify.sh.
+
+**A row-security predicate is a plan, so the resolver's volatility is a performance property.**
+`USING (tenant_id = afpc_current_tenant())` reads correctly and costs a sequential scan: a
+VOLATILE function in a qual is re-evaluated per row and cannot become an index condition. The
+same clause against a STABLE resolver is an Index Cond - measured 479 ms against 53 ms on 600k
+rows across two tenants. That is why `afpc_policy_tenant()` exists next to
+`afpc_current_tenant()` and why the two have different volatility markers on purpose.
+
+**`CREATE OR REPLACE VIEW` discards the view's reloptions, and `security_invoker` is a
+reloption.** Setting it and then restating the definition sets it on the version about to be
+replaced - 0009's own view probe caught that by returning both tenants' rows through a view
+whose table was correctly filtered. Apply it *after* the rewrites; B21 checks it from the
+catalog. The version default is not a safety net: a view created by a superuser in this cluster
+keeps owner semantics with empty `reloptions`.
+
+**`ALTER DEFAULT PRIVILEGES ... REVOKE ... FROM PUBLIC` is a no-op for functions.** For tables
+it works, because a stored default-privileges record replaces the object's initial ACL. For
+functions the initial ACL already grants EXECUTE to PUBLIC and the record only adds to it, so
+the statement succeeds, changes nothing, and a function created afterwards is still callable by
+every role. The mechanism that works is a per-object `REVOKE` (0008 did its two, 0009 did the
+rest) plus verify.sh B22, which is not a duplicate of the sweep - it is the only thing that
+keeps it closed.
+
+**The view -> table dependency edges hang off the rule, not the view.** `pg_depend` rows with
+`classid='pg_rewrite'` have `objid` equal to the *rewrite rule's* oid, so
+`WHERE d.objid = 'vw_customers'::regclass` returns two rows about the view itself and nothing
+about what it reads. A first draft of 0009's classifier used exactly that and concluded that
+none of the fourteen views covered a tenant table. `information_schema.view_table_usage`
+answers the question and is what the migration uses; the check that compares the rewritten
+column lists against a pre-rewrite snapshot is what caught the reasoning.
+
 
 **Never bind-mount a file from this repo into the container.** The `.sql` files are mode
 `0660` and owned by a uid the container cannot read as. A mounted file fails with

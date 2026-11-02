@@ -4,7 +4,18 @@
 
 **Location:** `scripts/database/08_create_views.sql`
 
----
+> **Changed by `db/migrations/0009_rls_enforcement.sql`, and this page describes the old
+> behaviour in three ways.** (1) Every view over a tenant table now exposes `tenant_id` as its
+> last column, so the twelve customer-facing and inventory views have one more column than
+> listed below. (2) The four aggregate views (`vw_agent_activity_summary`,
+> `vw_entity_communication_stats`, `vw_inventory_valuation`, `vw_item_movement_summary`) also
+> group by it, because grouping without it adds two tenants' numbers together. (3) They are all
+> `security_invoker` now, which is what makes row-level security apply to a query that goes
+> through a view; an agent sees one tenant and the audit account sees all of them, which is the
+> reason for (1). The canonical definitions live in `0001` (port) plus `0009` (this change) -
+> not in the SQL file named above, which is one of the superseded copies listed in
+> `db/README.md`.
+
 
 ## Overview
 

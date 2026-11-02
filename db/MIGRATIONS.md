@@ -15,14 +15,14 @@ bearing; changing one without the other turns a green row red.
 | `0006_index_hygiene` | 5.5, 5.6 | drop 6 redundant indexes (3 identical pairs + 3 prefix pairs — the prefix form is the same defect, the review only counted identical column lists), give leading coverage to the 14 foreign key columns that had none, and index what the CRM actually queries: trigram GINs for the two `ILIKE '%…%'` paths (a btree cannot answer those at all), `entities.tax_id`/`contacts.phone` for equality, and an `addresses` composite that also removes `vw_customers`' per-row address sort. Creates `vw_index_redundancy` so the question has one definition instead of three. `inventory_movements.transaction_id` is **left alone** — unindexed today, not a foreign key, queried by nothing; 6.1 argues it into a dedup key, which is `0011`'s decision with its access method attached |
 | `0007_domain_constraints` | 5.9 | 20 membership CHECKs, 6 columns pointed at two new master-data tables (`units_of_measure`, `costing_methods`), and `vw_domain_vocabulary`, which publishes what every domain column accepts and names the 4 left free on purpose with the reason. Which mechanism a column gets is a rule, not a preference — see the header of the migration |
 | `0008_delete_safety` | 5.10 | flip 5 CASCADE edges to RESTRICT (on-hand and reservations to items/warehouses, `bot_actions` to sessions) plus `inventory_on_hand.location_id`'s SET NULL — measured: a parent delete really did destroy stock and the audit trail whenever nothing had ever MOVED, because the edges that looked safe were protected by accident of the movement FKs. Retains `locations -> warehouses` CASCADE as composition, proved by a probe that attempts it. Adds the close-out path the review prescribes: `decommission_warehouse()` / `retire_item()`, which refuse with the actual stock counts and close out by `is_active` |
-| `0009_rls_enforcement` | 5.7 | ENABLE+FORCE on all business tables, tenant policies, drop inert `app.current_agent` ones |
+| `0009_rls_enforcement` | 5.7 | ENABLE **and FORCE** row security on all 18 tenant-coded tables with one `tenant_isolation` policy per table (qual *and* `WITH CHECK`, so reads and writes are both filtered) plus a `USING (true)` SELECT policy for the two read roles; drops the 5 policies that keyed off the `app.current_agent` GUC nothing sets. `afpc_policy_tenant()` is a **STABLE** tenant resolver for the quals, because a VOLATILE one is re-evaluated per row and cannot become an index condition (measured 479 ms against 53 ms) — which is what makes 0006's promise about the tenant-led indexes true. Rewrites the 12 CRM views to expose `tenant_id` and sets `security_invoker` on every non-extension view, because a postgres-owned view skips the wall entirely. Also pays two debts: the 6 sequences 0002 could not grant retroactively (without them `afpc_app` cannot write a customer, so RLS was untestable on the CRM tables), and 0008's census of functions born with `EXECUTE` to PUBLIC. Publishes `vw_rls_status` |
 | `0010_timestamp_triggers` | 6.3 | one `BEFORE INSERT OR UPDATE` trigger, `created_at` on the two tables lacking it |
 | `0011_idempotency` | 6.1 | `idempotency_keys` plus version-bumping triggers — ADR-005 implemented |
 | `0012_vector_indexing` | 6.4 | ivfflat to hnsw, index the two unindexed embeddings, vectors to a side table |
 | `0013_audit_log` | 6.2 | row-level immutable audit in `public`, append-only grants |
 | `0014_movement_contract` | 4.1, 4.2, 4.3 | `p_unit_of_measure`, ISSUE-branch warehouse columns, cost divisor, stop re-wrapping 23502, **and assert `ROW_COUNT` in the ISSUE branch** (the phantom-issue half of 4.2, which no constraint can express; the ON CONFLICT line moved to 0004) |
 | `0015_reservation_locking` | 4.3, 4.2 | handler OUT tuple, `FOR UPDATE`, honour `location_id` — now including the **multi-bin double-decrement** below — no recursive movement insert |
-| `0016_single_add_customer` | 4.4 | one `add_customer` overload instead of two ambiguous ones. The `integer` → `bigint` widening of its OUT columns was done in `0005` (a type fix, not a behaviour fix), so what remains here is the overload collapse — and note that named arguments do **not** disambiguate the current pair, because both share the first four parameter names |
+| `0016_single_add_customer` | 4.4 | one `add_customer` overload instead of two ambiguous ones. The `integer` → `bigint` widening of its OUT columns was done in `0005` (a type fix, not a behaviour fix), so what remains here is the overload collapse — and note that named arguments do **not** disambiguate the current pair either: they share their parameter *names* as well as their first ten positions, so the only call that resolves today supplies 11 or more arguments (measured in 0009's block F, which had to route around this) |
 | `0017_tool_call_log` | 4.5 | create `agent_tool_calls` and `tickets`, or delete the code that writes them |
 | `0018_currencies` | 6.5 | `currencies` + rate history, money vs quantity precision |
 | `0019_partitioning` | 6.6 | partition the append-only tables, BRIN on time columns |
@@ -33,43 +33,151 @@ bearing; changing one without the other turns a green row red.
 `verify.sh` prints these counts every run, so the deltas are visible rather than
 remembered.
 
-| Count | Before 0003 | After 0004 | After 0005 | After 0006 | After 0007 | After 0008 | Why |
-|---|---|---|---|---|---|---|---|
-| FKs | 30 | 47 | 48 | 48 | 54 | 54 | `tenant_id` FKs, RESTRICT, on 17 tables; then `thread_root_id`, which 5.2 found had no constraint at all; then 6 to the master-data tables, which is why B17 had to be re-run against them |
-| tenant-coded tables | 0 | 18 | 18 | 18 | 18 | 18 | the review's "0 rows returned" for 5.8 |
-| FKs with no index anywhere | 12 | 11 | 11 | **0** | 0 | 0 | the corrected measure (see below): a column in no key position of any index. Unchanged by 0005 — `idx_comms_thread_root` already covers the new FK. 0006 indexes all of them |
-| FK columns leading no index | — | 14 | 14 | **0** | 0 | 0006's invariant, now asserted. The judgment 0003 left to be confirmed resolved **against** the tenant-led composites: an FK existence check carries no tenant predicate, so `(tenant_id, col)` cannot serve it — measured, 47 buffers/0.193 ms as a seq scan versus 6 buffers/0.017 ms index-only. Both shapes are kept where both query shapes exist, which is not the duplicate case 5.6 is about |
-| redundant index pairs (identical + prefix) | 8 | 3 | 3 | **0** | 0 | 4 pairs became single indexes when 0003 replaced the global natural key with a tenant-scoped unique; `0004` removed `idx_on_hand_available`/`idx_on_hand_low_stock`. The remaining 3 are pre-existing `idx_comm_*`/`idx_comms_*` pairs in `communications` (correction C1). 0006 found **3 more of the same defect that the review's measure could not see**: indexes whose column list is a strict leading prefix of another index on the same table (`audit_summary`, `locations`, `inventory_reservations`) — so the honest count of 5.6 is 6, not 3 |
-| integer key columns | 19 | 19 | **0** | 0 | 0 | 5.1/5.3: four serial PKs and fifteen referencing columns, widened together |
-| key columns narrower than their ceiling | 4 | 4 | **0** | 0 | 0 | bigint keys fed by an integer sequence — see B14 |
-| domain columns with no published answer | 30 | 30 | 30 | 30 | **0** | 0 | 5.9's count, restated as a question the database can answer. 26 are constrained, 4 are free text with a recorded reason |
-| tables | 18 | 19 | 19 | 19 | 21 | 21 | the two master-data tables, `units_of_measure` and `costing_methods` |
-| CASCADE edges | 6 | 6 | 6 | 6 | 6 | **1** | 5.10's count. Five flipped to RESTRICT (four inventory, one audit); `locations -> warehouses` retained — bin rows with no stock, no open reservations and no ledger reference are structure, and deleting them with the warehouse is composition, not destruction. B3 checks both sides: no CASCADE on a table that holds facts, and no CASCADE anywhere else beyond that one named edge |
+| Count | Before 0003 | After 0004 | After 0005 | After 0006 | After 0007 | After 0008 | After 0009 | Why |
+|---|---|---|---|---|---|---|---|---|
+| FKs | 30 | 47 | 48 | 48 | 54 | 54 | 54 | `tenant_id` FKs, RESTRICT, on 17 tables; then `thread_root_id`, which 5.2 found had no constraint at all; then 6 to the master-data tables, which is why B17 had to be re-run against them |
+| tenant-coded tables | 0 | 18 | 18 | 18 | 18 | 18 | 18 | the review's "0 rows returned" for 5.8 |
+| FKs with no index anywhere | 12 | 11 | 11 | **0** | 0 | 0 | 0 | the corrected measure (see below): a column in no key position of any index. Unchanged by 0005 — `idx_comms_thread_root` already covers the new FK. 0006 indexes all of them |
+| FK columns leading no index | — | 14 | 14 | **0** | 0 | 0 | 0 | 0006's invariant, now asserted. The judgment 0003 left to be confirmed resolved **against** the tenant-led composites: an FK existence check carries no tenant predicate, so `(tenant_id, col)` cannot serve it — measured, 47 buffers/0.193 ms as a seq scan versus 6 buffers/0.017 ms index-only. Both shapes are kept where both query shapes exist, which is not the duplicate case 5.6 is about |
+| redundant index pairs (identical + prefix) | 8 | 3 | 3 | **0** | 0 | 0 | 0 | 4 pairs became single indexes when 0003 replaced the global natural key with a tenant-scoped unique; `0004` removed `idx_on_hand_available`/`idx_on_hand_low_stock`. The remaining 3 are pre-existing `idx_comm_*`/`idx_comms_*` pairs in `communications` (correction C1). 0006 found **3 more of the same defect that the review's measure could not see**: indexes whose column list is a strict leading prefix of another index on the same table (`audit_summary`, `locations`, `inventory_reservations`) — so the honest count of 5.6 is 6, not 3 |
+| integer key columns | 19 | 19 | **0** | 0 | 0 | 0 | 0 | 5.1/5.3: four serial PKs and fifteen referencing columns, widened together |
+| key columns narrower than their ceiling | 4 | 4 | **0** | 0 | 0 | 0 | 0 | bigint keys fed by an integer sequence — see B14 |
+| domain columns with no published answer | 30 | 30 | 30 | 30 | **0** | 0 | 0 | 5.9's count, restated as a question the database can answer. 26 are constrained, 4 are free text with a recorded reason |
+| tables | 18 | 19 | 19 | 19 | 21 | 21 | 21 | the two master-data tables, `units_of_measure` and `costing_methods` |
+| tables with row security forced | 2 | 2 | 2 | 2 | 2 | 2 | **18** | 5.7's `rls_forced = 0`. Scope is "has a `tenant_id` column", read from the catalog, so a new tenant-coded table joins automatically and B7 fails on it if it does not. The 4 tables without one are declared global in B19 |
+| policies in `public` | 3 | 3 | 3 | 3 | 3 | 3 | **36** | 18 × `tenant_isolation` (FOR ALL, qual + WITH CHECK) + 18 × `audit_read_all` (FOR SELECT, `USING (true)`, the read roles' door). 5 dropped first: 3 keyed off `app.current_agent`, 2 of 0002's stopgaps |
+| views | 14 | 14 | 14 | 14 | 14 | 14 | **15** | `vw_rls_status`. All 15 now carry `security_invoker=true` and every one over a tenant table exposes `tenant_id`, which is what closes 0003's deferral NOTICE |
+| functions executable by every role | — | — | — | — | 13 | 13 | **0** | 0008's census, swept. Three stay open by declaration — `afpc_current_tenant`, `afpc_policy_tenant`, `afpc_uuid_v7` — because they are called from column defaults and policy quals during an ordinary SELECT |
+| CASCADE edges | 6 | 6 | 6 | 6 | 6 | **1** | 1 | 5.10's count. Five flipped to RESTRICT (four inventory, one audit); `locations -> warehouses` retained — bin rows with no stock, no open reservations and no ledger reference are structure, and deleting them with the warehouse is composition, not destruction. B3 checks both sides: no CASCADE on a table that holds facts, and no CASCADE anywhere else beyond that one named edge |
 
 Also deferred from 0003, deliberately:
 
-- **Views.** All 12 `vw_*` views use explicit column lists, so none picked up
-  `tenant_id`. 0003 reports which ones and leaves them: a view owned by `postgres`
-  bypasses RLS anyway, so the fix belongs with `security_invoker` in 0009, not here.
-  0005 dropped and recreated eight of them (they blocked the retype) and proved the
-  recreation was faithful column-for-column; the `tenant_id` gap is still 0009's.
+- **Views — closed by 0009.** All 12 `vw_*` views used explicit column lists, so none
+  picked up `tenant_id`. 0003 reported which ones and left them, correctly: exposing the
+  column was pointless while a `postgres`-owned view bypassed RLS anyway. 0009 did both
+  halves at once, and the second half is what made the first one necessary - the read
+  roles now see every tenant in one result set, so a view without `tenant_id` is not
+  merely incomplete, it is unreadable, and an aggregate view that does not group by it
+  adds two tenants' bots together under one name. (0005's faithful-recreation machinery
+  is the precedent for the column-for-column proof; 0009 asserts the same property from
+  the catalog by comparing against the pre-rewrite column lists.)
 - **Corrected by 0006.** This note claimed `idx_movements_date (performed_at)` was
   prefix-redundant with 0003's `idx_movements_tenant_date (tenant_id, performed_at)`. It is
   not: prefix-redundancy requires the *same leading columns*, and these two differ in the
   first one. `(performed_at)` is the only index that can serve a cross-tenant range over the
   ledger, so it stays. The claim was wrong because it was reasoned from the index names
   rather than read from `indkey` — which is what `vw_index_redundancy` now does instead.
-- **Function EXECUTE is PUBLIC by default.** Thirteen business functions are callable by
-  every role, including `afpc_auditor`, because 0001 created them before 0002's grants and
-  PostgreSQL grants EXECUTE to PUBLIC at creation. The writes inside fail on table
-  privileges, so nothing leaks today, but least-privilege says the audit account should not
-  be able to *try*. `0009` owns the sweep: REVOKE from PUBLIC, GRANT to `afpc_app`, and
-  `ALTER DEFAULT PRIVILEGES ... REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC` so new functions
-  start closed. 0008 already did this for its own two functions and prints the remaining
-  count.
-- **Row-level isolation.** `tenant_id` exists and is enforced structurally, but nothing
-  filters by it yet. `db/tests/5_8_tenancy.sql` block 8d demonstrates both the read and
-  the write hole, and is the KNOWN-OPEN row that 0009 turns green.
+- **Function EXECUTE is PUBLIC by default — swept by 0009, and the "so new functions start
+  closed" half of the plan turned out not to work.** Thirteen business functions were callable
+  by every role, including `afpc_auditor`, because 0001 created them before 0002's grants and
+  PostgreSQL grants EXECUTE to PUBLIC at creation. 0009 revokes them and re-grants to
+  `afpc_app`, but `ALTER DEFAULT PRIVILEGES ... REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC` is a
+  no-op for functions - see the findings below - so what keeps it closed is B22, not a record
+  in `pg_default_acl`.
+- **Row-level isolation — done by 0009, with one change of seat.** `tenant_id` was enforced
+  structurally but nothing filtered by it. Block 8d of `db/tests/5_8_tenancy.sql` demonstrates
+  both the read and the write hole and is green now; it also had to start running as
+  `afpc_app`, because it was written in the owner's seat, where a superuser bypass makes any
+  policy invisible - the reason 5.7 survived as a catalog reading for seven migrations.
+
+### Obligations 0009 creates for the migrations after it
+
+- **`security_invoker` has to be re-applied by anyone who recreates a view.**
+  `CREATE OR REPLACE VIEW` discards the view's reloptions, so the flag does not survive a
+  definition change - 0009 found this by having its own view probe fail. `0010` rewrites
+  views for `updated_at`, and `0012` may for embeddings: both must re-apply it or B21
+  fails, which is the intended arrangement. Setting it at the *end* of a migration that
+  touches views is the pattern.
+- **New functions do not start closed, and cannot be made to.** The default-privileges
+  mechanism for that is a no-op for functions (measured; see the 0009 findings), so every
+  migration from `0010` on that creates a function must revoke `EXECUTE` from `PUBLIC` and
+  grant it to `afpc_app` for its own functions, the way 0008 did for its two. B22 is the
+  backstop and will point at the function by name.
+- **A new tenant-coded table needs a policy, and B7 will say so.** The scope is read from
+  the catalog, so the table appears as an offender the moment it has a `tenant_id` column
+  and no `tenant_isolation` policy. A new table *without* one is not caught by that rule;
+  it is caught by B19, which requires it to be declared global by name.
+- **Row security binds a role, so it is inert until the agents use the role.** Every
+  current Python entrypoint connects as `POSTGRES_USER`, which defaults to `postgres`,
+  and a superuser bypasses row security whatever the policies say. `0009` is what makes
+  the Phase 5 `db.py` (connect as `afpc_app`, `SET app.tenant_id` per connection) an
+  enforcement change rather than a cosmetic one - and until it lands, the honest statement
+  of 5.7's status is "the schema is protected; the applications are not yet". The role
+  `agent_first_erp_crm` in `blueprint/bot.py`'s default config cannot even log in
+  (`NOLOGIN`), so the first agent written against this database will fail into the right
+  answer.
+- **Tenant provisioning is an owner operation.** Under 0009's policies an `afpc_app`
+  connection cannot insert a row into `tenants`: the key default generates a uuid that
+  cannot equal the caller's tenant, and the `WITH CHECK` requires that it does. Anything
+  that creates a tenant - including `0013`'s audit work and the seed path - runs as the
+  owner or as an admin role that does not exist yet.
+
+## Found while building 0009
+
+- **A policy's predicate is a plan, not a sentence.** 5.7 reads as a question about
+  `pg_class` and `pg_policies`, and the obvious fix is a `USING (tenant_id =
+  afpc_current_tenant())` clause reusing the helper 0003 already wrote. Measured on 600k rows
+  in two tenants, that clause costs **479 ms** and does a sequential scan; the same clause
+  against a `STABLE` resolver costs **53 ms** and does an index-only scan. The reason is the
+  volatility marker: a VOLATILE function in a qual is re-evaluated for every row scanned and
+  *cannot* become an index condition. So 0006's closing promise - the `(tenant_id, last_name,
+  first_name)` pair becomes reachable "as soon as a tenant predicate is present, which 0009
+  guarantees" - was a promise about a function's declaration, made four migrations early.
+  `afpc_policy_tenant()` is that resolver, delegating to `afpc_current_tenant()` so the
+  fallback chain has one implementation while the *planner contract* differs: VOLATILE is right
+  for a column default (0003's reason) and wrong for a qual. B20 asserts the qual verbatim
+  rather than listing things to avoid, so a third wrong way cannot hide in an exemption list.
+- **A postgres-owned view is a doorway in the wall, and the fix has an order.** With RLS
+  enabled, forced, and the isolation policy installed, `SELECT count(*) FROM warehouses`
+  returned 1 row as `afpc_app` and `SELECT count(*) FROM <view over warehouses>` returned 2.
+  Setting `security_invoker` fixes it - but `CREATE OR REPLACE VIEW` *discards the view's
+  reloptions*, so the first draft of this migration, which set the flag and then rewrote the
+  twelve definitions, quietly un-set it again; the rehearsal's view probe returned both
+  tenants' rows. Every migration that recreates a view now inherits that obligation, and B21
+  checks it from the catalog. (The version default is not a safety net: measured here, a view
+  created by a superuser keeps owner semantics with empty `reloptions`.)
+- **Two policies are one policy too few, and the reason is that `afpc_current_tenant()`
+  raises.** A single tenant-scoped policy would make the view-only audit account unable to
+  read the database it exists to read, because the resolver fails loudly when neither tenant
+  GUC is set - the choice 0003 documented. So the read roles get their own `USING (true)`
+  SELECT policy. That permissive policies are OR'd, and that constant folding then removes the
+  raising branch from the plan entirely, is a property of the *plan*, not of the intent, so
+  the audit probe empties both GUCs and reads cross-tenant rows to prove it. Related and
+  deliberately unresolved: a raising predicate in a qual answers differently on an empty table
+  (0 rows, no error) than on a populated one (error), because a scan that never reaches a row
+  never calls the function. Both outcomes are safe; neither is a lie. It is kept because the
+  alternative - filtering quietly to nothing - is how a misconfigured deployment hides.
+- **`ALTER DEFAULT PRIVILEGES` cannot revoke what a default-privileges record never
+  granted.** 0008 recorded this migration's duty as "the `ALTER DEFAULT PRIVILEGES` that stops
+  it recurring". For tables that sentence works, because a stored record *replaces* the
+  object's initial ACL. For functions it does not: the initial ACL for a function already contains
+  `EXECUTE` to PUBLIC, and a default-privileges record only adds to it, so the revoke record is
+  stored, reports success, and changes nothing - measured by creating a function after
+  installing it and finding it executable by `afpc_auditor` still. There is no way to make
+  future functions start closed from here. B22 is therefore not a belt-and-braces duplicate of
+  the sweep: it is the only mechanism that works, and it fails loudly where the ALTER would
+  have succeeded silently.
+- **The sequence gap was why 5.7 had survived seven migrations.** `SET ROLE afpc_app; INSERT
+  INTO entities` fails with `permission denied for sequence entities_id_seq` - six of the
+  baseline's serial keys predate 0002's records and `ALTER DEFAULT PRIVILEGES` is not
+  retroactive. The consequence is not that agents could not write customers (they connect as
+  postgres today, so they could write anything). The consequence is that *no behavioural test
+  of row security on the CRM tables could run*, which is how a decorative control stays
+  decorative. Fixing the grant is one statement; finding it required trying to be the role.
+- **`SET LOCAL ROLE` inside a plpgsql subtransaction does not revert when the block ends.** It
+  reverts when the block *aborts*. A probe that succeeds therefore runs the rest of the
+  migration as the role it was testing, which is how 0008's note about `RETURN` in a handler
+  returns in a new costume: every probe here resets the role explicitly, on both paths.
+- **The control binds a role, not a schema, so the harness had to change seats to see it at
+  all.** `FORCE` answers 5.7.1 for a table *owner*; a superuser bypasses row security
+  regardless, and the harness connects as postgres. Every migration up to this one could
+  verify 5.7 by reading three catalog columns, and no test could have told the difference
+  between a policy and a wall. That is why B7's predicate includes `polwithcheck` (a policy
+  that filters reads but not writes is indistinguishable from a complete one in `pg_class`),
+  why `5_8_tenancy`'s block 8d now observes through `SET LOCAL ROLE`, and why the proof this
+  migration is real came from outside: as `afpc_app`, over TLS, from a foreign network
+  namespace, tenant A's warehouse code was visible as A (1 row), invisible as B (0 rows), and
+  a write carrying A's id while in B's context was refused by the policy.
 
 ## Found while building 0008
 
@@ -112,6 +220,23 @@ Also deferred from 0003, deliberately:
   compare unequal: `'999777' = 999777` is a type error, not a coercion). None of those are
   findings; they are 0008 writing against the database that exists after 0007, which is the
   point of a sequence that replays.
+
+- **Two more places where a reasonable query about the catalog asks the wrong question.**
+  The view -> table dependency edges are recorded against the *rewrite rule's* oid, so
+  `pg_depend WHERE objid = 'vw_customers'::regclass` returns two rows about the view and none
+  about what it reads; the first draft of 0009's classifier used that and concluded that no view
+  covered a tenant table, which would have exempted all fourteen from the rewrite. And
+  `information_schema.columns WHERE column_name='tenant_id'` counts *columns*, so the census
+  line labelled "tenant-coded" jumped from 18 to 30 the moment the views exposed the column - a
+  number that answers a different question than its label asks is how a scoreboard loses its
+  readers, so the census now filters on `relkind='r'`.
+- **Overloads defeat a test before they defeat a policy.** `add_customer`'s two overloads share
+  their first ten parameter *positions and names*, so a call with fewer is ambiguous (42725) -
+  including with named arguments, which is the mitigation the 4.4 note suggested. Block F needed
+  eleven typed arguments to reach the write path it is meant to exercise, and plpgsql hands a
+  variable to the parser as `unknown`, so it needed `::text` on those too. Nothing about that
+  is tenancy; it is the cost of writing a behaviour test in a schema with an open 4.x finding,
+  and 0016 is where the workaround goes away.
 
 ## Found while building 0007
 

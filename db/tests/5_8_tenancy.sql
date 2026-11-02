@@ -123,9 +123,14 @@ $$;
 ROLLBACK;
 
 -- 8d. Tenancy is real at the row level, not only in the catalog: tenant 1 must not be
--- able to see or overwrite tenant 2's rows through the plain table. This is the
--- assertion that stays red until 0009 adds policies; today it should report that rows
--- are visible across tenants, which is precisely what 0009 exists to fix.
+-- able to see or overwrite tenant 2's rows through the plain table. This is the assertion
+-- that stays red until 0009 adds policies - and, unlike every other block in this file, it
+-- has to change seats to say anything true. The harness connects as postgres; postgres is a
+-- superuser; a superuser bypasses row security however it is configured, FORCE included. So
+-- the observation below happens as afpc_app, because a version of this test that stayed in
+-- the owner's seat would have reported 5.8 as closed by 0009 without ever being affected by
+-- it. Provisioning stays in the owner's seat, which is what 0009's COMMENT ON TABLE tenants
+-- says it is for.
 BEGIN;
 DO $$
 DECLARE
@@ -133,24 +138,36 @@ DECLARE
     v_t2   uuid;
     v_see  int;
     v_own  int;
+    v_msg  text;
 BEGIN
     INSERT INTO tenants (slug, name) VALUES ('rls-tenant', 'RLS Tenant')
         RETURNING tenant_id INTO v_t2;
+    INSERT INTO warehouses (tenant_id, warehouse_code, name) VALUES (v_t1, 'AFPC-RLS-1', 't1');
+    INSERT INTO warehouses (tenant_id, warehouse_code, name) VALUES (v_t2, 'AFPC-RLS-1', 't2');
 
-    PERFORM set_config('app.tenant_id', v_t1::text, false);
-    INSERT INTO warehouses (warehouse_code, name) VALUES ('AFPC-RLS-1', 't1');
-    PERFORM set_config('app.tenant_id', v_t2::text, false);
-    INSERT INTO warehouses (warehouse_code, name) VALUES ('AFPC-RLS-1', 't2');
+    BEGIN
+        EXECUTE 'SET LOCAL ROLE afpc_app';
+        PERFORM set_config('app.tenant_id', v_t1::text, true);
+        SELECT count(*) INTO v_see FROM warehouses WHERE warehouse_code = 'AFPC-RLS-1';
+        -- An UPDATE that touches another tenant's row is the damaging version of the same
+        -- hole: reads leak, writes corrupt.
+        UPDATE warehouses SET name = 'hijacked'
+            WHERE warehouse_code = 'AFPC-RLS-1' AND tenant_id = v_t2;
+        GET DIAGNOSTICS v_own = ROW_COUNT;
+    EXCEPTION WHEN insufficient_privilege THEN
+        -- Post-0009 the target row is not even visible to the policy, so the UPDATE matches
+        -- nothing; a refusal here would be the WITH CHECK answering, which is the same fact
+        -- stated more strongly. Either way the row must be checked, not the counter.
+        v_see := -1;
+    END;
+    EXECUTE 'RESET ROLE';
 
-    PERFORM set_config('app.tenant_id', v_t1::text, false);
-    SELECT count(*) INTO v_see FROM warehouses WHERE warehouse_code = 'AFPC-RLS-1';
-    -- An UPDATE that touches another tenant's row is the damaging version of the same
-    -- hole: reads leak, writes corrupt.
-    UPDATE warehouses SET name = 'hijacked'
-        WHERE warehouse_code = 'AFPC-RLS-1' AND tenant_id = v_t2;
-    GET DIAGNOSTICS v_own = ROW_COUNT;
-
-    IF v_see > 1 OR v_own > 0 THEN
+    -- The fact, independent of how it was refused: tenant 2's row still says t2.
+    IF v_see = -1 THEN
+        SELECT name INTO v_msg FROM warehouses WHERE tenant_id = v_t2 AND warehouse_code='AFPC-RLS-1';
+        RAISE NOTICE 'VERDICT OK the write was refused outright and the foreign row reads %',
+            coalesce(v_msg, '(absent)');
+    ELSIF v_see > 1 OR v_own > 0 THEN
         RAISE NOTICE 'VERDICT ERR 00000 | tenant % sees % rows and changed % outside its '
                      'tenant - no row-level isolation yet (0009)', v_t1, v_see, v_own;
     ELSE

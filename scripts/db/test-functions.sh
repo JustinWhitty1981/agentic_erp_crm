@@ -161,6 +161,16 @@ CASES=(
 "5_10_delete_safety|a session delete destroyed|5.10|0008_delete_safety"
 "5_10_delete_safety|was not refused by its own constraint|5.10|0008_delete_safety"
 "5_10_delete_safety|no explicit close-out path exists|5.10|0008_delete_safety"
+# 5.7's four rows are the two halves of 5.7.3 (the GUC nothing sets, failing open on writes and
+# closed on reads), plus the two properties that make the control usable rather than merely
+# present: the tenant predicate must reach an index, and the agent role must be able to write a
+# row at all. Blocks C and D of the same file have no row: an audit read and a view/table
+# comparison both succeed on the pre-0009 database too, and a phrase that cannot reproduce
+# would read CLOSED through a branch that was never at risk.
+"5_7_row_level_security|an agent cannot record a movement|5.7|0009_rls_enforcement"
+"5_7_row_level_security|an agent cannot read its own reservations|5.7|0009_rls_enforcement"
+"5_7_row_level_security|the tenant predicate is not an index condition|5.7|0009_rls_enforcement"
+"5_7_row_level_security|the app role cannot write a CRM row at all|5.7|0009_rls_enforcement"
 )
 
 echo

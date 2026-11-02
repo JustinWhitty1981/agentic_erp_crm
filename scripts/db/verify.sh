@@ -224,11 +224,91 @@ check "B17 5.6  every FK leads an index" "0006_index_hygiene" \
                         AND i.indkey[0]=(c.conkey)[1])" \
     "single-column FKs whose column leads no index (parent deletes scan the child)"
 
+# 5.7 asked "is RLS enforced" and got rls_on=2, rls_forced=0 out of 18. The original version of
+# this check demanded ENABLE+FORCE on *every* table in public, which is the wrong scope: it
+# sweeps in units_of_measure, costing_methods and _schema_graph, tables with no tenant_id
+# column for a policy to compare against, and would have been satisfied only by meaningless
+# USING (true) policies - 5.7's actual complaint in a new place. So the scope is the tables
+# that HAVE tenancy, read from the catalog rather than a list, and the tables without it are
+# accounted for by B19 instead of being silently excluded. A policy that filters reads but not
+# writes looks identical to a complete one in pg_class, so the WITH CHECK is part of the
+# predicate: that distinction is precisely what made 5.7 decorative.
 check "B7 5.7  RLS forced" "0009_rls_enforcement" \
     "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-      WHERE n.nspname='public' AND c.relkind='r' AND c.relname<>'schema_migrations'
-        AND (c.relrowsecurity = false OR c.relforcerowsecurity = false)" \
-    "business tables without ENABLE+FORCE ROW LEVEL SECURITY"
+      JOIN pg_attribute a ON a.attrelid=c.oid AND a.attname='tenant_id'
+                          AND a.attnum>0 AND NOT a.attisdropped
+      WHERE n.nspname='public' AND c.relkind='r'
+        AND (NOT c.relrowsecurity OR NOT c.relforcerowsecurity
+             OR NOT EXISTS (SELECT 1 FROM pg_policy po
+                             WHERE po.polrelid=c.oid AND po.polname='tenant_isolation'
+                               AND po.polqual IS NOT NULL AND po.polwithcheck IS NOT NULL))" \
+    "tenant-coded tables without ENABLE+FORCE and a read+write isolation policy"
+
+# The other half of the scope decision: a table with no tenant_id is exempt, but exempt is a
+# declaration, not an absence. Same shape as 0007's rule for unconstrained columns - the
+# scoreboard counts considered decisions, so a new global table has to be considered here.
+check "B19 5.7 global tables declared" "0009_rls_enforcement" \
+    "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+      WHERE n.nspname='public' AND c.relkind='r'
+        AND NOT EXISTS (SELECT 1 FROM pg_attribute a
+                         WHERE a.attrelid=c.oid AND a.attname='tenant_id'
+                           AND a.attnum>0 AND NOT a.attisdropped)
+        AND c.relname NOT IN ('schema_migrations','_schema_graph',
+                              'units_of_measure','costing_methods')" \
+    "tables outside the tenant model that nothing has declared global"
+
+# 5.7's third failure was a policy keyed off a setting no code sets. The general form of that
+# mistake is a policy that resolves the tenant the wrong way, and there are two wrong ways in
+# this schema's reach: a GUC read directly, and 0003's VOLATILE afpc_current_tenant(), whose
+# per-row cost makes the predicate unusable as an index condition. Both are caught by requiring
+# the qual verbatim - a shape check rather than a list of things to avoid, so a third wrong way
+# cannot be missing from an exemption list.
+check "B20 5.7 policy quals resolve the tenant stably" "0009_rls_enforcement" \
+    "SELECT count(*) FROM pg_policy po JOIN pg_class c ON c.oid=po.polrelid
+      JOIN pg_namespace n ON n.oid=c.relnamespace
+      WHERE n.nspname='public' AND po.polname='tenant_isolation'
+        AND (pg_get_expr(po.polqual, po.polrelid)
+                 IS DISTINCT FROM '(tenant_id = afpc_policy_tenant())'
+             OR pg_get_expr(po.polwithcheck, po.polrelid)
+                 IS DISTINCT FROM '(tenant_id = afpc_policy_tenant())')" \
+    "isolation policies not written as tenant_id = afpc_policy_tenant()"
+
+# Views are where 0009 could have stopped at the easy half: a postgres-owned view evaluates
+# its base tables as its owner, which bypasses row security for any query that goes through it.
+# Measured during rehearsal - the first draft set security_invoker before restating the view
+# definitions, CREATE OR REPLACE VIEW dropped the reloption, and the filtered table returned 1
+# row while the view over it returned 2.
+check "B21 5.7 no view runs as its owner" "0009_rls_enforcement" \
+    "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+      WHERE n.nspname='public' AND c.relkind='v'
+        AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid=c.oid AND d.deptype='e')
+        AND coalesce(array_to_string(c.reloptions, ','), '') NOT LIKE '%security_invoker=true%'" \
+    "views that would skip the invoker's row security"
+
+# 0008 measured thirteen functions born with EXECUTE to PUBLIC and left the sweep here.
+# ALTER DEFAULT PRIVILEGES cannot close it forward - a default-privileges record only ADDs to
+# the system default ACL, which already grants function EXECUTE to PUBLIC - so this is the
+# mechanism that keeps it closed instead. Exempt by necessity, not oversight: the three
+# context helpers are called from column defaults and policy quals, so a role that merely
+# SELECTs would otherwise fail on privileges, and a uuid is not a row.
+check "B22 5.7 functions closed to PUBLIC" "0009_rls_enforcement" \
+    "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+      WHERE n.nspname='public' AND p.prokind='f'
+        AND p.proname NOT IN ('afpc_current_tenant','afpc_policy_tenant','afpc_uuid_v7')
+        AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid=p.oid AND d.deptype='e')
+        AND (p.proacl IS NULL OR EXISTS (SELECT 1 FROM aclexplode(p.proacl) x
+                                          WHERE x.grantee=0 AND x.privilege_type='EXECUTE'))" \
+    "non-extension functions still executable by every role in the cluster"
+
+# The grant 0002 could not make retroactive: sequences created before its ALTER DEFAULT
+# PRIVILEGES records kept the owner-only ACL, so afpc_app could not insert a customer at all.
+# It reads as a tenancy bug (the write-path isolation test cannot run without it), which is
+# where 0009 found it.
+check "B23 5.8 app role can use the keys" "0009_rls_enforcement" \
+    "SELECT count(*) FROM pg_sequences s WHERE s.schemaname='public'
+       AND NOT has_sequence_privilege('afpc_app',
+             format('%I.%I', s.schemaname, s.sequencename)::regclass, 'USAGE,SELECT')" \
+    "sequences afpc_app cannot draw from"
 
 check "B8 5.2  thread refs bigint+FK" "0005_key_types" \
     "SELECT count(*) FROM information_schema.columns
@@ -354,7 +434,14 @@ scalar "SELECT format('%s enums / %s CASCADE / %s RLS-forced / %s tenant-coded /
     (SELECT count(*) FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace WHERE n.nspname='public' AND t.typtype='e'),
     (SELECT count(*) FROM pg_constraint WHERE contype='f' AND confdeltype='c'),
     (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relrowsecurity AND c.relforcerowsecurity),
-    (SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND column_name='tenant_id'),
+    (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+      JOIN pg_attribute a ON a.attrelid=c.oid AND a.attname='tenant_id' AND a.attnum>0
+       WHERE n.nspname='public' AND c.relkind='r'),
+                       -- ^ relkind, not information_schema.columns: the old form counted
+                       -- *columns* named tenant_id, so 0009 exposing the column through the
+                       -- twelve CRM views moved this number from 18 to 30 without any table
+                       -- changing. A census that answers a different question than its label
+                       -- asks is how a scoreboard loses its readers.
     ($REDUNDANT),
     (SELECT count(*) FROM pg_constraint c
       WHERE c.contype='f' AND NOT EXISTS (SELECT 1 FROM pg_index i
