@@ -419,3 +419,27 @@ WHERE comm.started_at >= NOW() - INTERVAL '30 days';
 ---
 
 *Generated for Agent First ERP CRM - Database views reference*
+
+### vw_index_redundancy
+Indexes whose key list is identical to, or a strict leading prefix of, another index on the
+same table - write amplification with no read benefit (DATABASE_REVIEW.md 5.6). Built by
+`db/migrations/0006_index_hygiene.sql`; both forms of the finding are in one place so the
+harness, the scoreboard and an auditor ask one definition of "redundant".
+
+```sql
+SELECT * FROM vw_index_redundancy;
+```
+
+| Column | Meaning |
+|---|---|
+| table_name | the table carrying the redundant index |
+| redundant_index | the index that can go |
+| redundant_keys | its columns, in order |
+| covered_by | the surviving index that already answers every query it could |
+| redundancy | `identical` or `prefix` |
+
+Primary keys, unique indexes, partial indexes and expression keys are never reported as
+redundant. The last two exclusions are load-bearing: an index on
+`(tenant_id, item_id, warehouse_id)` looks like a prefix of 0004's identity index but is not
+interchangeable with it, because the identity index's `COALESCE` positions are what tell a
+no-bin stock row from a real one.

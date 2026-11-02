@@ -185,19 +185,37 @@ check "B4 4.2  on-hand row identity" "0004_on_hand_identity" \
      ) THEN 0 ELSE 1 END" \
     "inventory_on_hand has no unique identity including tenant_id"
 
-check "B5 5.6  duplicate indexes" "0006_index_hygiene" \
-    "SELECT count(*) FROM (
-       SELECT indrelid, indkey, count(*) FROM pg_index
-        WHERE indrelid IN (SELECT oid FROM pg_class WHERE relnamespace=(SELECT oid FROM pg_namespace WHERE nspname='public'))
-        GROUP BY indrelid, indkey HAVING count(*) > 1) d" \
-    "identical index column sets on the same table"
+check "B5 5.6  redundant indexes gone" "0006_index_hygiene" \
+    "SELECT count(*) FROM vw_index_redundancy" \
+    "index pairs that are identical or a strict leading prefix (the view is the definition)"
 
-check "B6 5.5  entities/contacts indexed" "0006_index_hygiene" \
-    "SELECT (6 - (SELECT count(*) FROM pg_index i JOIN pg_class t ON t.oid=i.indrelid
-                   JOIN pg_namespace n ON n.oid=t.relnamespace
-                  WHERE n.nspname='public' AND t.relname IN ('entities','contacts') AND i.indnatts>=1
-                    AND NOT i.indisprimary))::float/1" \
-    "entities/contacts carry only their primary key"
+check "B6 5.5  CRM predicates are indexable" "0006_index_hygiene" \
+    "SELECT (SELECT count(*) FROM (VALUES ('entities','name','gin_trgm_ops'),
+                                   ('contacts','email','gin_trgm_ops'),
+                                   ('entities','tax_id',''), ('contacts','phone','')) q(tbl,col,opcls)
+       WHERE NOT EXISTS (SELECT 1 FROM pg_index i
+                           JOIN pg_class c ON c.oid=i.indrelid
+                           JOIN pg_opclass oc ON oc.oid=i.indclass[0]
+                          WHERE c.relname=q.tbl
+                            AND i.indkey[0]=(SELECT attnum FROM pg_attribute
+                                             WHERE attrelid=c.oid AND attname=q.col)
+                            AND (q.opcls='' OR oc.opcname=q.opcls)))
+      + (SELECT count(*) FROM pg_class c WHERE c.relname='addresses' AND NOT EXISTS (
+           SELECT 1 FROM pg_index i WHERE i.indrelid=c.oid AND i.indkey[0]=(
+             SELECT attnum FROM pg_attribute WHERE attrelid=c.oid AND attname='entity_id')
+             AND i.indkey[1]=(SELECT attnum FROM pg_attribute
+                               WHERE attrelid=c.oid AND attname='is_primary')))" \
+    "the four columns 5.5 names, plus the correlated address subquery's sort key"
+
+check "B17 5.6  every FK leads an index" "0006_index_hygiene" \
+    "SELECT count(*) FROM pg_constraint c
+      WHERE c.contype='f' AND c.connamespace='public'::regnamespace
+        AND cardinality(c.conkey)=1
+        AND (SELECT attname FROM pg_attribute WHERE attrelid=c.conrelid AND attnum=(c.conkey)[1])
+            <> 'tenant_id'
+        AND NOT EXISTS (SELECT 1 FROM pg_index i WHERE i.indrelid=c.conrelid
+                        AND i.indkey[0]=(c.conkey)[1])" \
+    "single-column FKs whose column leads no index (parent deletes scan the child)"
 
 check "B7 5.7  RLS forced" "0009_rls_enforcement" \
     "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
@@ -306,19 +324,28 @@ SELECT format('%s tables / %s views / %s functions / %s FKs / %s triggers',
 # correctness one: measured on this server, Postgres' FK mechanism uses any index that
 # contains the column as a key column, in any position. Keep the two numbers distinct -
 # conflating them caused 0004 to drop an index it should have kept.
-scalar "SELECT format('%s enums / %s CASCADE / %s RLS-forced / %s tenant-coded / %s dup index sets / %s FKs unindexed (any position) / %s FKs not leading (planning only)',
+# The redundant-pair count lives in vw_index_redundancy, which 0006 creates, so it is read from
+# there rather than re-derived here - with an explicit "not yet" when the view does not exist,
+# because a 0 here would otherwise look like a clean bill of health for a check that never ran.
+if [ "$(scalar "SELECT to_regclass('public.vw_index_redundancy') IS NOT NULL")" = "t" ]; then
+    REDUNDANT=$(scalar "SELECT count(*)::text FROM vw_index_redundancy")
+else
+    REDUNDANT="'not yet (0006)'"
+fi
+scalar "SELECT format('%s enums / %s CASCADE / %s RLS-forced / %s tenant-coded / %s redundant index pairs / %s FKs unindexed (any position) / %s FKs leading no index',
     (SELECT count(*) FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace WHERE n.nspname='public' AND t.typtype='e'),
     (SELECT count(*) FROM pg_constraint WHERE contype='f' AND confdeltype='c'),
     (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relrowsecurity AND c.relforcerowsecurity),
     (SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND column_name='tenant_id'),
-    (SELECT count(*) FROM (SELECT indrelid, indkey FROM pg_index
-        WHERE indrelid IN (SELECT oid FROM pg_class WHERE relnamespace=(SELECT oid FROM pg_namespace WHERE nspname='public'))
-        GROUP BY indrelid, indkey HAVING count(*)>1) d),
+    ($REDUNDANT),
     (SELECT count(*) FROM pg_constraint c
       WHERE c.contype='f' AND NOT EXISTS (SELECT 1 FROM pg_index i
         WHERE i.indrelid=c.conrelid AND (c.conkey)[1] = ANY(i.indkey))),
     (SELECT count(*) FROM pg_constraint c
-      WHERE c.contype='f' AND NOT EXISTS (SELECT 1 FROM pg_index i
+      WHERE c.contype='f' AND cardinality(c.conkey)=1
+        AND (SELECT attname FROM pg_attribute WHERE attrelid=c.conrelid AND attnum=(c.conkey)[1])
+            <> 'tenant_id'
+        AND NOT EXISTS (SELECT 1 FROM pg_index i
         WHERE i.indrelid=c.conrelid AND i.indkey[0]=(c.conkey)[1])))"
 
 echo

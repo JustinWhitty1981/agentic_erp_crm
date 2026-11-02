@@ -126,6 +126,19 @@ CASES=(
 # assertion would let 0003 go green while an agent could still read a foreign row.
 "5_8_tenancy|no tenant_id column, so a second|5.8|0003_tenant_foundation"
 "5_8_tenancy|no row-level isolation yet|5.8|0009_rls_enforcement"
+# 5.5 and 5.6 are about whether an index is USED, which is a statistics question and cannot be
+# settled by reading pg_indexes - or by running anything on an empty table. These rows bring
+# their own volume, so they reproduce on a pre-0006 database and go quiet on a post-0006 one.
+# The file's fifth assertion - that the planner PREFERS the trigram once the table is large -
+# deliberately has no row here: it cannot be evaluated at today's size, and a row that reads
+# CLOSED because a branch was skipped would be the harness crediting itself for nothing.
+"5_5_6_index_hygiene|no index can answer the entity-name lookup|5.5|0006_index_hygiene"
+"5_5_6_index_hygiene|no index can answer the email duplicate check|5.5|0006_index_hygiene"
+"5_5_6_index_hygiene|still scans the child table|5.6|0006_index_hygiene"
+# Two rows for 5.6's hygiene half: the redundancy answer itself, and whether anything has
+# counted it yet. The second is the one that would otherwise read CLOSED by silence.
+"5_5_6_index_hygiene|no redundancy view exists yet|5.6|0006_index_hygiene"
+"5_5_6_index_hygiene|index pairs are redundant|5.6|0006_index_hygiene"
 )
 
 echo

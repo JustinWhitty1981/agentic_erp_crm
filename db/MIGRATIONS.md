@@ -12,7 +12,7 @@ bearing; changing one without the other turns a green row red.
 | `0003_tenant_foundation` | 5.8 | `tenants` registry; `tenant_id uuid NOT NULL` on all 17 business tables with FK + tenant-led index; `afpc_current_tenant()` resolves the column default from `app.tenant_id` / `app.default_tenant_id`; all 6 natural keys re-scoped to be unique per tenant |
 | `0004_on_hand_identity` | 4.2 | unique expression identity `(tenant_id, item_id, warehouse_id, COALESCE(location_id,nil), COALESCE(lot_number,''))`; the function's `ON CONFLICT` arbiter is extended to name `tenant_id` in the same migration, because inference matches an index's key columns **as a set** and a 4-column target cannot reach a 5-column unique; deterministic merge of pre-existing duplicates, refusing to guess when they differ in real location or lot |
 | `0005_key_types` | 5.1–5.4 | integer key columns → bigint (19 widened, derived from `pg_constraint` **plus** the name rule, because `thread_root_id` has no constraint to derive it from — the finding's own subject would otherwise be skipped), **and their 6 owned sequences raised to bigint with it**, since `ALTER COLUMN TYPE` leaves the sequence's ceiling alone; `thread_root_id` gets the FK it never had; `afpc_uuid_v7()` replaces `gen_random_uuid()` on all 13 UUID primary keys; the four functions that returned `entity_id integer` are widened, because widening the table and not the API only moves the ceiling |
-| `0006_index_hygiene` | 5.5, 5.6 | delete 8 duplicate sets, index `entities`/`contacts` search paths, index `transaction_id` |
+| `0006_index_hygiene` | 5.5, 5.6 | drop 6 redundant indexes (3 identical pairs + 3 prefix pairs — the prefix form is the same defect, the review only counted identical column lists), give leading coverage to the 14 foreign key columns that had none, and index what the CRM actually queries: trigram GINs for the two `ILIKE '%…%'` paths (a btree cannot answer those at all), `entities.tax_id`/`contacts.phone` for equality, and an `addresses` composite that also removes `vw_customers`' per-row address sort. Creates `vw_index_redundancy` so the question has one definition instead of three. `inventory_movements.transaction_id` is **left alone** — unindexed today, not a foreign key, queried by nothing; 6.1 argues it into a dedup key, which is `0011`'s decision with its access method attached |
 | `0007_domain_constraints` | 5.9 | lookup tables for the 31 unconstrained status/type columns |
 | `0008_delete_safety` | 5.10 | CASCADE to RESTRICT on stock edges, explicit close-out functions |
 | `0009_rls_enforcement` | 5.7 | ENABLE+FORCE on all business tables, tenant policies, drop inert `app.current_agent` ones |
@@ -33,15 +33,15 @@ bearing; changing one without the other turns a green row red.
 `verify.sh` prints these counts every run, so the deltas are visible rather than
 remembered.
 
-| Count | Before 0003 | After 0004 | After 0005 | Why |
-|---|---|---|---|---|
-| FKs | 30 | 47 | 48 | `tenant_id` FKs, RESTRICT, on 17 tables; then `thread_root_id`, which 5.2 found had no constraint at all |
-| tenant-coded tables | 0 | 18 | 18 | the review's "0 rows returned" for 5.8 |
-| FKs with no index anywhere | 12 | 11 | 11 | the corrected measure (see below): a column in no key position of any index. Unchanged by 0005 — `idx_comms_thread_root` already covers the new FK |
-| FK columns leading no index | — | 14 | 14 | planning-only, printed for contrast. **0006 must confirm the judgment on these rather than inherit it**: `warehouse_id` on `inventory_on_hand`/`inventory_reservations` lost first-column coverage when 0003 re-led their indexes with `tenant_id` |
-| duplicate index sets | 8 | 3 | 3 | 4 pairs became single indexes when 0003 replaced the global natural key with a tenant-scoped unique; `0004` removed `idx_on_hand_available`/`idx_on_hand_low_stock`. The remaining 3 are pre-existing `idx_comm_*`/`idx_comms_*` pairs in `communications` (correction C1). **0006 is a 3-item job.** |
-| integer key columns | 19 | 19 | **0** | 5.1/5.3: four serial PKs and fifteen referencing columns, widened together |
-| key columns narrower than their ceiling | 4 | 4 | **0** | bigint columns fed by an integer sequence — see B14 |
+| Count | Before 0003 | After 0004 | After 0005 | After 0006 | Why |
+|---|---|---|---|---|---|
+| FKs | 30 | 47 | 48 | 48 | `tenant_id` FKs, RESTRICT, on 17 tables; then `thread_root_id`, which 5.2 found had no constraint at all |
+| tenant-coded tables | 0 | 18 | 18 | 18 | the review's "0 rows returned" for 5.8 |
+| FKs with no index anywhere | 12 | 11 | 11 | **0** | the corrected measure (see below): a column in no key position of any index. Unchanged by 0005 — `idx_comms_thread_root` already covers the new FK. 0006 indexes all of them |
+| FK columns leading no index | — | 14 | 14 | **0** | 0006's invariant, now asserted. The judgment 0003 left to be confirmed resolved **against** the tenant-led composites: an FK existence check carries no tenant predicate, so `(tenant_id, col)` cannot serve it — measured, 47 buffers/0.193 ms as a seq scan versus 6 buffers/0.017 ms index-only. Both shapes are kept where both query shapes exist, which is not the duplicate case 5.6 is about |
+| redundant index pairs (identical + prefix) | 8 | 3 | 3 | **0** | 4 pairs became single indexes when 0003 replaced the global natural key with a tenant-scoped unique; `0004` removed `idx_on_hand_available`/`idx_on_hand_low_stock`. The remaining 3 are pre-existing `idx_comm_*`/`idx_comms_*` pairs in `communications` (correction C1). 0006 found **3 more of the same defect that the review's measure could not see**: indexes whose column list is a strict leading prefix of another index on the same table (`audit_summary`, `locations`, `inventory_reservations`) — so the honest count of 5.6 is 6, not 3 |
+| integer key columns | 19 | 19 | **0** | 0 | 5.1/5.3: four serial PKs and fifteen referencing columns, widened together |
+| key columns narrower than their ceiling | 4 | 4 | **0** | 0 | bigint columns fed by an integer sequence — see B14 |
 
 Also deferred from 0003, deliberately:
 
@@ -50,13 +50,70 @@ Also deferred from 0003, deliberately:
   bypasses RLS anyway, so the fix belongs with `security_invoker` in 0009, not here.
   0005 dropped and recreated eight of them (they blocked the retype) and proved the
   recreation was faithful column-for-column; the `tenant_id` gap is still 0009's.
-- **`idx_movements_date (performed_at)`** is prefix-redundant with the new
-  `idx_movements_tenant_date` but was not dropped: removing a pre-existing index is
-  0006's remit, and doing it under the cover of a tenancy migration would make the
-  tenancy diff impossible to read.
+- **Corrected by 0006.** This note claimed `idx_movements_date (performed_at)` was
+  prefix-redundant with 0003's `idx_movements_tenant_date (tenant_id, performed_at)`. It is
+  not: prefix-redundancy requires the *same leading columns*, and these two differ in the
+  first one. `(performed_at)` is the only index that can serve a cross-tenant range over the
+  ledger, so it stays. The claim was wrong because it was reasoned from the index names
+  rather than read from `indkey` — which is what `vw_index_redundancy` now does instead.
 - **Row-level isolation.** `tenant_id` exists and is enforced structurally, but nothing
   filters by it yet. `db/tests/5_8_tenancy.sql` block 8d demonstrates both the read and
   the write hole, and is the KNOWN-OPEN row that 0009 turns green.
+
+## Found while building 0006
+
+- **An index that exists is not an index that is used.** 5.5 and 5.6 are both about behaviour,
+  and every way of checking them from `pg_indexes` passes vacuously on an empty table. The
+  first draft of 0006 verified itself with an `EXPLAIN` and reported "still a sequential scan"
+  on a database with zero rows — which is the *correct* plan at zero rows. The split that works:
+  the migration asserts the index is *usable* (forbid the other access paths, require the
+  trigram to appear), and the harness asserts it is *preferred*, against 10,000 rows it inserts
+  itself and rolls back. `ANALYZE` is legal inside a transaction and its statistics roll back
+  with the rows, which is what makes the second form possible.
+- **A btree cannot serve `ILIKE '%fragment%'` at all — not "slowly", not "at low selectivity".**
+  Measured on 5,000 rows: seq scan either way, with a plain btree *and* with a
+  `text_pattern_ops` btree. This is why `pg_trgm` has been installed since 0000 and finally got
+  used. It is also why a btree on `lower(email)` would not have fixed the email check: `ILIKE`
+  is not rewritten into a `lower()` comparison, so only a trigram index is an access path.
+- **Prefix redundancy is the same finding as duplicate columns, and the review missed it.** An
+  index whose key list is a strict leading prefix of another index answers no query the wider
+  one cannot answer. Three such pairs were live. This changes the shape of the fix: the check is
+  now "is one key list a prefix of another", not "are two key lists equal".
+- **`x.indexrelid < y.indexrelid` as a pair-dedup tiebreak is a silent lie.** The first version
+  of the prefix check carried one, to stop reporting each pair twice. It made the check find 3
+  redundant pairs on the development database and **0** on a clone where the same indexes had
+  been recreated in the other order. The condition was already asymmetric through "narrower and
+  a prefix", so the tiebreak was not deduplicating anything — it was selecting which bugs to
+  see. Twins *do* need a tiebreak, and it belongs on the equality branch only.
+- **`indkey` is zero-subscripted, and `indkey::int[]` keeps them.** Third time this has bitten
+  this repository (0004's introspection, 0005's coverage query, 0006's prefix slice). A slice
+  `[1:n]` of it skips the first column, so an array built that way compares the wrong keys and
+  can be *wrong in the direction of looking clean*. Rebuild through
+  `unnest(...) WITH ORDINALITY` + `array_agg` when a slice is needed.
+- **A check duplicated across a migration, a scoreboard and a test file drifts.** Fixing the
+  tiebreak bug meant editing four copies, and one of them would not have needed editing had the
+  bug not already been latent there. `vw_index_redundancy` is now the single definition, per
+  ADR-003, and is readable by `afpc_auditor` through 0002's default privileges — so the auditor
+  and the harness ask the same question of the same object.
+- **An FK existence check carries no tenant predicate.** `DELETE FROM entities WHERE id = X`
+  makes Postgres run `SELECT 1 FROM child WHERE entity_id = X`, across every tenant. 0003's
+  tenant-led composites were correct for scans and useless for this, which is the mechanism
+  behind 0003's "confirm this judgment" note. Answered, in favour of keeping both shapes.
+- **A partial index is a legitimate FK index.** For a nullable FK, `(col) WHERE col IS NOT NULL`
+  is taken by the FK check without being forced — an equality implies `IS NOT NULL` — and on a
+  300,000-row table that is 99% NULL it measured 48 kB against 2,064 kB for the plain form, at
+  the same 0.03 ms. So 0006 derives the shape from `attnotnull` instead of choosing a style:
+  10 partial, 4 plain.
+- **Dropping an index can break an `ON CONFLICT` that never names one** (0004's rule, applied
+  preemptively here). Every drop in 0006 is announced, checked against function bodies by name,
+  checked to be non-unique, and checked to be covered by a surviving index — and the migration
+  aborts if any of those four fail. The coverage check is what caught the subscript bug above.
+- **What 5.5 asked for that this does not do**: index `entities.status`, `entities.entity_type`,
+  or `contacts.first_name`/`last_name`. Two are queried by nothing (and at 60/20/20 and 75/25
+  would be a table scan with extra steps); the pair is already served by 0003's
+  `(tenant_id, last_name, first_name)` as soon as a tenant predicate is present, which 0009
+  guarantees — measured 0.046 ms indexed against 0.392 ms scanning. Adding them would create
+  the near-duplicates this migration exists to remove.
 
 ## Found while building 0005
 

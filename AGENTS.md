@@ -316,6 +316,7 @@ See `.env.example` for required variables.
 | `vw_recent_interactions` | Last 100 agent interactions |
 | `vw_failed_interactions` | Error analysis |
 | `vw_tool_performance` | Tool usage statistics |
+| `vw_index_redundancy` | Indexes that are identical to, or a leading prefix of, another index |
 | `vw_inventory_valuation` | Inventory value by warehouse/category |
 | `vw_item_availability` | Stock levels across warehouses |
 | `vw_item_movement_summary` | 30-day item movement patterns |

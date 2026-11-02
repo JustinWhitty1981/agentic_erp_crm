@@ -162,6 +162,28 @@ recreation is faithful for columns, and grants come back on their own through 00
 is how the baseline ended up with eight views that had no description. 0005 captures the
 definitions and descriptions, and asserts the counts afterwards.
 
+**An index-existence check is not an index-usage check, and `EXPLAIN` on an empty table proves
+nothing.** 0006's first self-verification asserted "the lookup path uses the trigram index" by
+explaining a query, and it failed on a database with zero rows - where a sequential scan is the
+*correct* plan. Worse, forbidding the sequential path made the planner take a full btree scan of
+`idx_entities_tenant_name` used as a filter, which also proves nothing. Two different assertions
+are needed: *usable* (forbid the alternatives, require the access method to appear) and
+*preferred* (needs statistics, so it belongs where rows exist - `db/tests/5_5_6_index_hygiene.sql`
+inserts 10,000 inside a transaction, `ANALYZE`s, and rolls back; ANALYZE is transactional, so its
+`pg_statistic` writes go away with the rows).
+
+**`indkey::int[]` keeps `int2vector`'s zero-based subscripts.** So `(indkey::int[])[1:n]` skips
+the first column and compares the wrong keys. Rebuild it as
+`array_agg(v ORDER BY o) FROM unnest(indkey::int[]) WITH ORDINALITY q(v, o)` before slicing.
+This is the third time this representation has produced a wrong answer here (0004 introspection,
+0005 coverage, 0006 redundancy), and the 0006 instance was found only because a *guard* refused
+to drop an index it believed was uncovered.
+
+**A deduplication tiebreak can hide half the findings.** Pairing index checks with
+`x.indexrelid < y.indexrelid` made the redundancy check report 3 pairs on this database and 0 on
+a clone of it whose indexes had been recreated in the other order. Add a tiebreak only to a
+branch that is otherwise symmetric.
+
 **`uuid_generate_v1mc()` is not time-ordered in the way you would expect.** Its leading
 32 bits are `time_low`, which wraps every 429 seconds; across a boundary, 19 of 20 older
 keys sort *after* a newer one, so the btree walks backward through pages it already passed.
