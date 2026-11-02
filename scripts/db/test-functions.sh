@@ -171,6 +171,19 @@ CASES=(
 "5_7_row_level_security|an agent cannot read its own reservations|5.7|0009_rls_enforcement"
 "5_7_row_level_security|the tenant predicate is not an index condition|5.7|0009_rls_enforcement"
 "5_7_row_level_security|the app role cannot write a CRM row at all|5.7|0009_rls_enforcement"
+# 6.3 gets seven rows because the finding is seven separate claims about what a write does to a
+# value, and only two of them are in the review's table: the stale column and the trigger that
+# covers UPDATE only. The others - a table something rewrites with no column at all, a row whose
+# age cannot be read, one rule installed twice, a column declared two ways, and a control that
+# reaches the owner but not the agent - each needed its own state, and each reproduces on the
+# pre-0010 database and goes quiet on the post one (measured: 7 ERR rows, then 7 OK).
+"6_3_timestamps|updated_at went stale on an ordinary write|6.3|0010_timestamp_triggers"
+"6_3_timestamps|the same column is declared two ways|6.3|0010_timestamp_triggers"
+"6_3_timestamps|an address edit leaves no timestamp anywhere|6.3|0010_timestamp_triggers"
+"6_3_timestamps|the age of a stock row is unknowable|6.3|0010_timestamp_triggers"
+"6_3_timestamps|the same rule is installed twice|6.3|0010_timestamp_triggers"
+"6_3_timestamps|nothing publishes which tables maintain a write timestamp|6.3|0010_timestamp_triggers"
+"6_3_timestamps|own write left updated_at|6.3|0010_timestamp_triggers"
 )
 
 echo

@@ -16,7 +16,7 @@ bearing; changing one without the other turns a green row red.
 | `0007_domain_constraints` | 5.9 | 20 membership CHECKs, 6 columns pointed at two new master-data tables (`units_of_measure`, `costing_methods`), and `vw_domain_vocabulary`, which publishes what every domain column accepts and names the 4 left free on purpose with the reason. Which mechanism a column gets is a rule, not a preference — see the header of the migration |
 | `0008_delete_safety` | 5.10 | flip 5 CASCADE edges to RESTRICT (on-hand and reservations to items/warehouses, `bot_actions` to sessions) plus `inventory_on_hand.location_id`'s SET NULL — measured: a parent delete really did destroy stock and the audit trail whenever nothing had ever MOVED, because the edges that looked safe were protected by accident of the movement FKs. Retains `locations -> warehouses` CASCADE as composition, proved by a probe that attempts it. Adds the close-out path the review prescribes: `decommission_warehouse()` / `retire_item()`, which refuse with the actual stock counts and close out by `is_active` |
 | `0009_rls_enforcement` | 5.7 | ENABLE **and FORCE** row security on all 18 tenant-coded tables with one `tenant_isolation` policy per table (qual *and* `WITH CHECK`, so reads and writes are both filtered) plus a `USING (true)` SELECT policy for the two read roles; drops the 5 policies that keyed off the `app.current_agent` GUC nothing sets. `afpc_policy_tenant()` is a **STABLE** tenant resolver for the quals, because a VOLATILE one is re-evaluated per row and cannot become an index condition (measured 479 ms against 53 ms) — which is what makes 0006's promise about the tenant-led indexes true. Rewrites the 12 CRM views to expose `tenant_id` and sets `security_invoker` on every non-extension view, because a postgres-owned view skips the wall entirely. Also pays two debts: the 6 sequences 0002 could not grant retroactively (without them `afpc_app` cannot write a customer, so RLS was untestable on the CRM tables), and 0008's census of functions born with `EXECUTE` to PUBLIC. Publishes `vw_rls_status` |
-| `0010_timestamp_triggers` | 6.3 | one `BEFORE INSERT OR UPDATE` trigger, `created_at` on the two tables lacking it |
+| `0010_timestamp_triggers` | 6.3 | one trigger function, `afpc_touch_updated_at()`, installed as a `BEFORE INSERT OR UPDATE` row trigger on all 13 tables that have an `updated_at` column - scope read from `pg_attribute` rather than from the review's list, because 0003 had since added `tenants` and the finding had grown by following the plan. On UPDATE it stamps the column **unless the statement set it deliberately**, so an ordinary edit cannot forget to maintain it while a backfill carrying real historical timestamps survives - the property 0004's duplicate merge and 0005's key widening needed and did not have. Retires `update_updated_at_column` and `update_communications_updated_at`, asserted by md5 to be the same body twice. Adds `created_at` to `inventory_on_hand` and `inventory_reservations` - the review says all three ledger tables have "no timestamp-shaped column at all"; measured, each has one, and none of them records when the *row* began, which for stock matters because `last_movement_at` is overwritten by every movement. Adds `updated_at` to `addresses` and `inventory_on_hand`, found by asking `pg_proc` which tables its functions `UPDATE` rather than by reading the review, and makes the six nullable `updated_at` declarations uniform so a watermark predicate cannot skip rows by accident. Publishes `vw_timestamp_status` |
 | `0011_idempotency` | 6.1 | `idempotency_keys` plus version-bumping triggers — ADR-005 implemented |
 | `0012_vector_indexing` | 6.4 | ivfflat to hnsw, index the two unindexed embeddings, vectors to a side table |
 | `0013_audit_log` | 6.2 | row-level immutable audit in `public`, append-only grants |
@@ -33,22 +33,25 @@ bearing; changing one without the other turns a green row red.
 `verify.sh` prints these counts every run, so the deltas are visible rather than
 remembered.
 
-| Count | Before 0003 | After 0004 | After 0005 | After 0006 | After 0007 | After 0008 | After 0009 | Why |
-|---|---|---|---|---|---|---|---|---|
-| FKs | 30 | 47 | 48 | 48 | 54 | 54 | 54 | `tenant_id` FKs, RESTRICT, on 17 tables; then `thread_root_id`, which 5.2 found had no constraint at all; then 6 to the master-data tables, which is why B17 had to be re-run against them |
-| tenant-coded tables | 0 | 18 | 18 | 18 | 18 | 18 | 18 | the review's "0 rows returned" for 5.8 |
-| FKs with no index anywhere | 12 | 11 | 11 | **0** | 0 | 0 | 0 | the corrected measure (see below): a column in no key position of any index. Unchanged by 0005 — `idx_comms_thread_root` already covers the new FK. 0006 indexes all of them |
-| FK columns leading no index | — | 14 | 14 | **0** | 0 | 0 | 0 | 0006's invariant, now asserted. The judgment 0003 left to be confirmed resolved **against** the tenant-led composites: an FK existence check carries no tenant predicate, so `(tenant_id, col)` cannot serve it — measured, 47 buffers/0.193 ms as a seq scan versus 6 buffers/0.017 ms index-only. Both shapes are kept where both query shapes exist, which is not the duplicate case 5.6 is about |
-| redundant index pairs (identical + prefix) | 8 | 3 | 3 | **0** | 0 | 0 | 0 | 4 pairs became single indexes when 0003 replaced the global natural key with a tenant-scoped unique; `0004` removed `idx_on_hand_available`/`idx_on_hand_low_stock`. The remaining 3 are pre-existing `idx_comm_*`/`idx_comms_*` pairs in `communications` (correction C1). 0006 found **3 more of the same defect that the review's measure could not see**: indexes whose column list is a strict leading prefix of another index on the same table (`audit_summary`, `locations`, `inventory_reservations`) — so the honest count of 5.6 is 6, not 3 |
-| integer key columns | 19 | 19 | **0** | 0 | 0 | 0 | 0 | 5.1/5.3: four serial PKs and fifteen referencing columns, widened together |
-| key columns narrower than their ceiling | 4 | 4 | **0** | 0 | 0 | 0 | 0 | bigint keys fed by an integer sequence — see B14 |
-| domain columns with no published answer | 30 | 30 | 30 | 30 | **0** | 0 | 0 | 5.9's count, restated as a question the database can answer. 26 are constrained, 4 are free text with a recorded reason |
-| tables | 18 | 19 | 19 | 19 | 21 | 21 | 21 | the two master-data tables, `units_of_measure` and `costing_methods` |
-| tables with row security forced | 2 | 2 | 2 | 2 | 2 | 2 | **18** | 5.7's `rls_forced = 0`. Scope is "has a `tenant_id` column", read from the catalog, so a new tenant-coded table joins automatically and B7 fails on it if it does not. The 4 tables without one are declared global in B19 |
-| policies in `public` | 3 | 3 | 3 | 3 | 3 | 3 | **36** | 18 × `tenant_isolation` (FOR ALL, qual + WITH CHECK) + 18 × `audit_read_all` (FOR SELECT, `USING (true)`, the read roles' door). 5 dropped first: 3 keyed off `app.current_agent`, 2 of 0002's stopgaps |
-| views | 14 | 14 | 14 | 14 | 14 | 14 | **15** | `vw_rls_status`. All 15 now carry `security_invoker=true` and every one over a tenant table exposes `tenant_id`, which is what closes 0003's deferral NOTICE |
-| functions executable by every role | — | — | — | — | 13 | 13 | **0** | 0008's census, swept. Three stay open by declaration — `afpc_current_tenant`, `afpc_policy_tenant`, `afpc_uuid_v7` — because they are called from column defaults and policy quals during an ordinary SELECT |
-| CASCADE edges | 6 | 6 | 6 | 6 | 6 | **1** | 1 | 5.10's count. Five flipped to RESTRICT (four inventory, one audit); `locations -> warehouses` retained — bin rows with no stock, no open reservations and no ledger reference are structure, and deleting them with the warehouse is composition, not destruction. B3 checks both sides: no CASCADE on a table that holds facts, and no CASCADE anywhere else beyond that one named edge |
+| Count | Before 0003 | After 0004 | After 0005 | After 0006 | After 0007 | After 0008 | After 0009 | Why | After 0010 |
+|---|---|---|---|---|---|---|---|---|---|
+| FKs | 30 | 47 | 48 | 48 | 54 | 54 | 54 | `tenant_id` FKs, RESTRICT, on 17 tables; then `thread_root_id`, which 5.2 found had no constraint at all; then 6 to the master-data tables, which is why B17 had to be re-run against them | 54 |
+| tenant-coded tables | 0 | 18 | 18 | 18 | 18 | 18 | 18 | the review's "0 rows returned" for 5.8 | 18 |
+| FKs with no index anywhere | 12 | 11 | 11 | **0** | 0 | 0 | 0 | the corrected measure (see below): a column in no key position of any index. Unchanged by 0005 — `idx_comms_thread_root` already covers the new FK. 0006 indexes all of them | 0 |
+| FK columns leading no index | — | 14 | 14 | **0** | 0 | 0 | 0 | 0006's invariant, now asserted. The judgment 0003 left to be confirmed resolved **against** the tenant-led composites: an FK existence check carries no tenant predicate, so `(tenant_id, col)` cannot serve it — measured, 47 buffers/0.193 ms as a seq scan versus 6 buffers/0.017 ms index-only. Both shapes are kept where both query shapes exist, which is not the duplicate case 5.6 is about | 0 |
+| redundant index pairs (identical + prefix) | 8 | 3 | 3 | **0** | 0 | 0 | 0 | 4 pairs became single indexes when 0003 replaced the global natural key with a tenant-scoped unique; `0004` removed `idx_on_hand_available`/`idx_on_hand_low_stock`. The remaining 3 are pre-existing `idx_comm_*`/`idx_comms_*` pairs in `communications` (correction C1). 0006 found **3 more of the same defect that the review's measure could not see**: indexes whose column list is a strict leading prefix of another index on the same table (`audit_summary`, `locations`, `inventory_reservations`) — so the honest count of 5.6 is 6, not 3 | 0 |
+| integer key columns | 19 | 19 | **0** | 0 | 0 | 0 | 0 | 5.1/5.3: four serial PKs and fifteen referencing columns, widened together | 0 |
+| key columns narrower than their ceiling | 4 | 4 | **0** | 0 | 0 | 0 | 0 | bigint keys fed by an integer sequence — see B14 | 0 |
+| domain columns with no published answer | 30 | 30 | 30 | 30 | **0** | 0 | 0 | 5.9's count, restated as a question the database can answer. 26 are constrained, 4 are free text with a recorded reason | 0 |
+| tables | 18 | 19 | 19 | 19 | 21 | 21 | 21 | the two master-data tables, `units_of_measure` and `costing_methods` | 21 |
+| tables with row security forced | 2 | 2 | 2 | 2 | 2 | 2 | **18** | 5.7's `rls_forced = 0`. Scope is "has a `tenant_id` column", read from the catalog, so a new tenant-coded table joins automatically and B7 fails on it if it does not. The 4 tables without one are declared global in B19 | 18 |
+| policies in `public` | 3 | 3 | 3 | 3 | 3 | 3 | **36** | 18 × `tenant_isolation` (FOR ALL, qual + WITH CHECK) + 18 × `audit_read_all` (FOR SELECT, `USING (true)`, the read roles' door). 5 dropped first: 3 keyed off `app.current_agent`, 2 of 0002's stopgaps | — |
+| views | 14 | 14 | 14 | 14 | 14 | 14 | **15** | `vw_rls_status`. All 15 now carry `security_invoker=true` and every one over a tenant table exposes `tenant_id`, which is what closes 0003's deferral NOTICE | **16** |
+| functions executable by every role | — | — | — | — | 13 | 13 | **0** | 0008's census, swept. Three stay open by declaration — `afpc_current_tenant`, `afpc_policy_tenant`, `afpc_uuid_v7` — because they are called from column defaults and policy quals during an ordinary SELECT | 0 |
+| CASCADE edges | 6 | 6 | 6 | 6 | 6 | **1** | 1 | 5.10's count. Five flipped to RESTRICT (four inventory, one audit); `locations -> warehouses` retained — bin rows with no stock, no open reservations and no ledger reference are structure, and deleting them with the warehouse is composition, not destruction. B3 checks both sides: no CASCADE on a table that holds facts, and no CASCADE anywhere else beyond that one named edge | 1 |
+| triggers in `public` | 3 | 3 | 3 | 3 | 3 | 3 | 3 | **14** | 13 `afpc_touch_updated_at` triggers plus `trg_on_hand_consistency`. The two bespoke timestamp triggers 0001 ported are retired, and 6.3C's duplicated function with them|
+| tables whose `updated_at` is maintained | 2 | 2 | 2 | 2 | 2 | 2 | 2 | **13** | 6.3's own measure, which is a behaviour claim rather than a column census: two of eleven before 0010 (the review's two "yes" rows), thirteen of thirteen after|
+| tables with no row-creation timestamp | 3 | 3 | 3 | 2 | 2 | 2 | 2 | 0 | 6.3's last paragraph named three; measured, `inventory_movements.performed_at` already served, so the real gap was two. `schema_migrations.applied_at` is build bookkeeping|
 
 Also deferred from 0003, deliberately:
 
@@ -82,12 +85,16 @@ Also deferred from 0003, deliberately:
 
 ### Obligations 0009 creates for the migrations after it
 
-- **`security_invoker` has to be re-applied by anyone who recreates a view.**
-  `CREATE OR REPLACE VIEW` discards the view's reloptions, so the flag does not survive a
-  definition change - 0009 found this by having its own view probe fail. `0010` rewrites
-  views for `updated_at`, and `0012` may for embeddings: both must re-apply it or B21
-  fails, which is the intended arrangement. Setting it at the *end* of a migration that
-  touches views is the pattern.
+- **`security_invoker` has to be re-applied by anyone who recreates a view, and applied by
+  anyone who creates one.** `CREATE OR REPLACE VIEW` discards the view's reloptions, so the flag
+  does not survive a definition change - 0009 found this by having its own view probe fail. The
+  prediction made here that `0010` "rewrites views for `updated_at`" turned out wrong in an
+  instructive way: it did not touch one existing view, because all twelve use explicit column
+  lists, so adding a column to a base table changes no view - the same property 0003 reported as
+  the reason `tenant_id` had to be added by hand. What 0010 does instead is *create*
+  `vw_timestamp_status`, and a new view needs the reloption too, which B21 counts without knowing
+  or caring that the view is new. `0012` may rewrite view definitions for embeddings and must
+  re-apply it. Setting the flag at the *end* of a migration that touches views is the pattern.
 - **New functions do not start closed, and cannot be made to.** The default-privileges
   mechanism for that is a no-op for functions (measured; see the 0009 findings), so every
   migration from `0010` on that creates a function must revoke `EXECUTE` from `PUBLIC` and
@@ -111,6 +118,108 @@ Also deferred from 0003, deliberately:
   cannot equal the caller's tenant, and the `WITH CHECK` requires that it does. Anything
   that creates a tenant - including `0013`'s audit work and the seed path - runs as the
   owner or as an admin role that does not exist yet.
+
+### Obligations 0010 creates for the migrations after it
+
+- **A migration that adds a write path to a table owes that table an `updated_at`, and B24 will
+  name it.** Eight tables are declared "no updated_at by decision - nothing in the schema rewrites
+  these rows" on the evidence of `pg_proc`, not on a hunch. `0013` is the one most likely to trip
+  it: `audit_summary` is a rollup keyed `(date, user_id, bot_id)`, and the moment its recompute
+  becomes an `ON CONFLICT DO UPDATE`, the register's own evidence contradicts its verdict and the
+  check goes red. The fix is the column plus the trigger, not an edit to the exemption list.
+- **`0011`'s version trigger lands next to this one.** `inventory_on_hand` and
+  `inventory_reservations` will carry two `BEFORE ... FOR EACH ROW` triggers, and PostgreSQL fires
+  them in name order: `afpc_touch_updated_at` before `trg_*`. Both assign to `NEW` and return it,
+  so the order is not observable today. It becomes observable the moment 0011's bump reads
+  `NEW.updated_at`, or an `AFTER`-row variant is added - so the version column must be computed
+  from its own counter, never derived from the timestamp, and `0011` should say which order it
+  assumed.
+- **Repoint probe E when `0014` lands.** 0010's stock probe duplicates the two statements
+  `execute_inventory_movement` runs, because the function itself cannot run while 4.1 is open. Once
+  0014 fixes the signature, the assertion is stronger at the real call site, and the duplicated
+  statements become drift waiting to happen.
+- **A `created_at` backfill is a one-time truth, not a rule.** `inventory_on_hand.created_at` is
+  filled from the earliest movement that could have made the row, which is a lower bound chosen
+  because nothing better exists. A migration that reconstructs history more precisely should amend
+  those rows deliberately - and can, because the touch trigger honours an explicit `updated_at` and
+  never touches `created_at`.
+- **`updated_at` is trustworthy for writes, not for *changes*.** The trigger stamps every UPDATE
+  including one that rewrites identical values, which is correct - the row was written - but it
+  means the column answers "when was this row last touched", not "when did this row's data last
+  differ". Anything building a delta feed from it should say which question it is asking.
+
+## Found while building 0010
+
+- **A check can be wrong in the direction that hides the finding.** B11 has tested
+  `(tgtype & 2) = 2 AND (tgtype & 4) = 4` since it was written, with the comments "-- INSERT" and
+  "-- UPDATE". Both comments are wrong: the bits, established by creating probe triggers on a
+  scratch table, are ROW=1, BEFORE=2, INSERT=4, DELETE=8, UPDATE=16 - so 2 is the *timing*, not a
+  command, and the predicate was demanding a BEFORE INSERT trigger and never looking at UPDATE at
+  all. Measured on the live schema it flagged the two tables whose column *was* maintained and
+  passed silently over the nine where it was not. It was also counting `information_schema.columns`,
+  which includes view columns, so it reported 13 where the truth is 11 tables and 2 views - the
+  same 0009 lesson about a census answering a different question than its label, in a check that
+  had been green for seven migrations. The corrected predicate reports 9 offenders before 0010 and
+  0 after.
+- **`now()` is the transaction timestamp, and that quietly invalidates the obvious test.** The
+  first draft of 0010's probes did what a timestamp test suggests: read the column, write the row,
+  read it again, compare. Inside one transaction every one of those instants is identical, so the
+  assertion `new > old` fails against a *working* trigger - and, worse, `new = old` would "pass"
+  against a broken one if the comparison were written the other way. Every probe now pins the
+  column to a past value first and asks whether the write moved it off the pin, which is a claim
+  true at any transaction boundary. The same property is what makes the trigger's
+  "unless the statement set it deliberately" rule worth having: `now()` shared across a batch is a
+  feature for a change-data-capture reader, and an affordance a backfill needs to be able to
+  override.
+- **The review's count grew by following the plan.** It lists eight tables carrying an
+  `updated_at` that nothing maintains. The population here is eleven before 0010 starts, because
+  0003 created `tenants` with the column and no trigger, and thirteen when 0010 adds two more. A
+  finding written against a dump ages the moment the schema stops being the dump, so section 4
+  derives its scope from `pg_attribute` and B11 asks the same question back. The review's other
+  number is wrong the other way: it says the schema's three triggers "all fire on `UPDATE` only"
+  and labels `trg_on_hand_consistency` as `UD`. Measured, that trigger is `tgtype 23` - BEFORE
+  INSERT OR UPDATE. The correction matters only for accuracy, but the accuracy is what the next
+  person reasons from.
+- **Three tables "have no timestamp-shaped column at all" is a misreading, and the right reading is
+  worse.** `inventory_movements` has `performed_at`, `inventory_reservations` has `reserved_at`,
+  `inventory_on_hand` has `last_movement_at` - all NOT NULL, all defaulted. None of the three
+  records when the *row* began. For the ledger tables that is harmless; for stock it is the actual
+  defect, because `last_movement_at` is overwritten by the movement that changes the quantity, so a
+  row created two years ago and touched five minutes ago is indistinguishable from one created five
+  minutes ago. That is why 0010 adds a column to two of the three and refuses to add one to
+  `inventory_movements`, where the event time and the write time are the same fact and a second
+  column would be a second truth.
+- **Which tables need an `updated_at` is a question the database can answer.** The review decides
+  it from the presence of a column. Asking `pg_proc` which tables its own function bodies
+  `UPDATE` finds `addresses` - a table the review lists as "created_at yes, updated_at no" with no
+  remark, because from a dump an absent column is not a story, while `update_customer` rewrites
+  those rows on every shipping-address change and leaves nothing behind anywhere in the schema.
+  That is the same defect as a stale column, one step worse: there is no column to be stale. It is
+  also the reason the register publishes `rewritten_by` as a derived column rather than a comment,
+  and why B24 counts the disagreement between the two - a migration that adds a write path to a
+  table declared immutable turns the register red by name.
+- **A trigger function's EXECUTE is not privilege-checked against the invoker.** Measured on a
+  clone: `afpc_app` updated three rows through a `BEFORE UPDATE` trigger whose function had been
+  revoked from both `PUBLIC` and `afpc_app`, and the same `UPDATE` succeeded identically after
+  re-granting it. This is the opposite of 0009's policy quals, where a missing grant produced
+  `permission denied for function` in the middle of a plain `SELECT`, and it was worth measuring
+  precisely because the instinct after 0009 is to reach for the grant - which would have added an
+  inert privilege and a misleading precedent that a trigger body is a callable surface. 0010's
+  function is revoked from `PUBLIC` and granted to nobody.
+- **A test must not depend on a finding that is still open.** Probe E wants to exercise the stock
+  write path, and the real write path is `execute_inventory_movement` - which cannot run at all
+  until 0014 closes 4.1, because its signature never mentions a unit of measure while
+  `inventory_movements.unit_of_measure` is NOT NULL with no default. Calling it made 0010 fail with
+  someone else's finding. The probe writes the function's own two statements instead - the plain
+  UPDATE of the adjustment branch and the `ON CONFLICT DO UPDATE` of the receipt branch, the second
+  of which is a genuinely different executor path - and says in its comment that it should be
+  repointed at the call site when 0014 lands.
+- **Adding a column to a base table changes no view, which is the opposite of what the 0009
+  obligations note predicted.** Twelve views were written with explicit column lists, so
+  `inventory_on_hand.created_at` and `addresses.updated_at` appear in none of them and 0010
+  restated no definition. The obligation still bit, just at the other end: 0010 *creates* a view,
+  and a new view has empty `reloptions` and runs as its owner unless told otherwise, so
+  `security_invoker` is applied after the definition and B21 counts it with the fifteen others.
 
 ## Found while building 0009
 

@@ -364,16 +364,49 @@ check "B10 6.1 idempotency implemented" "0011_idempotency" \
        THEN 0 ELSE 1 END" \
     "ADR-005 table and version triggers"
 
+# 6.3's evidence is a table in a document, and the first version of this check reproduced its
+# shape rather than its meaning, in two ways. (1) The bits: tgtype 2 is BEFORE, 4 is INSERT and
+# 16 is UPDATE - established with probe triggers on a scratch table (row BEFORE INSERT = 7,
+# BEFORE UPDATE = 19, BEFORE DELETE = 11, AFTER INSERT OR UPDATE OR DELETE = 29, AFTER UPDATE
+# statement = 16). Demanding "& 2 and & 4" therefore asked for a BEFORE INSERT trigger and never
+# looked at UPDATE at all, which flagged the only two tables in the schema whose column *was*
+# maintained and passed silently on the nine that were not. (2) The population:
+# information_schema.columns includes view columns, so the count was 13 where the truth is 11
+# tables and 2 views - the same 0009 lesson about a census answering a different question than
+# its label. BEFORE is part of the predicate on purpose: an AFTER ROW UPDATE trigger that assigns
+# to NEW is discarded by the executor, so a trigger that fires too late is not maintenance.
 check "B11 6.3 updated_at maintained" "0010_timestamp_triggers" \
-    "SELECT count(*) FROM information_schema.columns c
-      WHERE c.table_schema='public' AND c.column_name='updated_at'
-        AND NOT EXISTS (SELECT 1 FROM pg_trigger t JOIN pg_class r ON r.oid=t.tgrelid
-                         JOIN pg_namespace n ON n.oid=r.relnamespace
-                        WHERE n.nspname='public' AND r.relname=c.table_name
-                          AND NOT t.tgisinternal
-                          AND (t.tgtype::int & 2) = 2   -- INSERT
-                          AND (t.tgtype::int & 4) = 4)  -- UPDATE" \
-    "tables whose updated_at silently goes stale"
+    "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+      JOIN pg_attribute a ON a.attrelid=c.oid AND a.attname='updated_at'
+                          AND a.attnum>0 AND NOT a.attisdropped
+      WHERE n.nspname='public' AND c.relkind='r'
+        AND NOT EXISTS (SELECT 1 FROM pg_trigger t
+                         WHERE t.tgrelid=c.oid AND NOT t.tgisinternal
+                           AND (t.tgtype::int & 1)=1 AND (t.tgtype::int & 2)=2
+                           AND (t.tgtype::int & 16)=16)" \
+    "tables carrying an updated_at that no BEFORE UPDATE row trigger maintains"
+
+# The register 0010 publishes is only useful if its verdict can disagree with its evidence, so
+# the disagreement is what gets counted here: a table a function rewrites, with nothing
+# maintaining a timestamp for it. This is the check that makes the 'no updated_at by decision'
+# rows honest, and the reason 0014/0015 are told that a new write path owes the column.
+check "B24 6.3  write paths are visible" "0010_timestamp_triggers" \
+    "SELECT count(*) FROM vw_timestamp_status WHERE needs_attention" \
+    "tables the schema rewrites while no timestamp records that it happened"
+
+# 6.3C is not "there were two copies of the timestamp rule" but "two copies of a rule can exist".
+# Counted over every trigger function, so the next duplicate is a FAIL rather than a repeat of the
+# discovery. prosrc rather than proconfig: identical source is the defect, and a divergent body
+# under two names is a different one.
+check "B25 6.3  one implementation per rule" "0010_timestamp_triggers" \
+    "SELECT count(*) FROM (
+        SELECT md5(coalesce(p.prosrc,'')) AS body
+          FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+          JOIN pg_type t ON t.oid=p.prorettype
+         WHERE n.nspname='public' AND t.typname='trigger' AND p.prokind='f'
+           AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid=p.oid AND d.deptype='e')
+         GROUP BY 1 HAVING count(*) > 1) x" \
+    "trigger functions whose bodies are byte-identical to another one's"
 
 check "B12 6.4 hnsw on all embeddings" "0012_vector_indexing" \
     "SELECT count(*) FROM information_schema.columns c

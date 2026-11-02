@@ -321,6 +321,7 @@ See `.env.example` for required variables.
 | `vw_index_redundancy` | Indexes that are identical to, or a leading prefix of, another index |
 | `vw_domain_vocabulary` | What every status/type column accepts, how it is enforced, and why |
 | `vw_rls_status` | What row-level security actually does per table: forced or not, which roles, the read and write predicates verbatim, and a verdict |
+| `vw_timestamp_status` | Whether each table's `updated_at` can be trusted: is it maintained, on which commands, is it nullable, and which functions rewrite the table anyway |
 | `vw_inventory_valuation` | Inventory value by warehouse/category |
 | `vw_item_availability` | Stock levels across warehouses |
 | `vw_item_movement_summary` | 30-day item movement patterns |

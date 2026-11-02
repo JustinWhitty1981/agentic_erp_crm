@@ -62,6 +62,18 @@ SELECT datname, usename, client_addr, state, backend_start
   FROM pg_stat_activity ORDER BY backend_start;                             -- who is connected now
 ```
 
+From 0010 on there is a second one, for the column a sync query depends on:
+
+```sql
+SELECT table_name, updated_at_not_null, moves_on_update, rewritten_by, verdict
+  FROM public.vw_timestamp_status ORDER BY needs_attention DESC, table_name;  -- can I trust a watermark here?
+```
+
+`rewritten_by` is not documentation: it is the list of functions in `pg_proc` whose bodies contain
+an `UPDATE` against that table, so the register changes when the write paths do. That is how
+`addresses` turned out to need the column - the review lists it as merely missing one, and nothing
+in the schema said anything rewrites it until the functions were asked.
+
 From 0009 on, the structural question has a view:
 
 ```sql
@@ -140,6 +152,28 @@ TLS change, `init.sh` reverts `ssl` rather than leaving a persistent database un
 Eleven of these, and every one was learned by a check failing on a rehearsal rather than
 by reading documentation about the database. Keep the pattern: when a migration surprises
 you, the surprise goes here, and the check that would have caught it goes in verify.sh.
+
+**`now()` is the transaction timestamp, so a timestamp test needs a pin, not a sleep.** Read a
+column, update the row, read it again: inside one transaction both reads return the same instant,
+whether or not a trigger is working. The test that survives is *pin the column to a past value,
+then write, then ask whether it moved* - true at any transaction boundary, and it needs no
+`pg_sleep`. The same fact makes a batch of twenty rows share one timestamp, which is what you want
+from a change-data-capture reader and what you do not want to discover while debugging a probe.
+
+**Trigger timing lives in `tgtype` bits that are easy to guess wrong.** Measured with probe
+triggers: `ROW=1`, `BEFORE=2`, `INSERT=4`, `DELETE=8`, `UPDATE=16` - so `BEFORE UPDATE FOR EACH ROW`
+is 19, `BEFORE INSERT OR UPDATE` is 23, and `AFTER INSERT OR UPDATE OR DELETE` is 29. Bit 2 is the
+*timing*, not a command, which is how a check written as `& 2 = 2 AND & 4 = 4` and commented
+"INSERT, UPDATE" ended up demanding a BEFORE INSERT trigger and never looking at UPDATE - green for
+seven migrations, while flagging the two tables that were correctly maintained.
+
+**A trigger function's `EXECUTE` is not checked against the role that fires it.** Measured:
+`afpc_app` updated rows through a `BEFORE UPDATE` trigger whose function had been revoked from both
+`PUBLIC` and `afpc_app`, and re-granting it changed nothing. Row-security policy quals behave the
+opposite way - a missing grant there produces `permission denied for function` in the middle of an
+ordinary `SELECT`, which is why 0009 keeps three helpers PUBLIC-executable. So revoking a trigger
+function is safe and granting it is noise; the thing to reason about is who the server counts as the
+caller, and for a trigger it is not the caller.
 
 **A row-security predicate is a plan, so the resolver's volatility is a performance property.**
 `USING (tenant_id = afpc_current_tenant())` reads correctly and costs a sequential scan: a
