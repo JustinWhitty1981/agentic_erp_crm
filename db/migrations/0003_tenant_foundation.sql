@@ -124,33 +124,37 @@ COMMENT ON FUNCTION afpc_current_tenant() IS
 -- The loop is over an explicit list rather than "all tables in public" so that a table
 -- added by a later migration cannot quietly slip past tenancy: it has to be named here
 -- or in its own migration. That is the failure mode 3.1 came from.
--- A per-table (tenant_id) index is only worth its write cost when no other index on
--- that table already leads with tenant_id: a btree whose FIRST column is tenant_id is a
--- (tenant_id) index for planning purposes, because leading columns of an equality
--- predicate need not be in the WHERE clause to be usable. This function exists so that
--- judgment is applied identically here and in 0004, which creates the on-hand identity
--- unique that makes inventory_on_hand's standalone index redundant later.
+-- A per-table (tenant_id) index is only worth its write cost when a NON-UNIQUE index on
+-- that table already leads with tenant_id. The restriction to non-unique matters: a
+-- standalone (tenant_id) index is otherwise the only first-column coverage a tenant_id
+-- foreign key has, and every other FK column on the table is covered by being a key
+-- column of the unique index rather than by leading anything. Dropping it against a
+-- unique-only alternative silently converts a covered FK into a sequential scan on every
+-- referential check.
 CREATE OR REPLACE FUNCTION afpc_drop_redundant_tenant_indexes() RETURNS text[]
 LANGUAGE sql VOLATILE AS $$
-    SELECT array_agg(idx) FROM (
-        SELECT i.indexrelid::regclass::text AS idx
+    SELECT array_agg(idx::text) FROM (
+        SELECT i.indexrelid::regclass AS idx
           FROM pg_index i
-          JOIN pg_class c   ON c.oid = i.indrelid
+          JOIN pg_class c     ON c.oid = i.indrelid
           JOIN pg_namespace n ON n.oid = c.relnamespace
           JOIN pg_attribute lead ON lead.attrelid = i.indrelid AND lead.attnum = i.indkey[0]
          WHERE n.nspname = 'public' AND lead.attname = 'tenant_id'
            AND i.indexrelid::regclass::text LIKE 'idx_%_tenant'
-           -- another index on the same table also leads with tenant_id, and is not this one
+           AND NOT i.indisunique
            AND EXISTS (SELECT 1 FROM pg_index j
                         WHERE j.indrelid = i.indrelid AND j.indexrelid <> i.indexrelid
+                          AND NOT j.indisunique
                           AND j.indkey[0] = lead.attnum)
-         GROUP BY i.indrelid, i.indexrelid
     ) d
 $$;
 
 COMMENT ON FUNCTION afpc_drop_redundant_tenant_indexes() IS
-    'Names the idx_*_tenant indexes that are redundant because another index on the same '
-    'table already leads with tenant_id. Called by 0003 and again by 0004.';
+    'Names the standalone idx_*_tenant indexes redundant because another NON-UNIQUE index '
+    'on the same table already leads with tenant_id. Unique indexes are excluded on '
+    'purpose: a unique index is a constraint, and letting it strand the only leading '
+    'coverage a tenant_id foreign key has would trade write amplification for sequential '
+    'scans on every referential check. Called by 0003 and again by 0004.';
 
 DO $$
 DECLARE
@@ -353,8 +357,10 @@ BEGIN
     IF dropped IS NOT NULL AND cardinality(dropped) > 0 THEN
         EXECUTE 'DROP INDEX ' || array_to_string(
             (SELECT array_agg(x) FROM unnest(dropped) AS x), ', ');
-        RAISE NOTICE 'dropped % redundant (tenant_id) indexes, already a prefix of a '
-                     'tenant-led composite: %', cardinality(dropped), array_to_string(dropped, ', ');
+        RAISE NOTICE 'dropped % redundant (tenant_id) indexes: another index on the same '
+                     'table already leads with tenant_id, which makes these unusable-by-'
+                     'choice rather than merely duplicate: %',
+            cardinality(dropped), array_to_string(dropped, ', ');
     END IF;
 END
 $$;

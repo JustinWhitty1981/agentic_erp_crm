@@ -170,13 +170,20 @@ check "B3 5.10 no CASCADE into stock" "0008_delete_safety" \
         AND r.relname IN ('inventory_on_hand','inventory_reservations','locations','movements')" \
     "CASCADE edges that destroy stock rows"
 
+# 4.2 from the catalog side. Deliberately a different assertion from the one in 0004:
+# the migration proves the arbiter is inferable (behaviour), this proves the constraint
+# is tenant-scoped at all (structure). The original version of this check only counted
+# key columns, which passed a 5-column index that made the function's upsert impossible.
 check "B4 4.2  on-hand row identity" "0004_on_hand_identity" \
     "SELECT CASE WHEN EXISTS (
-        SELECT 1 FROM pg_index i JOIN pg_class t ON t.oid=i.indrelid JOIN pg_namespace n ON n.oid=t.relnamespace
-         WHERE n.nspname='public' AND t.relname='inventory_on_hand' AND i.indisunique
-           AND (SELECT count(*) FROM unnest(i.indkey) k WHERE k>0) >= 3
+        SELECT 1 FROM pg_index i
+          JOIN pg_class tc ON tc.oid = i.indrelid AND tc.relname = 'inventory_on_hand'
+          JOIN unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord) ON true
+          JOIN pg_attribute a ON a.attrelid = tc.oid AND a.attnum = k.attnum
+         WHERE i.indisunique AND k.ord <= i.indnatts AND a.attname = 'tenant_id'
+           AND (SELECT count(*) FROM unnest(i.indkey) j) >= 5
      ) THEN 0 ELSE 1 END" \
-    "inventory_on_hand lacks a multi-column unique identity"
+    "inventory_on_hand has no unique identity including tenant_id"
 
 check "B5 5.6  duplicate indexes" "0006_index_hygiene" \
     "SELECT count(*) FROM (
@@ -260,7 +267,11 @@ SELECT format('%s tables / %s views / %s functions / %s FKs / %s triggers',
     (SELECT count(*) FROM pg_trigger t JOIN pg_class r ON r.oid=t.tgrelid
        JOIN pg_namespace n ON n.oid=r.relnamespace
       WHERE n.nspname='public' AND NOT t.tgisinternal))"
-scalar "SELECT format('%s enums / %s CASCADE / %s RLS-forced / %s tenant-coded / %s dup index sets / %s unindexed FKs',
+# FK columns whose first column leads no index. This is a QUERY-PLANNING measure, not a
+# correctness one: measured on this server, Postgres' FK mechanism uses any index that
+# contains the column as a key column, in any position. Keep the two numbers distinct -
+# conflating them caused 0004 to drop an index it should have kept.
+scalar "SELECT format('%s enums / %s CASCADE / %s RLS-forced / %s tenant-coded / %s dup index sets / %s FKs unindexed (any position) / %s FKs not leading (planning only)',
     (SELECT count(*) FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace WHERE n.nspname='public' AND t.typtype='e'),
     (SELECT count(*) FROM pg_constraint WHERE contype='f' AND confdeltype='c'),
     (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relrowsecurity AND c.relforcerowsecurity),
@@ -270,7 +281,10 @@ scalar "SELECT format('%s enums / %s CASCADE / %s RLS-forced / %s tenant-coded /
         GROUP BY indrelid, indkey HAVING count(*)>1) d),
     (SELECT count(*) FROM pg_constraint c
       WHERE c.contype='f' AND NOT EXISTS (SELECT 1 FROM pg_index i
-        WHERE i.indrelid=c.conrelid AND i.indkey[0]=c.conkey[1])))"
+        WHERE i.indrelid=c.conrelid AND (c.conkey)[1] = ANY(i.indkey))),
+    (SELECT count(*) FROM pg_constraint c
+      WHERE c.contype='f' AND NOT EXISTS (SELECT 1 FROM pg_index i
+        WHERE i.indrelid=c.conrelid AND i.indkey[0]=(c.conkey)[1])))"
 
 echo
 echo "== scoreboard =="

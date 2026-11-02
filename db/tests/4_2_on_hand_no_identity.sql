@@ -3,6 +3,11 @@
 -- arbiter used inside execute_inventory_movement cannot be satisfied. This probes
 -- the arbiter in isolation, so it stays red even after 4.1 is fixed.
 -- Expected on the unfixed baseline: VERDICT ERR 42P10.
+--
+-- The arbiter below gained tenant_id when 0004 introduced the tenant-scoped identity:
+-- an ON CONFLICT target must list an index's key columns exactly and in order, so a
+-- 4-column target can never infer into a 5-column unique. db/tests/0_0_conflict_inference
+-- _rule.sql establishes that rule by experiment; change this in step with the index.
 
 BEGIN;
 DO $$
@@ -22,7 +27,7 @@ BEGIN
     VALUES (v_item, v_wh, 10, 10, 0)
     ON CONFLICT (item_id, warehouse_id,
                  COALESCE(location_id, '00000000-0000-0000-0000-000000000000'::uuid),
-                 COALESCE(lot_number, ''))
+                 COALESCE(lot_number, ''), tenant_id)
     DO UPDATE SET quantity_on_hand = inventory_on_hand.quantity_on_hand + 10;
 
     RAISE NOTICE 'VERDICT OK upsert arbiter resolved';

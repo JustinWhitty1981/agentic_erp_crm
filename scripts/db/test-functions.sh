@@ -65,6 +65,15 @@ CASES=(
 "4_5_tools_vs_schema|tickets does not exist|4.5|0017_tool_call_log"
 "5_2_thread_key_ceiling|threading dies here|5.2|0005_key_types"
 "5_2_thread_key_ceiling|thread_root_id has no FK|5.2|0005_key_types"
+# 4.2 splits into two rows on purpose: 0004 makes the arbiter inferable and stops
+# duplicate stock rows, but the ISSUE branch's silent zero-row update is a different
+# defect that no constraint can express. Recording them together would let 0004 be
+# credited with closing a hole that stays open.
+"4_6_update_branch_vanishes|phantom issue|4.2|0014_movement_contract"
+# The multi-bin deduction is the reservation/location half of the same defect family, and
+# 0015 is where "honour location_id" is scheduled. Splitting it from the phantom-issue row
+# means closing 0014 cannot be mistaken for closing this.
+"4_6_update_branch_vanishes|warehouse-wide issue touched|4.2|0015_reservation_locking"
 # 5.8 gets two rows: the tenancy column itself (closed by 0003) and row-level
 # isolation, which is a different mechanism and lands in 0009. Reporting them as one
 # assertion would let 0003 go green while an agent could still read a foreign row.

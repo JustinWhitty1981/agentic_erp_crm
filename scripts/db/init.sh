@@ -76,6 +76,13 @@ ALTER SYSTEM SET log_line_prefix = '%m [%p] user=%u db=%d app=%a host=%h ';
 ALTER SYSTEM SET log_checkpoints = 'on';
 ALTER SYSTEM SET log_lock_waits = 'on';
 ALTER SYSTEM SET track_activities = 'on';
+-- Cluster-level tenant fallback, mirrored by the database-level setting that
+-- db/migrations/0003_tenant_foundation.sql applies. Needed because ALTER DATABASE SET
+-- is recorded in pg_db_role_setting, which CREATE DATABASE ... TEMPLATE does NOT copy:
+-- without this, a clone or a restored copy of this database has no tenant context and
+-- every INSERT fails in afpc_current_tenant(). The database-level value still wins where
+-- it exists, so an override made deliberately is never silently replaced by this one.
+ALTER SYSTEM SET app.default_tenant_id = '${AFPC_TENANT_ID:-00000000-0000-0000-0000-000000000001}';
 "
 echo "[2/5] settings written to postgresql.auto.conf on the data volume"
 
@@ -86,10 +93,17 @@ docker compose -f "$COMPOSE_FILE" exec -T \
 set -eu
 umask 077
 mkdir -p /certs
-if [ ! -s /certs/server.crt ] || [ ! -s /certs/server.key ]; then
+# CA and leaf are generated under separate guards. The original condition tested for a
+# missing leaf and then regenerated the CA inside it, so every rebuild that lost
+# server.crt minted a NEW AUTHORITY - which silently invalidates the ca.crt an auditor
+# pinned for sslmode=verify-full. The authority must outlive the leaf it signs.
+if [ ! -s /certs/ca.crt ] || [ ! -s /certs/ca.key ]; then
     openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
         -keyout /certs/ca.key -out /certs/ca.crt \
         -subj "/CN=Agent First ERP CRM development CA" >/dev/null 2>&1
+    echo "      generated a new private CA"
+fi
+if [ ! -s /certs/server.crt ] || [ ! -s /certs/server.key ]; then
     openssl req -newkey rsa:2048 -nodes \
         -keyout /certs/server.key -out /certs/server.csr \
         -subj "/CN=afpc-pg" >/dev/null 2>&1
@@ -98,9 +112,11 @@ if [ ! -s /certs/server.crt ] || [ ! -s /certs/server.key ]; then
         -CAcreateserial -days 825 -extfile /certs/leaf.cnf \
         -out /certs/server.crt >/dev/null 2>&1
     rm -f /certs/server.csr /certs/leaf.cnf
-    echo "      generated a new private CA and leaf certificate"
+    echo "      issued a new leaf certificate from the existing CA"
 fi
-test -s /certs/server.crt && test -s /certs/server.key
+# Fail loudly here. A half-populated /certs with ssl=on is the unbootable state that the
+# revert logic at the end of this script exists to recover from.
+test -s /certs/server.crt && test -s /certs/server.key && test -s /certs/ca.crt
 chmod 644 /certs/ca.crt /certs/server.crt
 chmod 600 /certs/server.key
 REMOTE

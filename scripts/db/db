@@ -48,6 +48,16 @@ env_file() {
     echo "generated dev/.env with random local credentials (mode 600, gitignored)"
 }
 
+# Stop and remove the container, and destroy only the DATA volume. 'down -v' also deletes
+# afpc_tls, which regenerates the private CA: every rebuild would silently break an
+# auditor who pinned dev/tls/afpc-ca.crt for sslmode=verify-full, and the exported copy
+# would no longer match the server. Certificates outlive data here on purpose.
+recreate_data_only() {
+    "${COMPOSE[@]}" stop postgres >/dev/null 2>&1 || true
+    "${COMPOSE[@]}" rm -f -s postgres >/dev/null 2>&1 || true
+    docker volume rm afpc_pgdata >/dev/null 2>&1 || true
+}
+
 confirm() {
     printf '%s' "$1"
     read -r reply
@@ -61,7 +71,7 @@ case "$cmd" in
         "${COMPOSE[@]}" up -d
         if [ "${1:-}" = "--local" ]; then "$DB/init.sh" --no-net; else "$DB/init.sh"; fi
         "$DB/migrate.sh"
-        "$DB/verify.sh" || true
+        "$DB/verify.sh"
         ;;
     init)     env_file; "$DB/init.sh" "$@" ;;
     migrate)  "$DB/migrate.sh" "$@" ;;
@@ -83,19 +93,23 @@ case "$cmd" in
         echo "restore with: pg_restore -d agent_first_erp_crm --clean --if-exists backup/$local_file" ;;
     fresh)
         confirm "This DESTROYS the development database and rebuilds it. Type y to continue: "
-        "${COMPOSE[@]}" down -v
+        recreate_data_only
         env_file
         "${COMPOSE[@]}" up -d
         "$DB/init.sh"
         "$DB/migrate.sh"
         "$DB/seed.sh" || true
-        "$DB/verify.sh" || true
-        "$DB/test-functions.sh" || true
+        # No '|| true' here. These two are the acceptance gate for the rebuild: masking
+        # their exit codes makes 'db fresh' report success on a database where the harness
+        # is red, which is the same class of false pass that let the original migration
+        # loop claim one table of eighteen had been created.
+        "$DB/verify.sh"
+        "$DB/test-functions.sh"
         ;;
     down)     "${COMPOSE[@]}" stop; echo "stopped; volume afpc_pgdata preserved" ;;
     destroy)
         confirm "This deletes volume afpc_pgdata permanently. Type y to continue: "
-        "${COMPOSE[@]}" down -v ;;
+        recreate_data_only ;;
     help|-h|--help) usage ;;
     *) echo "unknown command: $cmd" >&2; usage; exit 2 ;;
 esac
