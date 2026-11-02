@@ -218,6 +218,41 @@ check "B9 5.3  no integer PKs" "0005_key_types" \
       WHERE c.table_schema='public' AND c.data_type='integer' AND c.column_name LIKE '%id'" \
     "integer primary keys on tables that grow with tenant count"
 
+check "B13 5.1  no cross-type FK edges" "0005_key_types" \
+    "SELECT count(*) FROM pg_constraint f
+      JOIN pg_attribute fa ON fa.attrelid=f.conrelid AND fa.attnum=(f.conkey)[1]
+      JOIN pg_attribute ta ON ta.attrelid=f.confrelid AND ta.attnum=(f.confkey)[1]
+     WHERE f.contype='f' AND f.connamespace='public'::regnamespace
+       AND cardinality(f.conkey)=1 AND fa.atttypid <> ta.atttypid" \
+"FKs comparing two types: 5.2 in general form, invisible in pg_constraint"
+
+check "B14 5.3  key ceiling matches key type" "0005_key_types" \
+    "SELECT count(*) FROM pg_attribute a
+      JOIN pg_class c ON c.oid=a.attrelid
+      JOIN pg_namespace n ON n.oid=c.relnamespace
+     WHERE n.nspname='public' AND c.relkind IN ('r','p') AND a.attnum>0
+       AND a.atttypid='bigint'::regtype
+       AND pg_get_serial_sequence(c.relname,a.attname) IS NOT NULL
+       AND EXISTS (SELECT 1 FROM pg_sequence s WHERE s.seqrelid =
+                     pg_get_serial_sequence(c.relname,a.attname)::regclass
+                   AND s.seqtypid <> 'bigint'::regtype)" \
+"bigint keys fed by an integer sequence (ALTER COLUMN TYPE leaves the sequence alone)"
+
+check "B15 5.4  uuid keys time-ordered" "0005_key_types" \
+    "SELECT count(*) FROM pg_constraint k
+      JOIN pg_class c ON c.oid=k.conrelid
+      JOIN pg_attribute a ON a.attrelid=k.conrelid AND a.attnum=(k.conkey)[1]
+      LEFT JOIN pg_attrdef d ON d.adrelid=k.conrelid AND d.adnum=a.attnum
+     WHERE k.contype='p' AND cardinality(k.conkey)=1 AND a.atttypid='uuid'::regtype
+       AND c.relnamespace='public'::regnamespace
+       AND coalesce(pg_get_expr(d.adbin,d.adrelid),'(no default)') NOT LIKE '%afpc_uuid_v7%'" \
+"UUID primary keys still defaulting to random (btree inserts land at random pages)"
+
+check "B16 5.2  no unvalidated constraints" "0005_key_types" \
+    "SELECT count(*) FROM pg_constraint WHERE connamespace='public'::regnamespace
+       AND contype='f' AND NOT convalidated" \
+"NOT VALID FKs: new writes enforced, existing rows not - repair, then VALIDATE"
+
 check "B10 6.1 idempotency implemented" "0011_idempotency" \
     "SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_class WHERE relname='idempotency_keys')
         AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname LIKE '%version%')

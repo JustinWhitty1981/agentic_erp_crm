@@ -137,3 +137,33 @@ is a parse error - the second statement cannot see the first one's CTE. A migrat
 combines them looks correct and only fails when the code path is reachable, which on an
 empty development table it never is. 0004's duplicate-merge had exactly this bug and a
 clone rehearsal is what found it.
+
+**`ALTER TABLE ... ALTER COLUMN ... TYPE bigint` does not change the sequence behind it.**
+The column becomes `bigint`; `entities_id_seq` stays `integer` with `max_value`
+2147483647. The table can hold a value nothing can generate, and a check that reads the
+column type reports it fixed. You need `ALTER SEQUENCE ... AS bigint` as well - it
+preserves both the current value and the ownership link. `verify.sh` B14 asserts the pair.
+
+**`pg_attribute` contains rows for indexes as well as tables.** A catalog query that looks
+for "integer columns named id" without `c.relkind IN ('r','p')` will try
+`ALTER TABLE addresses_pkey ALTER COLUMN id TYPE bigint` and fail. Same family as the
+`indkey` zero-subscripting trap below: the catalog is wider than the schema you are
+thinking about.
+
+**`public` is not all yours.** pgvector installs 198 functions and 4 aggregates (`array_agg`,
+`avg`, `sum`) into it. `pg_get_functiondef()` *raises* on an aggregate, so a loop over
+`pg_proc` filtered only by namespace dies on a row that has nothing to do with you. Exclude
+extension-owned objects via `pg_depend.deptype = 'e'`.
+
+**`DROP VIEW` costs more than the view.** Postgres refuses to alter the type of a column a
+view reads, so widening a key means dropping and recreating every view that touches it. The
+recreation is faithful for columns, and grants come back on their own through 0002's
+`ALTER DEFAULT PRIVILEGES` - but `COMMENT ON VIEW` lives on the view and dies with it, which
+is how the baseline ended up with eight views that had no description. 0005 captures the
+definitions and descriptions, and asserts the counts afterwards.
+
+**`uuid_generate_v1mc()` is not time-ordered in the way you would expect.** Its leading
+32 bits are `time_low`, which wraps every 429 seconds; across a boundary, 19 of 20 older
+keys sort *after* a newer one, so the btree walks backward through pages it already passed.
+`afpc_uuid_v7()` puts 48 bits of big-endian millisecond in front instead. See
+`db/migrations/0005_key_types.sql` for the measurements.

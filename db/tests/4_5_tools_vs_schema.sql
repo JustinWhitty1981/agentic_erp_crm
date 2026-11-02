@@ -19,7 +19,7 @@ $$;
 BEGIN;
 DO $$
 DECLARE
-    v_ent int;
+    v_ent bigint;
     v_con int;
     r record;
 BEGIN

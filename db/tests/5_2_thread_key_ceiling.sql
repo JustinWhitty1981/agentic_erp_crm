@@ -10,7 +10,7 @@
 BEGIN;
 DO $$
 DECLARE
-    v_ent    int;
+    v_ent    bigint;
     v_parent bigint;
 BEGIN
     INSERT INTO entities (name) VALUES ('Ceiling Probe') RETURNING id INTO v_ent;
@@ -31,7 +31,11 @@ BEGIN
     BEGIN
         INSERT INTO communications (entity_id, communication_type, direction, summary, parent_id)
             VALUES (v_ent, 'note', 'inbound', 'reply to that row', v_parent);
-        RAISE NOTICE 'VERDICT ERR 00000 | and the reply was accepted too - unexpected';
+        -- This is the branch a fixed database takes. It used to read "unexpected", which
+        -- 0005 made false: threading a parent past 2^31 is exactly what must work now.
+        -- The harness keys on the OTHER branch, so the CLOSED/KNOWN-OPEN logic is
+        -- unaffected - but raw verdicts are what a human reads during an incident.
+        RAISE NOTICE 'VERDICT OK the reply was accepted: parent_id holds a bigint key';
     EXCEPTION WHEN OTHERS THEN
         RAISE NOTICE 'VERDICT ERR % | threading dies here: %', SQLSTATE, left(SQLERRM, 90);
     END;
@@ -44,7 +48,7 @@ ROLLBACK;
 BEGIN;
 DO $$
 DECLARE
-    v_ent int;
+    v_ent bigint;
     v_fk  int;
     n     int;
 BEGIN

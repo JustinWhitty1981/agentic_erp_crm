@@ -39,6 +39,43 @@ snapshot() { psql_run -d "$DBNAME" -f - 2>&1 <<< "$COUNTS_SQL" | grep -o 'COUNT 
 
 BEFORE="$(snapshot)"
 
+# Sequences are not transactional, so every counter a case deliberately pushes past its
+# ceiling has to be pulled back afterwards, or the next run inherits it. This is derived
+# from the catalog rather than named: 0005 added tests that advance entities_id_seq too,
+# and a hand-maintained list of exactly one sequence is how a harness starts lying.
+# Restoring from max(id) with is_called=false means the next nextval() returns max(id)+1,
+# which is what a fresh database would hand out.
+DO_RESTORE="DO \$\$
+DECLARE r record; v bigint;
+BEGIN
+    FOR r IN
+        SELECT c.relname AS tbl, a.attname AS col,
+               pg_get_serial_sequence(c.relname, a.attname) AS seq
+          FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname <> 'schema_migrations'
+           AND a.attnum > 0 AND NOT a.attisdropped
+           AND pg_get_serial_sequence(c.relname, a.attname) IS NOT NULL
+         ORDER BY 1
+    LOOP
+        EXECUTE format('SELECT coalesce(max(%I), 0) FROM public.%I', r.col, r.tbl) INTO v;
+        -- greatest(...,1): setval rejects 0, and an empty table's max() is 0. With
+        -- is_called = false the next nextval() is 1, which is what an untouched sequence
+        -- would hand out anyway.
+        EXECUTE format('SELECT setval(%L, %s, false)', r.seq, greatest(v, 1));
+    END LOOP;
+END
+\$\$;"
+
+# Normalise first, so the run starts from the same counters a fresh database would have,
+# then normalise again: the cases roll their own rows back, but the counters they moved do
+# not come back with them.
+printf '  %-38s' "normalising serial counters"
+if ! printf '%s\n' "$DO_RESTORE" | psql_run -d "$DBNAME" -f - 2>&1 | grep -q "ERROR"; then echo "ok"
+else echo "FAILED - the harness cannot vouch for the counters"; fi
+BEFORE_SEQ="$(psql_run -d "$DBNAME" -tA -c \
+    "SELECT sequencename||'='||coalesce(last_value::text,'-') FROM pg_sequences ORDER BY 1")"
+
 RESULTS="$(mktemp -d)"
 for f in "$DBROOT"/db/tests/*.sql; do
     base="$(basename "$f" .sql)"
@@ -47,9 +84,12 @@ for f in "$DBROOT"/db/tests/*.sql; do
         && echo "" || echo "  (file reported an error; verdicts below)"
 done
 
-# Restore the counter the 5.2 ceiling case advances on purpose.
-run_sql "SELECT setval('communications_id_seq',
-            COALESCE((SELECT max(id) FROM communications), 1), false);" >/dev/null 2>&1 || true
+printf '  %-38s' "restoring serial counters"
+if ! printf '%s\n' "$DO_RESTORE" | psql_run -d "$DBNAME" -f - 2>&1 | grep -q "ERROR"; then echo "ok"
+else echo "FAILED - the harness cannot vouch for the counters"; fi
+AFTER_SEQ="$(psql_run -d "$DBNAME" -tA -c \
+    "SELECT sequencename||'='||coalesce(last_value::text,'-') FROM pg_sequences ORDER BY 1")"
+[ "$BEFORE_SEQ" = "$AFTER_SEQ" ] || SEQ_DRIFT=1
 
 # file          | text meaning "the finding reproduces"        | finding | migration that closes it
 CASES=(
@@ -65,6 +105,13 @@ CASES=(
 "4_5_tools_vs_schema|tickets does not exist|4.5|0017_tool_call_log"
 "5_2_thread_key_ceiling|threading dies here|5.2|0005_key_types"
 "5_2_thread_key_ceiling|thread_root_id has no FK|5.2|0005_key_types"
+# 5.1/5.3 and 5.4 are behavioural: a column of the wrong width and a key distribution that
+# is merely bad both look entirely normal in the catalog, which is the lesson of 5.2. These
+# rows are what stops 0005 being credited for a type it did not actually change.
+"5_1_3_4_key_width_and_order|the >2^31 path failed|5.1|0005_key_types"
+"5_1_3_4_key_width_and_order|threading dies here|5.3|0005_key_types"
+"5_1_3_4_key_width_and_order|arrived out of order|5.4|0005_key_types"
+"5_1_3_4_key_width_and_order|the nil-UUID sentinel|5.4|0005_key_types"
 # 4.2 splits into two rows on purpose: 0004 makes the arbiter inferable and stops
 # duplicate stock rows, but the ISSUE branch's silent zero-row update is a different
 # defect that no constraint can express. Recording them together would let 0004 be
@@ -116,6 +163,17 @@ else
     echo
     echo "  residue: TESTS WROTE TO THE PERSISTENT DATABASE"
     diff <(printf '%s\n' "$BEFORE") <(printf '%s\n' "$AFTER") | sed 's/^/    /'
+    BAD_N=$((BAD_N+1))
+fi
+
+# Row counts cannot see a moved counter, and a moved counter is exactly what the ceiling
+# cases leave behind. A test that pushes a sequence past 2^31 and does not restore it has
+# changed the persistent database as surely as an INSERT would have: the next run starts
+# from a different key space, and only the first run of a suite reports the truth.
+if [ "${SEQ_DRIFT:-0}" = "1" ]; then
+    echo
+    echo "  residue: SERIAL COUNTERS MOVED AND WERE NOT RESTORED"
+    diff <(printf '%s\n' "$BEFORE_SEQ") <(printf '%s\n' "$AFTER_SEQ") | sed 's/^/    /'
     BAD_N=$((BAD_N+1))
 fi
 
