@@ -13,7 +13,7 @@ bearing; changing one without the other turns a green row red.
 | `0004_on_hand_identity` | 4.2 | unique expression identity `(tenant_id, item_id, warehouse_id, COALESCE(location_id,nil), COALESCE(lot_number,''))`; the function's `ON CONFLICT` arbiter is extended to name `tenant_id` in the same migration, because inference matches an index's key columns **as a set** and a 4-column target cannot reach a 5-column unique; deterministic merge of pre-existing duplicates, refusing to guess when they differ in real location or lot |
 | `0005_key_types` | 5.1–5.4 | integer key columns → bigint (19 widened, derived from `pg_constraint` **plus** the name rule, because `thread_root_id` has no constraint to derive it from — the finding's own subject would otherwise be skipped), **and their 6 owned sequences raised to bigint with it**, since `ALTER COLUMN TYPE` leaves the sequence's ceiling alone; `thread_root_id` gets the FK it never had; `afpc_uuid_v7()` replaces `gen_random_uuid()` on all 13 UUID primary keys; the four functions that returned `entity_id integer` are widened, because widening the table and not the API only moves the ceiling |
 | `0006_index_hygiene` | 5.5, 5.6 | drop 6 redundant indexes (3 identical pairs + 3 prefix pairs — the prefix form is the same defect, the review only counted identical column lists), give leading coverage to the 14 foreign key columns that had none, and index what the CRM actually queries: trigram GINs for the two `ILIKE '%…%'` paths (a btree cannot answer those at all), `entities.tax_id`/`contacts.phone` for equality, and an `addresses` composite that also removes `vw_customers`' per-row address sort. Creates `vw_index_redundancy` so the question has one definition instead of three. `inventory_movements.transaction_id` is **left alone** — unindexed today, not a foreign key, queried by nothing; 6.1 argues it into a dedup key, which is `0011`'s decision with its access method attached |
-| `0007_domain_constraints` | 5.9 | lookup tables for the 31 unconstrained status/type columns |
+| `0007_domain_constraints` | 5.9 | 20 membership CHECKs, 6 columns pointed at two new master-data tables (`units_of_measure`, `costing_methods`), and `vw_domain_vocabulary`, which publishes what every domain column accepts and names the 4 left free on purpose with the reason. Which mechanism a column gets is a rule, not a preference — see the header of the migration |
 | `0008_delete_safety` | 5.10 | CASCADE to RESTRICT on stock edges, explicit close-out functions |
 | `0009_rls_enforcement` | 5.7 | ENABLE+FORCE on all business tables, tenant policies, drop inert `app.current_agent` ones |
 | `0010_timestamp_triggers` | 6.3 | one `BEFORE INSERT OR UPDATE` trigger, `created_at` on the two tables lacking it |
@@ -33,15 +33,17 @@ bearing; changing one without the other turns a green row red.
 `verify.sh` prints these counts every run, so the deltas are visible rather than
 remembered.
 
-| Count | Before 0003 | After 0004 | After 0005 | After 0006 | Why |
-|---|---|---|---|---|---|
-| FKs | 30 | 47 | 48 | 48 | `tenant_id` FKs, RESTRICT, on 17 tables; then `thread_root_id`, which 5.2 found had no constraint at all |
-| tenant-coded tables | 0 | 18 | 18 | 18 | the review's "0 rows returned" for 5.8 |
-| FKs with no index anywhere | 12 | 11 | 11 | **0** | the corrected measure (see below): a column in no key position of any index. Unchanged by 0005 — `idx_comms_thread_root` already covers the new FK. 0006 indexes all of them |
-| FK columns leading no index | — | 14 | 14 | **0** | 0006's invariant, now asserted. The judgment 0003 left to be confirmed resolved **against** the tenant-led composites: an FK existence check carries no tenant predicate, so `(tenant_id, col)` cannot serve it — measured, 47 buffers/0.193 ms as a seq scan versus 6 buffers/0.017 ms index-only. Both shapes are kept where both query shapes exist, which is not the duplicate case 5.6 is about |
-| redundant index pairs (identical + prefix) | 8 | 3 | 3 | **0** | 4 pairs became single indexes when 0003 replaced the global natural key with a tenant-scoped unique; `0004` removed `idx_on_hand_available`/`idx_on_hand_low_stock`. The remaining 3 are pre-existing `idx_comm_*`/`idx_comms_*` pairs in `communications` (correction C1). 0006 found **3 more of the same defect that the review's measure could not see**: indexes whose column list is a strict leading prefix of another index on the same table (`audit_summary`, `locations`, `inventory_reservations`) — so the honest count of 5.6 is 6, not 3 |
-| integer key columns | 19 | 19 | **0** | 0 | 5.1/5.3: four serial PKs and fifteen referencing columns, widened together |
-| key columns narrower than their ceiling | 4 | 4 | **0** | 0 | bigint columns fed by an integer sequence — see B14 |
+| Count | Before 0003 | After 0004 | After 0005 | After 0006 | After 0007 | Why |
+|---|---|---|---|---|---|---|
+| FKs | 30 | 47 | 48 | 48 | 54 | `tenant_id` FKs, RESTRICT, on 17 tables; then `thread_root_id`, which 5.2 found had no constraint at all; then 6 to the master-data tables, which is why B17 had to be re-run against them |
+| tenant-coded tables | 0 | 18 | 18 | 18 | 18 | the review's "0 rows returned" for 5.8 |
+| FKs with no index anywhere | 12 | 11 | 11 | **0** | 0 | the corrected measure (see below): a column in no key position of any index. Unchanged by 0005 — `idx_comms_thread_root` already covers the new FK. 0006 indexes all of them |
+| FK columns leading no index | — | 14 | 14 | **0** | 0 | 0006's invariant, now asserted. The judgment 0003 left to be confirmed resolved **against** the tenant-led composites: an FK existence check carries no tenant predicate, so `(tenant_id, col)` cannot serve it — measured, 47 buffers/0.193 ms as a seq scan versus 6 buffers/0.017 ms index-only. Both shapes are kept where both query shapes exist, which is not the duplicate case 5.6 is about |
+| redundant index pairs (identical + prefix) | 8 | 3 | 3 | **0** | 0 | 4 pairs became single indexes when 0003 replaced the global natural key with a tenant-scoped unique; `0004` removed `idx_on_hand_available`/`idx_on_hand_low_stock`. The remaining 3 are pre-existing `idx_comm_*`/`idx_comms_*` pairs in `communications` (correction C1). 0006 found **3 more of the same defect that the review's measure could not see**: indexes whose column list is a strict leading prefix of another index on the same table (`audit_summary`, `locations`, `inventory_reservations`) — so the honest count of 5.6 is 6, not 3 |
+| integer key columns | 19 | 19 | **0** | 0 | 0 | 5.1/5.3: four serial PKs and fifteen referencing columns, widened together |
+| key columns narrower than their ceiling | 4 | 4 | **0** | 0 | 0 | bigint keys fed by an integer sequence — see B14 |
+| domain columns with no published answer | 30 | 30 | 30 | 30 | **0** | 5.9's count, restated as a question the database can answer. 26 are constrained, 4 are free text with a recorded reason |
+| tables | 18 | 19 | 19 | 19 | 21 | the two master-data tables, `units_of_measure` and `costing_methods` |
 
 Also deferred from 0003, deliberately:
 
@@ -59,6 +61,69 @@ Also deferred from 0003, deliberately:
 - **Row-level isolation.** `tenant_id` exists and is enforced structurally, but nothing
   filters by it yet. `db/tests/5_8_tenancy.sql` block 8d demonstrates both the read and
   the write hole, and is the KNOWN-OPEN row that 0009 turns green.
+
+## Found while building 0007
+
+- **`get_followup_customers` branches on a value nothing writes.** The function's first condition
+  is `rec.status = 'follow-up'` where `rec.status` is `entities.status`
+  (`db/migrations/0001_baseline_canonical_port.sql:1288`), and `entities.status`'s only documented
+  values are active / inactive / blacklisted (`docs/database/schema.md:43`). No SQL, function or
+  tool in the repository writes `'follow-up'` to anything — yet
+  `blueprint/tools/followup_customers.py:36` tells the agent that a customer is surfaced because
+  "their status is marked as 'follow-up'". So the most prominent reason the tool advertises is
+  unreachable by design, and 5.9 is the reason it was invisible: an undeclared vocabulary cannot
+  be checked for a missing member. **Assigned to `0014`**, which owns the movement and follow-up
+  contracts; `vw_domain_vocabulary` admits the value today so the gap is a *missing writer* rather
+  than a schema that could never hold the state, and `db/tests/5_9_domain_values.sql` block 4
+  proves the reader works given the value.
+- **Two documentation files disagree about `movement_type`, in both case and membership.**
+  `schema.md:352` says `'RECEIPT', 'ISSUE', 'TRANSFER', 'ADJUSTMENT', 'RESERVATION'`;
+  `blueprint/docs/schema_reference.md:299` says `'receipt', 'shipment', 'transfer', 'adjustment'`.
+  The code settles it: `execute_inventory_movement` branches on `('RECEIPT','RETURN')` and
+  `('ISSUE','ADJUSTMENT')`, which is uppercase and includes a value neither document lists. The
+  CHECK follows the code, because the code is what runs. Note what the constraint buys: TRANSFER
+  and RESERVATION are now *named* members of the vocabulary that no branch handles, which is
+  finding 4.6 stated as a set rather than as a suspicion — `0014` cannot accidentally leave it
+  implicit any more.
+- **A column's DEFAULT and its vocabulary are written in different parts of the same file, and
+  nothing connects them.** `inventory_items.base_unit_of_measure` defaults to `'EACH'`; the first
+  draft of the code table seeded `'EA'`. Had the check missed that, every insert relying on the
+  default would have failed in production, not in review. 0007 now asserts it: no column may
+  default to a value its own constraint rejects, CHECK-backed and lookup-backed alike.
+- **`pg_get_constraintdef()` renders two different shapes for the same kind of constraint**, and a
+  filter that spells one of them silently reports the other as "no constraint". Written with an
+  explicit array cast it prints `= ANY ((ARRAY['a'::character varying, ...])::text[])` — what 0003's
+  `tenants_status_check` looks like; written the way this migration's loop generates it, it prints
+  `= ANY (ARRAY['a'::text, ...])`. `vw_domain_vocabulary` initially showed 1 of 20 CHECKed columns.
+  A regex, not a `LIKE`, and `db/tests/5_9_domain_values.sql` block 2 is what proves the extraction
+  works: it writes every value the view publishes and requires each to be accepted.
+- **A test phrase must exist only on the failure side.** The harness matches with `grep -qF`, not
+  with a parser, so mapping `carries a reason` reported REGRESSION on a database where the check
+  passed — the phrase also appeared in `VERDICT OK every free-text domain column carries a reason`.
+  Every 5.9 phrase is now a fragment the OK branch cannot contain.
+- **Two membership CHECKs on one column is a contradiction, not a refinement.** Discovered by
+  accident when a probe constraint survived next to `entities_status_allowed` and the view printed
+  the column twice with different value sets, which also made 5.1's coverage count wrong by one.
+  Asserted against, as `vw_domain_vocabulary` being one row per column (B18).
+- **Why the mechanism differs per column, and why that is not inconsistency.** A CHECK where the
+  repository can name the complete set (a documented list, or a value the code branches on) — an
+  unlisted value is then a bug, and refusing it is the point. A lookup table where the set names
+  something that grows (units, costing methods) — being wrong should cost an `INSERT`, not a
+  migration. Nothing at all where the set belongs to whatever is installed: `bot_actions.action_type`
+  names a *tool*, and constraining it would make every new agent a schema change. The fourth case
+  is `entity_relationships.role`, which the schema's own examples ("Procurement Manager", "Owner")
+  make a job title. All four appear in `vw_domain_vocabulary` with the reason, and B2 fails if any
+  of them appears without one.
+- **Nothing in the tree branches on `warehouse_type`, `location_type`, `product_type` or
+  `order_type`, and no document lists their values** — only defaults (`PRIMARY`, `STORAGE`,
+  `STOCKED`, none). These four CHECKs are the weakest evidence in the migration: the sets were
+  composed from what the surrounding columns imply (a `parent_warehouse_id` means a second kind of
+  warehouse exists; `aisle`/`rack`/`shelf`/`bin`/`zone` mean a location has a role). Each
+  constraint comment says so, and the same note is in the migration header. A deployment that
+  ships in cross-docks will hit `warehouses_warehouse_type_allowed` and learn, from the constraint
+  name, that this was a guess rather than a specification. The alternative — leaving them open —
+  was rejected because 5.9's thesis is that an undefined vocabulary hides bugs, and these are the
+  columns a warehouse agent would write.
 
 ## Found while building 0006
 

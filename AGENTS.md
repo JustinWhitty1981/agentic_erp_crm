@@ -299,6 +299,8 @@ See `.env.example` for required variables.
 | `bot_actions` | AI agent actions |
 | `agent_interactions` | Complete trajectory logging |
 | `audit_summary` | Daily aggregation |
+| `units_of_measure` | Master data: units an item can be counted, weighed or measured in |
+| `costing_methods` | Master data: how an item's cost is derived |
 
 ### Views for Agents
 | View | Purpose |
@@ -317,6 +319,7 @@ See `.env.example` for required variables.
 | `vw_failed_interactions` | Error analysis |
 | `vw_tool_performance` | Tool usage statistics |
 | `vw_index_redundancy` | Indexes that are identical to, or a leading prefix of, another index |
+| `vw_domain_vocabulary` | What every status/type column accepts, how it is enforced, and why |
 | `vw_inventory_valuation` | Inventory value by warehouse/category |
 | `vw_item_availability` | Stock levels across warehouses |
 | `vw_item_movement_summary` | 30-day item movement patterns |

@@ -184,6 +184,31 @@ to drop an index it believed was uncovered.
 a clone of it whose indexes had been recreated in the other order. Add a tiebreak only to a
 branch that is otherwise symmetric.
 
+**`pg_get_constraintdef()` has two renderings of a membership test, and a filter that spells one
+misses the other.** `= ANY ((ARRAY['a'::character varying, ...])::text[])` is what a constraint
+written with an explicit array cast prints as; `= ANY (ARRAY['a'::text, ...])` is what the same kind
+of constraint prints as when the cast was implied. A `LIKE '%= ANY ((ARRAY%'` filter therefore
+reports half the CHECK constraints in the database as nonexistent - `vw_domain_vocabulary` found 1
+of 20 on the first run. Match both with a regex, and have a test write every value the view
+publishes, which is the only check that notices when the extraction stops working.
+
+**A grep for a column name in a view definition is not a dependency query.** Asking "which views
+read `version`?" with `position('version' in definition) > 0` matches `version()`, `substring(...)`
+and any identifier that merely contains the string, and the negative form of the same question
+("no view mentions it") matches nothing useful either. Ask the catalog: `pg_depend` rows from
+`pg_rewrite` to `pg_attribute` list the columns a view actually reads. Run that way, the answer is
+that **none of the 14 domain views reads any `version` column** - `vw_inventory_valuation` exists
+and is one of the 14, but its columns come from `inventory_on_hand.quantity`/`unit_cost`, not from
+the optimistic-lock counter. That settles 0010's "propagate `version` through the views" note:
+there is no view to propagate it through, so 010 either drops that item or says which view it
+meant. (`pg_views` shows 16 rows in `public`; the extra two are `pg_stat_statements*`, extension
+-owned, which is why the catalog line counts 14.)
+
+**`split_part` takes three arguments**, `cardinality()` ignores array subscripts while `array_length`
+does not, and `unnest()` of a zero-based vector is still iterated in order - three small ways an
+array comparison can be wrong in the direction that looks clean. When slicing a key list, rebuild
+it through `unnest(...) WITH ORDINALITY` and `array_agg` first.
+
 **`uuid_generate_v1mc()` is not time-ordered in the way you would expect.** Its leading
 32 bits are `time_low`, which wraps every 429 seconds; across a boundary, 19 of 20 older
 keys sort *after* a newer one, so the btree walks backward through pages it already passed.

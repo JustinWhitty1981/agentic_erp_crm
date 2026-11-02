@@ -144,25 +144,23 @@ check "B1b 5.8 natural keys tenant-scoped" "0003_tenant_foundation" \
            AND a.attname='tenant_id')" \
     "natural keys still globally unique (review 5.8's warehouse-code example)"
 
-check "B2 5.9  domain values constrained" "0007_domain_constraints" \
-    "SELECT count(*) FROM information_schema.columns c
-      WHERE c.table_schema='public' AND c.data_type IN ('character varying','text','character')
-        AND (c.column_name IN ('status','channel','direction','outcome','priority','sentiment_label',
-             'role','address_type','session_status','bot_type','action_type','movement_type',
-             'reference_type','unit_of_measure','order_type','cost_method','item_group','product_type',
-             'warehouse_type','location_type','base_uom','weight_unit','dimension_unit')
-             OR c.column_name LIKE '%type' OR c.column_name LIKE '%status')
-        AND c.column_default IS NULL
-        AND NOT EXISTS (SELECT 1 FROM information_schema.table_constraints tc
-                        JOIN information_schema.constraint_column_usage ccu
-                          ON tc.constraint_name=ccu.constraint_name
-                        WHERE tc.constraint_type IN ('CHECK','FOREIGN KEY')
-                          AND ccu.table_name=c.table_name AND ccu.column_name=c.column_name)
-        AND NOT EXISTS (SELECT 1 FROM information_schema.check_constraints ch
-                        WHERE ch.constraint_schema='public'
-                          AND position(c.column_name in ch.check_clause) > 0)" \
-    "status/type columns with no CHECK and no lookup FK"
+check "B2 5.9  every domain column has an answer" "0007_domain_constraints" \
+    "SELECT count(*) FROM vw_domain_vocabulary WHERE reason LIKE 'UNDECIDED%'" \
+    "domain columns with neither a constraint nor a recorded reason for staying free text"
 
+check "B18 5.9  domain answers are complete" "0007_domain_constraints" \
+    "SELECT (SELECT count(*) FROM vw_domain_vocabulary) - (SELECT count(DISTINCT table_name||'.'||column_name) FROM vw_domain_vocabulary) + (SELECT count(*) FROM ( \
+        SELECT c.relname||'.'||a.attname AS col \
+          FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid \
+          JOIN pg_namespace n ON n.oid=c.relnamespace \
+         WHERE n.nspname='public' AND c.relkind='r' AND c.relname<>'_schema_graph' AND a.attnum>0 \
+           AND NOT a.attisdropped AND a.atttypid IN ('text'::regtype,'varchar'::regtype) \
+           AND (a.attname ~ '(_type|_status|_method|_label|_unit|_measure)$|(^|_)status$|(^|_)priority$|(^|_)direction$|(^|_)outcome$' \
+                OR a.attname IN ('role','channel','action_type','item_group')) \
+           AND a.attname NOT IN ('industry','website','title','agent_id','reason_code','follow_up_action') \
+     ) x WHERE NOT EXISTS (SELECT 1 FROM vw_domain_vocabulary v2 \
+                            WHERE v2.table_name||'.'||v2.column_name = x.col))" \
+    "domain columns outside vw_domain_vocabulary, or listed twice (a second membership CHECK on one column contradicts the first)"
 check "B3 5.10 no CASCADE into stock" "0008_delete_safety" \
     "SELECT count(*) FROM pg_constraint c JOIN pg_class r ON r.oid=c.conrelid
       JOIN pg_namespace n ON n.oid=r.relnamespace
@@ -327,12 +325,23 @@ SELECT format('%s tables / %s views / %s functions / %s FKs / %s triggers',
 # The redundant-pair count lives in vw_index_redundancy, which 0006 creates, so it is read from
 # there rather than re-derived here - with an explicit "not yet" when the view does not exist,
 # because a 0 here would otherwise look like a clean bill of health for a check that never ran.
+if [ "$(scalar "SELECT to_regclass('public.vw_domain_vocabulary') IS NOT NULL")" = "t" ]; then
+    # quote_literal, so the value arrives as a SQL string rather than as bare words the
+    # surrounding format() call tries to parse as an expression.
+    VOCAB=$(scalar "SELECT quote_literal(
+        (SELECT count(*) FROM vw_domain_vocabulary WHERE enforced_by <> 'none - free text')
+        ||' constrained / '
+        ||(SELECT count(*) FROM vw_domain_vocabulary WHERE enforced_by = 'none - free text')
+        ||' free by decision')")
+else
+    VOCAB="'not yet (0007)'" 
+fi
 if [ "$(scalar "SELECT to_regclass('public.vw_index_redundancy') IS NOT NULL")" = "t" ]; then
     REDUNDANT=$(scalar "SELECT count(*)::text FROM vw_index_redundancy")
 else
     REDUNDANT="'not yet (0006)'"
 fi
-scalar "SELECT format('%s enums / %s CASCADE / %s RLS-forced / %s tenant-coded / %s redundant index pairs / %s FKs unindexed (any position) / %s FKs leading no index',
+scalar "SELECT format('%s enums / %s CASCADE / %s RLS-forced / %s tenant-coded / %s redundant index pairs / %s FKs unindexed (any position) / %s FKs leading no index / domain values: %s',
     (SELECT count(*) FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace WHERE n.nspname='public' AND t.typtype='e'),
     (SELECT count(*) FROM pg_constraint WHERE contype='f' AND confdeltype='c'),
     (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relrowsecurity AND c.relforcerowsecurity),
@@ -346,7 +355,8 @@ scalar "SELECT format('%s enums / %s CASCADE / %s RLS-forced / %s tenant-coded /
         AND (SELECT attname FROM pg_attribute WHERE attrelid=c.conrelid AND attnum=(c.conkey)[1])
             <> 'tenant_id'
         AND NOT EXISTS (SELECT 1 FROM pg_index i
-        WHERE i.indrelid=c.conrelid AND i.indkey[0]=(c.conkey)[1])))"
+        WHERE i.indrelid=c.conrelid AND i.indkey[0]=(c.conkey)[1])),
+    $VOCAB)"
 
 echo
 echo "== scoreboard =="

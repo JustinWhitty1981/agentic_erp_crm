@@ -138,6 +138,19 @@ CASES=(
 # Two rows for 5.6's hygiene half: the redundancy answer itself, and whether anything has
 # counted it yet. The second is the one that would otherwise read CLOSED by silence.
 "5_5_6_index_hygiene|no redundancy view exists yet|5.6|0006_index_hygiene"
+# 5.9's rows are each half of a design claim, so each needs its own state: a CHECK that refuses
+# a case variant, a CHECK that still accepts its own vocabulary, a code table that grows with an
+# INSERT, a state machine that refuses an undefined value, and the free-text exceptions staying
+# open on purpose with a reason attached.
+"5_9_domain_values|accepted ACTIVE alongside active|5.9|0007_domain_constraints"
+"5_9_domain_values|were refused by the constraint that publishes them|5.9|0007_domain_constraints"
+"5_9_domain_values|no published vocabulary yet|5.9|0007_domain_constraints"
+"5_9_domain_values|no master-data tables exist yet|5.9|0007_domain_constraints"
+"5_9_domain_values|did not restrict an unknown code|5.9|0007_domain_constraints"
+"5_9_domain_values|registered and is still refused|5.9|0007_domain_constraints"
+"5_9_domain_values|accepted an undefined state|5.9|0007_domain_constraints"
+"5_9_domain_values|is now constrained by|5.9|0007_domain_constraints"
+"5_9_domain_values|are undocumented|5.9|0007_domain_constraints"
 "5_5_6_index_hygiene|index pairs are redundant|5.6|0006_index_hygiene"
 )
 

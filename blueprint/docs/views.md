@@ -443,3 +443,27 @@ redundant. The last two exclusions are load-bearing: an index on
 `(tenant_id, item_id, warehouse_id)` looks like a prefix of 0004's identity index but is not
 interchangeable with it, because the identity index's `COALESCE` positions are what tell a
 no-bin stock row from a real one.
+
+### vw_domain_vocabulary
+What each status/type column accepts, how that is enforced, and why. Built by
+`db/migrations/0007_domain_constraints.sql` as the machine-readable half of review 5.9: the
+constraints make the database correct, this makes correctness queryable by an agent that is about
+to write a value.
+
+```sql
+SELECT * FROM vw_domain_vocabulary WHERE table_name = 'followups';
+```
+
+| Column | Meaning |
+|---|---|
+| table_name, column_name | the domain column |
+| enforced_by | `check`, `lookup table`, or `none - free text` |
+| rule | the constraint or foreign key that enforces it |
+| enforced_on_existing_rows | false means a NOT VALID constraint: new writes are checked, old rows are not |
+| nulls | whether the column admits NULL |
+| allowed_values | the literal set, extracted from the constraint definition |
+| lookup_values / lookup_table | the current codes, and the table they live in |
+| reason | for a free-text column: why it stayed open. For everything else: NULL |
+
+One row per domain column in `public`, derived from the catalog, so a column nobody considered
+appears as `UNDECIDED` rather than going missing.
