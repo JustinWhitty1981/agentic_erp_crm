@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# Single entry point for the development database.
+#
+#   scripts/db/db <command>
+#
+# This file, not the Makefile, holds the behaviour. Two implementations of the same
+# operations drift, and `make` is not installed on this host - which is part of why the
+# documented build path went unexercised for as long as it did. The Makefile delegates
+# here so both routes are identical.
+
+set -euo pipefail
+DB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$DB/../.." && pwd)"
+COMPOSE=(docker compose -f "$ROOT/dev/docker-compose.yml" --env-file "$ROOT/dev/.env")
+
+usage() {
+    cat <<'EOF'
+Agent First ERP CRM - development database
+
+  scripts/db/db up [--local]     start the container, provision it, apply migrations
+                        (--local keeps the binding on 127.0.0.1)
+  scripts/db/db init             re-apply roles, TLS, network rules, settings (idempotent)
+  scripts/db/db migrate          apply pending migrations, with checksum and order checks
+  scripts/db/db status           container, volumes, migration state
+  scripts/db/db verify           structural assertions against the live catalog
+  scripts/db/db test             execute the schema functions: known-open / closed / regression
+  scripts/db/db seed             load development reference data
+  scripts/db/db shell            psql as the owner, inside the container
+  scripts/db/db audit            psql as the view-only audit role, over TLS
+  scripts/db/db backup           pg_dump -Fc into backup/
+  scripts/db/db fresh            DESTROY the volume and rebuild from migrations (asks)
+  scripts/db/db down             stop, keeping data
+  scripts/db/db destroy          stop and delete the volume (asks)
+EOF
+}
+
+env_file() {
+    [ -f "$ROOT/dev/.env" ] && return 0
+    ( cd "$ROOT/dev" && umask 077 && {
+        echo "PGBIND=127.0.0.1"
+        echo "PGPORT=5432"
+        for k in POSTGRES_PASSWORD AFPC_APP_PASSWORD AFPC_READONLY_PASSWORD AFPC_AUDITOR_PASSWORD; do
+            printf '%s=%s\n' "$k" "$(head -c32 /dev/urandom | base64 | tr -d '+/=' | head -c22)"
+        done
+        echo "AFPC_TENANT_ID=00000000-0000-0000-0000-000000000001"
+    } > .env )
+    chmod 600 "$ROOT/dev/.env"
+    echo "generated dev/.env with random local credentials (mode 600, gitignored)"
+}
+
+confirm() {
+    printf '%s' "$1"
+    read -r reply
+    [ "$reply" = "y" ] || { echo "aborted"; exit 1; }
+}
+
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+    up)
+        env_file
+        "${COMPOSE[@]}" up -d
+        if [ "${1:-}" = "--local" ]; then "$DB/init.sh" --no-net; else "$DB/init.sh"; fi
+        "$DB/migrate.sh"
+        "$DB/verify.sh" || true
+        ;;
+    init)     env_file; "$DB/init.sh" "$@" ;;
+    migrate)  "$DB/migrate.sh" "$@" ;;
+    status)   "$DB/migrate.sh" --status
+              docker ps --filter name=afpc-pg --format '  container {{.Names}}  {{.Status}}  {{.Ports}}'
+              docker volume ls --filter name=afpc --format '  volume {{.Name}}' ;;
+    verify)   "$DB/verify.sh" "$@" ;;
+    test)     "$DB/test-functions.sh" "$@" ;;
+    seed)     "$DB/seed.sh" "$@" ;;
+    shell)    "${COMPOSE[@]}" exec postgres psql -X -U postgres -d agent_first_erp_crm ;;
+    audit)
+        "${COMPOSE[@]}" exec -e PGPASSWORD="$(sed -n 's/^AFPC_AUDITOR_PASSWORD=//p' "$ROOT/dev/.env")" \
+            postgres psql "host=127.0.0.1 port=5432 dbname=agent_first_erp_crm user=afpc_auditor sslmode=require" ;;
+    backup)
+        mkdir -p "$ROOT/backup"
+        local_file="agent_first_erp_crm_$(date +%Y%m%d_%H%M%S).dump"
+        "${COMPOSE[@]}" exec -T postgres pg_dump -U postgres -Fc -d agent_first_erp_crm > "$ROOT/backup/$local_file"
+        echo "wrote backup/$local_file"
+        echo "restore with: pg_restore -d agent_first_erp_crm --clean --if-exists backup/$local_file" ;;
+    fresh)
+        confirm "This DESTROYS the development database and rebuilds it. Type y to continue: "
+        "${COMPOSE[@]}" down -v
+        env_file
+        "${COMPOSE[@]}" up -d
+        "$DB/init.sh"
+        "$DB/migrate.sh"
+        "$DB/seed.sh" || true
+        "$DB/verify.sh" || true
+        "$DB/test-functions.sh" || true
+        ;;
+    down)     "${COMPOSE[@]}" stop; echo "stopped; volume afpc_pgdata preserved" ;;
+    destroy)
+        confirm "This deletes volume afpc_pgdata permanently. Type y to continue: "
+        "${COMPOSE[@]}" down -v ;;
+    help|-h|--help) usage ;;
+    *) echo "unknown command: $cmd" >&2; usage; exit 2 ;;
+esac

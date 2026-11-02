@@ -1,127 +1,117 @@
 # Agent First ERP CRM Makefile
-# Common development tasks
+#
+# Every database target delegates to scripts/db/db, which holds the behaviour. Two
+# implementations of the same operations drift apart, and this host has no `make`
+# installed, so the dispatcher is the authoritative route and works on its own:
+#
+#   scripts/db/db up          scripts/db/db verify          scripts/db/db test
+#
+# Install make on Debian/Ubuntu with: sudo apt-get install make
 
-.PHONY: help setup test lint clean db-create db-migrate db-seed
+DB := scripts/db/db
 
-# Default target
+.PHONY: help setup test lint format test-coverage clean docs docs-schema \
+        dev-up dev-init dev-status dev-down dev-destroy \
+        db-migrate db-status db-verify db-test db-seed db-shell db-audit \
+        db-backup db-fresh db-destroy
+
 help:
-	@echo "Agent First ERP CRM - Available Commands"
-	@echo ""
-	@echo "Setup:"
-	@echo "  make setup          - Set up development environment"
-	@echo "  make db-create      - Create PostgreSQL database"
-	@echo "  make db-migrate     - Apply database schema"
-	@echo "  make db-seed        - Load sample data"
+	@$(DB) help
 	@echo ""
 	@echo "Development:"
-	@echo "  make test           - Run all tests"
-	@echo "  make test-coverage  - Run tests with coverage report"
-	@echo "  make lint           - Run linting checks"
-	@echo "  make format         - Format code"
-	@echo ""
-	@echo "Database:"
-	@echo "  make db-reset       - Reset database (WARNING: destroys data)"
-	@echo "  make db-backup      - Backup database"
-	@echo "  make db-restore     - Restore database from backup"
-	@echo ""
-	@echo "Documentation:"
-	@echo "  make docs           - Generate documentation"
-	@echo "  make docs-schema    - Generate schema documentation"
-	@echo ""
-	@echo "Cleanup:"
-	@echo "  make clean          - Clean temporary files"
+	@echo "  make test / lint / format / docs / docs-schema / clean"
 
-# Setup development environment
+# ------------------------------------------------------------------ environment --
+dev-up:
+	@$(DB) up
+
+dev-init:
+	@$(DB) init
+
+dev-status:
+	@$(DB) status
+
+dev-down:
+	@$(DB) down
+
+dev-destroy:
+	@$(DB) destroy
+
+# --------------------------------------------------------------------- database --
+db-migrate:
+	@$(DB) migrate
+
+db-status:
+	@$(DB) status
+
+db-verify:
+	@$(DB) verify
+
+db-test:
+	@$(DB) test
+
+db-seed:
+	@$(DB) seed
+
+db-shell:
+	@$(DB) shell
+
+db-audit:
+	@$(DB) audit
+
+db-backup:
+	@$(DB) backup
+
+# Destroys and rebuilds. Gated, because this database is expected to persist.
+db-fresh:
+	@$(DB) fresh
+
+# ------------------------------------------------------------------- code tasks --
 setup:
 	@echo "Setting up development environment..."
 	@python3 -m venv venv
-	@source venv/bin/activate && pip install -r blueprint/requirements.txt
-	@echo "Setup complete. Run 'source venv/bin/activate' to activate the virtual environment."
+	@./venv/bin/pip install -r blueprint/requirements.txt
+	@echo "Now run: scripts/db/db up"
 
-# Create PostgreSQL database
-db-create:
-	@echo "Creating database 'agent_first_erp_crm'..."
-	@createdb agent_first_erp_crm || echo "Database may already exist"
-
-# Apply database schema
-db-migrate:
-	@echo "Applying database schema..."
-	@psql -d agent_first_erp_crm -f scripts/database/agent_first_erp_crm_schema.sql
-	@psql -d agent_first_erp_crm -f scripts/database/08_create_views.sql
-	@psql -d agent_first_erp_crm -f scripts/database/09_customer_functions.sql
-	@psql -d agent_first_erp_crm -f scripts/database/10_audit_log.sql
-	@psql -d agent_first_erp_crm -f scripts/database/11_interaction_logging.sql
-	@echo "Schema migration complete."
-
-# Load sample data
-db-seed:
-	@echo "Loading sample data..."
-	@psql -d agent_first_erp_crm -f scripts/database/setup_sample_data.sql
-	@echo "Sample data loaded."
-
-# Run all tests
 test:
 	@echo "Running tests..."
 	@pytest blueprint/tests/ -v
 
-# Run tests with coverage
 test-coverage:
 	@echo "Running tests with coverage..."
 	@pytest blueprint/tests/ --cov=blueprint --cov-report=html --cov-report=term-missing
 
-# Run linting
 lint:
 	@echo "Running linting checks..."
 	@python3 -m pycodestyle blueprint/ --max-line-length=120
 	@python3 -m pyflakes blueprint/
 
-# Format code
 format:
 	@echo "Formatting code..."
 	@python3 -m black blueprint/ --line-length 120
 
-# Reset database (WARNING: destroys all data)
-db-reset:
-	@echo "WARNING: This will destroy all data in the database!"
-	@read -p "Are you sure? (y/N) " confirm && [ "$$confirm" = "y" ] || exit 1
-	@dropdb agent_first_erp_crm || true
-	@createdb agent_first_erp_crm
-	@make db-migrate
-
-# Backup database
-db-backup:
-	@echo "Backing up database to backup/agent_first_erp_crm_$$(date +%Y%m%d_%H%M%S).sql..."
-	@mkdir -p backup
-	@pg_dump agent_first_erp_crm > backup/agent_first_erp_crm_$$(date +%Y%m%d_%H%M%S).sql
-
-# Restore database from backup
-db-restore:
-	@echo "Restoring database from backup..."
-	@read -p "Enter backup file name: " backup_file && \
-		psql agent_first_erp_crm < backup/$$backup_file
-
-# Generate documentation
 docs:
-	@echo "Generating documentation..."
 	@echo "Documentation is located in:"
-	@echo "  - blueprint/docs/ (agent-friendly SQL documentation)"
-	@echo "  - docs/database/ (database schema documentation)"
-	@echo "  - ARCHITECTURE_DECISION_RECORDS/ (architecture decisions)"
+	@echo "  - db/README.md                      single source of truth for the schema"
+	@echo "  - db/MIGRATIONS.md                  finding -> migration mapping"
+	@echo "  - dev/README.md                     this development server, audit access"
+	@echo "  - blueprint/docs/                   agent-friendly SQL documentation"
+	@echo "  - docs/database/                    schema documentation and review"
+	@echo "  - ARCHITECTURE_DECISION_RECORDS/     architecture decisions"
 
-# Generate schema documentation using pgschema
+# Regenerated from the running catalog, so it cannot drift the way the hand-maintained
+# schema.md did. Wired into CI in Phase 2 of the remediation plan.
 docs-schema:
-	@echo "Generating schema documentation with pgschema..."
-	@pip install pgschema
-	@pgschema dump -h localhost -U postgres -d agent_first_erp_crm -o docs/schema/
-	@pgschema graph -h localhost -U postgres -d agent_first_erp_crm > schema_graph.dot
+	@echo "Generating schema documentation from the live catalog..."
+	@$(DB) shell -c "\\dt+" > docs/database/tables.md
+	@$(DB) shell -c "\\dv+" > docs/database/views.md
+	@$(DB) shell -c "SELECT indexdef FROM pg_index i JOIN pg_class c ON c.oid=i.indrelid ORDER BY 1" > docs/database/indexes.md
+	@echo "wrote docs/database/{tables,views,indexes}.md"
 
-# Clean temporary files
 clean:
 	@echo "Cleaning temporary files..."
 	@find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 	@find . -type d -name "*.pyc" -delete 2>/dev/null || true
 	@find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
-	@find . -type d -name ".mypy_cache" -exec rm -rf {} + 2>/dev/null || true
 	@rm -rf htmlcov/ .coverage 2>/dev/null || true
-	@rm -rf .tmp/* 2>/dev/null || true
 	@echo "Cleanup complete."

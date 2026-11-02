@@ -1,0 +1,58 @@
+name: agentfirst
+
+# Local development database for Agent First ERP CRM.
+#
+# This host is the primary development server: the data volume is durable and is
+# never recreated implicitly. Destructive operations live behind `make db-fresh`
+# and require confirmation.
+#
+# PGBIND controls exposure: 127.0.0.1 for a quiet box, 0.0.0.0 once
+# scripts/db/init.sh has installed TLS and the network pg_hba rules.
+# Never leave this unset-open on a host with public IPv6 on the interface:
+# `ports: - "5432:5432"` binds :: as well as 0.0.0.0, which would expose the
+# database on this machine's global IPv6 address.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: afpc-pg
+    restart: unless-stopped
+    shm_size: 256mb
+    ports:
+      - "${PGBIND:-127.0.0.1}:${PGPORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in dev/.env}
+      POSTGRES_DB: agent_first_erp_crm
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C.UTF-8"
+    volumes:
+      - afpc_pgdata:/var/lib/postgresql/data
+      # Certificates live in a volume, not a bind mount: repo files are mode 0660
+      # and the container's postgres user could not read a bind-mounted key.
+      - afpc_tls:/certs
+    healthcheck:
+      # No -d: a volume whose first boot was interrupted has no application
+      # database yet, and reporting unhealthy forever would obscure the real state.
+      test: ["CMD-SHELL", "pg_isready -U postgres -h 127.0.0.1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+    networks:
+      - afpc_net
+    # Server configuration is applied by scripts/db/init.sh via ALTER SYSTEM, which
+    # writes postgresql.auto.conf on the data volume: recreate-safe and auditable.
+    # Command-line overrides are avoided - one malformed list item crash-loops the
+    # container, and referencing a TLS file that is not there yet is unrecoverable
+    # without an edit.
+
+networks:
+  afpc_net:
+    name: afpc_net
+    driver: bridge
+
+volumes:
+  afpc_pgdata:
+    name: afpc_pgdata
+  afpc_tls:
+    name: afpc_tls
