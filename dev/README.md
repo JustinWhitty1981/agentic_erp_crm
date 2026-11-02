@@ -27,6 +27,13 @@ psql "host=192.168.0.53 port=5432 dbname=agent_first_erp_crm user=afpc_auditor \
 `100.70.251.57`. If you would rather not distribute the CA, `sslmode=require` works
 but does not verify the certificate.
 
+**The CA is stable across rebuilds.** `scripts/db/db fresh` destroys only the data volume;
+the certificate volume survives, and `init.sh` regenerates the authority only if the
+authority itself is missing (a leaf can be reissued from a surviving CA, and the CA can
+only sign a new leaf if its key survived with it). If you ever see
+`certificate could not be validated` after a rebuild, the CA genuinely changed — re-copy
+`dev/tls/afpc-ca.crt` rather than downgrading to `sslmode=require`.
+
 The role is read-only by three independent mechanisms, so a single oversight cannot
 make it writable:
 
@@ -118,3 +125,15 @@ address changed.** It decided the configuration was unchanged and left a stale
 `127.0.0.1` binding live after `PGBIND` had been set to `0.0.0.0`. `init.sh` now compares
 the published address with the desired one and forces recreation; if you change `PGBIND`
 by hand, use `up -d --force-recreate`.
+
+**`pg_index.indkey` is zero-subscripted.** `indkey[0]` is the first key column. Slicing it
+as `indkey[1:n]` silently omits that first column, which made an index-coverage check in
+0004 report that `item_id` appeared in no index when it led the identity. Use
+`attnum = ANY(indkey)` and compare against `indkey[0]` explicitly; with ORDINALITY, the
+attribute at ordinal *k* is `indkey[k-1]`.
+
+**A `CTE` does not outlive its statement.** `WITH x AS (...) UPDATE ...; DELETE ... USING x`
+is a parse error - the second statement cannot see the first one's CTE. A migration that
+combines them looks correct and only fails when the code path is reachable, which on an
+empty development table it never is. 0004's duplicate-merge had exactly this bug and a
+clone rehearsal is what found it.
