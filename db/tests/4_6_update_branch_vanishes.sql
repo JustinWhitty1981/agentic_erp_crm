@@ -17,9 +17,14 @@
 -- function rewrite in 0014: raise on ROW_COUNT = 0, or write a negative on-hand row and
 -- let a CHECK reject it, which is the behaviour an ERP ledger should have.
 --
--- The INSERT-of-a-movement path is also avoided here on purpose: it still fails on the
--- 4.1 unit_of_measure defect, and conflating the two would make 0014's completion
--- ambiguous.
+-- The INSERT-of-a-movement path WAS avoided here: it still failed on the 4.1
+-- unit_of_measure defect, and calling the function would have read a 23502 as the hole
+-- being closed for the wrong reason. 0014 closes 4.1, which retires that constraint - so
+-- the file now reads the signature from pg_proc and runs the real call once the function
+-- can reach its ISSUE branch (0010's probe-E repoint obligation, applied at the call site
+-- the ledger belongs to). Pre-0014 databases run exactly the old statement probe;
+-- post-0014 they also see the stronger property the statement form could not express: a
+-- refused issue leaves no ledger row.
 
 BEGIN;
 DO $$
@@ -29,6 +34,7 @@ DECLARE
     v_before  int;
     v_after   int;
     v_touch   int;
+    v_fixed   boolean;
 BEGIN
     INSERT INTO warehouses (warehouse_code, name)
         VALUES ('AFPC-TEST-6', 'harness warehouse') RETURNING warehouse_id INTO v_wh;
@@ -40,23 +46,42 @@ BEGIN
     SELECT count(*) INTO v_before FROM inventory_on_hand
      WHERE item_id = v_item AND warehouse_id = v_wh;
 
-    -- The statement the function's ISSUE branch executes, taken literally. Calling the
-    -- function here would not test this defect: 4.1 makes the ledger INSERT fail with
-    -- 23502, which the handler reports as "refused", and the harness would read that as
-    -- the hole being closed for the wrong reason. 4.1's own row covers that path.
-    UPDATE inventory_on_hand
-       SET quantity_on_hand = quantity_on_hand - 5
-     WHERE item_id = v_item AND warehouse_id = v_wh;
-    GET DIAGNOSTICS v_touch = ROW_COUNT;
-    SELECT count(*) INTO v_after FROM inventory_on_hand
-     WHERE item_id = v_item AND warehouse_id = v_wh;
+    SELECT EXISTS (SELECT 1 FROM pg_proc p, unnest(p.proargnames) AS a
+                    WHERE p.proname = 'execute_inventory_movement'
+                      AND a = 'p_unit_of_measure') INTO v_fixed;
 
-    IF v_touch = 0 THEN
-        RAISE NOTICE 'VERDICT ERR 00000 | phantom issue: the UPDATE matched % rows and '
-                     'decremented nothing, yet the function returns a movement id - the '
-                     'ledger records an ISSUE no balance reflects', v_touch;
+    IF NOT v_fixed THEN
+        -- The statement the function's ISSUE branch executes, taken literally, because
+        -- pre-0014 the function never reaches it (header above).
+        UPDATE inventory_on_hand
+           SET quantity_on_hand = quantity_on_hand - 5
+         WHERE item_id = v_item AND warehouse_id = v_wh;
+        GET DIAGNOSTICS v_touch = ROW_COUNT;
+
+        IF v_touch = 0 THEN
+            RAISE NOTICE 'VERDICT ERR 00000 | phantom issue: the UPDATE matched % rows and '
+                         'decremented nothing, yet the function returns a movement id - the '
+                         'ledger records an ISSUE no balance reflects', v_touch;
+        ELSE
+            RAISE NOTICE 'VERDICT INFO the stock UPDATE matched % row(s)', v_touch;
+        END IF;
     ELSE
-        RAISE NOTICE 'VERDICT INFO the stock UPDATE matched % row(s)', v_touch;
+        BEGIN
+            PERFORM execute_inventory_movement(
+                'ISSUE', v_item, v_wh, NULL, 5, 5.00,
+                'afpc_harness', 'ORDER', NULL, 'phantom probe');
+            RAISE NOTICE 'VERDICT ERR 00000 | phantom issue: the call returned a movement id '
+                         'after matching no stock row - the ledger records an ISSUE no '
+                         'balance reflects';
+        EXCEPTION WHEN OTHERS THEN
+            IF (SELECT count(*) FROM inventory_movements WHERE item_id = v_item) <> 0 THEN
+                RAISE NOTICE 'VERDICT ERR % | phantom issue: the call refused, yet its ledger '
+                             'row survived the refusal - an ISSUE no balance reflects', SQLSTATE;
+            ELSE
+                RAISE NOTICE 'VERDICT OK the zero-stock issue was refused (SQLSTATE %), and '
+                             'the ledger row it had already written went back with it', SQLSTATE;
+            END IF;
+        END;
     END IF;
 EXCEPTION WHEN OTHERS THEN
     RAISE NOTICE 'VERDICT ERR % | the probe itself failed, which says nothing about the '

@@ -149,9 +149,29 @@ TLS change, `init.sh` reverts `ssl` rather than leaving a persistent database un
 
 ## Things that will bite you if you do not know them
 
-Thirty-five of these, each learned by a check failing on a rehearsal or a
+Thirty-eight of these, each learned by a check failing on a rehearsal or a
 migration after the fact - not by reading documentation about the database. Keep the pattern: when a migration surprises
 you, the surprise goes here, and the check that would have caught it goes in verify.sh.
+
+**`CREATE OR REPLACE FUNCTION` with a changed parameter list creates a SECOND function.**
+"Or replace" matches by signature, and a new signature matches nothing: 0014 added two
+DEFAULTed parameters to `execute_inventory_movement`, and every call to the name went
+ambiguous - 4.4's own 42725, reproduced inside the migration fixing 4.x. A signature-changing
+rewrite is `DROP FUNCTION IF EXISTS` (by full old signature) then `CREATE`. Assert the count
+of heads from `pg_proc` if you doubt it; 0014's probe I does.
+
+**`ON CONFLICT DO UPDATE` runs CHECK constraints against the tentative INSERT row.** The
+conflicting row's UPDATE branch is not reached until the speculative insert resolves - and
+"resolve" happens *after* the new tuple is checked. An `ADD`-style upsert whose INSERT-side
+value can violate a column CHECK (0014's negative receipt vs `chk_quantities_non_negative`)
+therefore fails in the way no reading of the statement predicts: the UPDATE-side CASE that
+was supposed to handle the case never runs. Read the Failing-row DETAIL, not the docs.
+
+**plpgsql's predefined condition names do not cover the SQLSTATE space.** `WHEN
+cardinality_violation` caught neither 2201E nor 22012 in this build (measured: both escaped
+the handler) - a WHEN arm naming the wrong thing is not a failing test, it is a test that
+silently stops existing. Name conditions you've probed, use `WHEN SQLSTATE 'xxxxx'` when the
+number is the fact, and let `WHEN OTHERS` + a SQLSTATE check be the fallback shape.
 
 **`setval(seq, v, false)` hands out `v` itself, not `v+1`.** A test harness that "restores"
 a sequence to `max(id)` with is_called=false therefore aims the next insert at an existing
