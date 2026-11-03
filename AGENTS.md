@@ -328,7 +328,7 @@ See `.env.example` for required variables.
 | `vw_audit_coverage` | Which tenant-coded tables have a row trail, which are exempted, and the reason each decision was made |
 | `vw_inventory_valuation` | Inventory value by warehouse/category |
 | `vw_item_availability` | Stock levels across warehouses |
-| `vw_item_movement_summary` | 30-day item movement patterns |
+| `vw_item_movement_summary` | 30-day item movement patterns. `total_inbound`/`total_outbound` exclude `RESERVATION` rows — a commitment makes stock unavailable, it moves nothing — while `net_quantity` still counts them |
 | `vw_low_stock_alerts` | Items below reorder point |
 
 See [blueprint/docs/views.md](blueprint/docs/views.md) for complete view reference.

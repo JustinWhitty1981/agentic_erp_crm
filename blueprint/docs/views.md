@@ -308,20 +308,27 @@ SELECT * FROM agent_first_erp_crm.vw_item_availability;
 
 ### vw_item_movement_summary
 
-30-day movement patterns.
+30-day movement patterns, grouped by item, day, and movement type.
 
 ```sql
 SELECT * FROM agent_first_erp_crm.vw_item_movement_summary;
 ```
 
-**Columns:**
-- `sku` - Item SKU
-- `item_name` - Item name
-- `total_receipts` - Total received
-- `total_shipments` - Total shipped
-- `net_change` - Net inventory change
+**Columns:** (read from `pg_attribute`, not from the earlier draft of this page, which named
+five columns this view has never had)
+- `item_id` - The item the movements are for
+- `movement_date` - Day, truncated
+- `movement_type` - `RECEIPT` / `ISSUE` / `TRANSFER` / `ADJUSTMENT` / `RESERVATION` / `RETURN`
+- `net_quantity` - Signed total of every movement in the group
+- `movement_count` - Rows in the group
+- `avg_unit_cost` - Mean unit cost across those rows
+- `total_inbound` - Sum of positive quantities; **excludes `RESERVATION`**
+- `total_outbound` - Sum of absolute negative quantities; **excludes `RESERVATION`**
+- `tenant_id` - Which tenant's movements these are (grouped, so two tenants never share a row)
 
-**Use Case:** Analyzing item movement
+**Use Case:** Analyzing item movement. A reservation commits stock without moving it, so it
+counts in `net_quantity` and in neither of the two direction columns - see
+`db/migrations/0015_reservation_locking.sql` for why that is the honest split.
 
 ---
 

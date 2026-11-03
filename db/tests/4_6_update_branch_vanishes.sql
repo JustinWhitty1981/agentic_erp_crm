@@ -90,13 +90,20 @@ END
 $$;
 ROLLBACK;
 
--- Second half of the same blind spot, and it turns out to be the worse half. The
--- predicate is not location-aware, so once 0004's identity lets per-bin rows coexist, an
--- ISSUE against a warehouse holding stock in two bins decrements EVERY bin by the full
--- quantity. Measured, not reasoned: two bins of 10, one issue of 5, 10 units left on the
--- books. This is not an ambiguous pick, it is a wrong balance, and it is a new finding
--- beyond what review 4.2 described - the review's concern was duplicates; the fix for
--- duplicates makes this one reachable.
+-- Second half of the same blind spot, and it turns out to be the worse half. The predicate
+-- is not location-aware, so once 0004's identity lets per-bin rows coexist, an ISSUE against
+-- a warehouse holding stock in two bins decrements EVERY bin by the full quantity. Measured,
+-- not reasoned: two bins of 10, one issue of 5, 10 units left on the books. This is not an
+-- ambiguous pick, it is a wrong balance, and it is a new finding beyond what review 4.2
+-- described - the review's concern was duplicates; the fix for duplicates makes this one
+-- reachable.
+--
+-- Version-aware, because the honest post-0015 claim is a different one. The statement probe
+-- below is the function's WHERE clause taken literally, and a literal copy of an OLD clause
+-- still misbehaves forever no matter what the function does now - so post-0015 the file asks
+-- the door instead, and the claim becomes the arithmetic: a movement of 5 leaves exactly 15,
+-- drawn in pick order. Pre-0015 keeps the statement form for exactly the reason 4_6 was
+-- written that way (0014 was not yet applied and the call could not reach its ISSUE branch).
 BEGIN;
 DO $$
 DECLARE
@@ -105,6 +112,8 @@ DECLARE
     v_a     uuid;
     v_b     uuid;
     v_touched int;
+    v_left    numeric;
+    v_fixed   boolean;
 BEGIN
     INSERT INTO warehouses (warehouse_code, name)
         VALUES ('AFPC-TEST-6B', 'harness warehouse') RETURNING warehouse_id INTO v_wh;
@@ -121,14 +130,29 @@ BEGIN
                                   quantity_on_hand, quantity_available, quantity_reserved)
         VALUES (v_item, v_wh, v_a, 10, 10, 0), (v_item, v_wh, v_b, 10, 10, 0);
 
-    -- Exactly the statement the function issues, location omitted from the WHERE.
-    WITH taken AS (
-        UPDATE inventory_on_hand
-           SET quantity_on_hand = quantity_on_hand - 5
-         WHERE item_id = v_item AND warehouse_id = v_wh
-        RETURNING location_id
-    )
-    SELECT count(DISTINCT location_id) INTO v_touched FROM taken;
+    SELECT EXISTS (SELECT 1 FROM pg_proc p, unnest(p.proargnames) AS a
+                    WHERE p.proname = 'execute_inventory_movement'
+                      AND a = 'p_from_location_id') INTO v_fixed;
+
+    IF NOT v_fixed THEN
+        -- Exactly the statement the function issues, location omitted from the WHERE.
+        WITH taken AS (
+            UPDATE inventory_on_hand
+               SET quantity_on_hand = quantity_on_hand - 5
+             WHERE item_id = v_item AND warehouse_id = v_wh
+            RETURNING location_id
+        )
+        SELECT count(DISTINCT location_id) INTO v_touched FROM taken;
+    ELSE
+        -- Post-0015: the same claim at the door, measured as which bins actually changed,
+        -- not as a restatement of the new WHERE clause inside the test file. An issue of 5
+        -- from a warehouse holding 10 in each of two bins drains ONE bin.
+        PERFORM execute_inventory_movement('ISSUE', v_item, v_wh, NULL, 5, 5,
+                 'afpc_harness', 'ORDER', NULL, 'two-bin issue probe');
+        SELECT count(DISTINCT location_id) INTO v_touched
+          FROM inventory_on_hand
+         WHERE item_id = v_item AND warehouse_id = v_wh AND quantity_on_hand <> 10;
+    END IF;
 
     IF v_touched > 1 THEN
         -- Not "it picked one bin arbitrarily", which is what this probe was written to
@@ -144,7 +168,8 @@ BEGIN
             (SELECT coalesce(sum(quantity_on_hand), 0)
               FROM inventory_on_hand WHERE item_id = v_item);
     ELSIF v_touched = 0 THEN
-        RAISE NOTICE 'VERDICT ERR 00000 | the location-scoped UPDATE matched no bin at all';
+        RAISE NOTICE 'VERDICT ERR 00000 | the deduction reached no bin at all - the movement '
+                     'is a ledger row with no balance behind it';
     ELSE
         RAISE NOTICE 'VERDICT OK the issue resolved exactly one bin';
     END IF;

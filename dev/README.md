@@ -149,7 +149,7 @@ TLS change, `init.sh` reverts `ssl` rather than leaving a persistent database un
 
 ## Things that will bite you if you do not know them
 
-Thirty-eight of these, each learned by a check failing on a rehearsal or a
+Forty-five of these, each learned by a check failing on a rehearsal or a
 migration after the fact - not by reading documentation about the database. Keep the pattern: when a migration surprises
 you, the surprise goes here, and the check that would have caught it goes in verify.sh.
 
@@ -421,3 +421,53 @@ only in a post-migration failure branch - a stale-token refusal, say - cannot pr
 migration exists, and the harness says "stopped reproducing with no migration to explain why."
 Migration-era test blocks therefore print their mapped phrases from the existence guard too, and
 when adding a CASES row, put the phrase where the pre-fix database can reach it.
+
+**A bare string literal in `RETURN QUERY` does not match a `varchar` OUT column.** A quoted
+literal in a select list is `unknown`-typed, and plpgsql will not coerce `unknown` into
+`character varying` - 42804, "structure of query does not match function result type". It will
+coerce into `text`, which is why a body mixing the two looks half-broken rather than wholly:
+0015's rewrite of `reserve_inventory_for_order` had to cast every status literal in the body,
+not only the one in the error handler that finding 4.3 happened to reach. Write
+`'SUCCESS'::varchar` in a function returning `TABLE(x, status varchar, ...)`.
+
+**`SELECT col INTO var` says nothing when it matches the wrong number of rows.** Zero rows
+leaves the variable untouched, so the guard below it tests NULL and evaluates UNKNOWN - neither
+branch fires, and the function walks past its own refusal (0015 measured it: the reservation
+door returned SUCCESS and wrote a commitment for an item with no on-hand rows at all). Several
+rows keeps whichever row the scan happens to return first and discards the rest, without an
+error and without a notice. Either way the fix is an aggregate - `coalesce(sum(...), 0)` - in a
+statement whose row count you then check, not a bare column read into a scalar.
+
+**`FOR UPDATE` cannot be combined with aggregates.** Locking the rows you are about to total
+raises 42809. So the lock and the total are two statements: loop with `FOR UPDATE` to take the
+locks in a deterministic order, then aggregate over the ids you collected. That is the shape
+`afpc_pick_bins` has because of (0015), and the ordering is not cosmetic - two pickers that
+visit bins in different orders deadlock on each other's partial writes.
+
+**`scripts/db/db fresh` destroys the volume, which means every database in the cluster.** The
+scratch clones you made for a rehearsal (`afpc_rehNN`) or an experiment (`afpc_expNN`) are gone
+with it, silently, because they live in the same data directory as the main database. If a gate
+step needs a clone afterwards, create it after the fresh run, not before.
+
+**A structural check on a function body reads its comments as code.** `pg_get_functiondef()`
+returns the whole `$$...$$` text including plpgsql comments, so an assertion like "this body
+must not contain an `ERROR` status" written as a `LIKE` fires on the comment explaining why the
+status does not exist - 0015's probe failed on precisely its own migration's prose. Prefer the
+behavioural form (call it, look at what comes back); if a body scan is unavoidable, match the
+statement shape, not the substring.
+
+**A `RAISE EXCEPTION` inside a block whose own `WHEN OTHERS` watches another code reports the
+wrong finding.** The probe's own failure is caught by its own handler: `P0001`, the SQLSTATE of
+`RAISE`, comes back as the thing under test, and the message says the probe's assertion rather
+than the function's behaviour. Assert outside the guarded block against a sentinel variable the
+handler sets, or name the condition you are actually catching.
+
+**Two catalog values are not the strings they look like.** `vw_domain_vocabulary.allowed_values`
+is `text[]`, so `x = ANY ((SELECT allowed_values ...))` fails with "operator does not exist:
+character varying = text[]" while `x = ANY (SELECT unnest(allowed_values) ...)` works - and the
+scalar-subquery form is fine inside `unnest()` itself. And `max(uuid)` does not exist in this
+build (uuid ordering is a PG18 feature): read one row out of a set-returning function with
+`(array_agg(x))[1]`. Related trap in the same family: counting occurrences with
+`regexp_matches` on a needle containing `(` or `)` counts the regex's groups, not the text -
+measured 0 matches for a string that `replace()` found and rewrote. Count a literal substring
+with `array_length(string_to_array(haystack, needle), 1) - 1`.

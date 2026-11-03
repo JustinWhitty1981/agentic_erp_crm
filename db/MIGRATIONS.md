@@ -21,7 +21,7 @@ bearing; changing one without the other turns a green row red.
 | `0012_vector_indexing` | 6.4 | ivfflat → hnsw on **all three** embedding columns — and the measured correction that 6.4's "1 of 3 searchable" was really 0 of 3: at 500 rows the planner refused even the indexed column (Seq Scan + Sort). No side table: the review's "~6KB/row into every scan" is false of the rows (`attstorage='e'`, out-of-line in toast, 61-byte main tuples) and true only of the one path that PROJECTS the column — so the fix is `vw_customers` dropping `e.embedding` (recreate, not replace: `CREATE OR REPLACE VIEW` cannot drop a column; dependents counted first, `security_invoker` and the three read grants re-applied and asserted). Probes assert usability with alternatives forbidden, top-10 exactness inside the ef budget, and the storage premise by fork-size delta (500 rows: 66 kB main, 4.1 MB toast); planner *preference* is declined as a cost-model detail, with measurements. halfvec deferred: the entire schema vector payload is NULLs, so there is nothing to make dense yet |
 | `0013_audit_log` | 6.2 | `audit_log`: one trail row per row-change on **18** tenant-coded tables (census-derived, so the next tenancy migration enrols its table automatically), carrying the tenant, the polymorphic `{pk: value}` identity, the action, and **only the changed columns** for updates (vectors as a sentinel - their stringification costs 60x the rest of an audit row, measured). Append-only **by grant** (afpc_app loses the UPDATE/DELETE 0002's defaults handed it; B27 counts the ACL, the test proves the attempt) and tamper-evident **by chain**: sha256 over a canonical payload prefixed by the previous row's hash, segmented per **(tenant, month)** - per tenant because 0009's wall would hide another tenant's chain head from the chain-walk query (0011's lost-write bug in a new place), by month because 0019's retention answer is DETACH and a segment is a detachable unit of chain. `audit_chain_verify` recomputes through the same function the trigger used (one definition of the payload, B25's principle at a hash) and catches rewrite, deletion, and forgery as three distinct failures; probe E tampers for real, detects, and repairs. The rollup 6.2 found standing with **no writer anywhere in pg_proc** is wired: `audit_summary_refresh` is pattern 1 by the natural key (the register classes it without being told - probe H asserts), and the B24 trip 0010 predicted is paid the prescribed way: `updated_at` + 0010's own touch trigger, not an edit to an exemption list. The identity half of 5.8 is **decided here, deferred on purpose**: db_user (resolvable in pg_authid) + tenant_id (FK), no principals table nothing authenticates against - that's §3.1's twin problem wearing more tables; the registry lands with the code that uses it. `idempotency_keys` and `audit_log` itself are the two exemptions, with reasons the coverage view publishes; a tenant hard-delete is atomic-impossible by ordinary SQL (its history FKs to it and would re-reference the deleted row - 'archived' exists), and probe G's controlled erasure is the primitive 0019 formalises as detach |
 | `0014_movement_contract` | 4.1, 4.2, 4.3 | `execute_inventory_movement` rewritten: 10→12 parameters (`p_unit_of_measure` DEFAULT NULL resolving through the ITEM MASTER, `p_idempotency_key` DEFAULT NULL wired to 0011's claim - both additions defaulted so every existing call resolves, and the old 10-parameter head DROPPED first because CREATE OR REPLACE with a changed signature creates a SECOND overload, which is how the 4.4 failure mode briefly reappeared inside 0014's own rehearsal). `to_warehouse_id`'s NOT NULL - 4.1's SECOND wall, invisible in the review's reading - becomes a per-type warehouse-shape CHECK over all six vocabulary members; TRANSFER (accepted-and-silent since 0007) now moves both sides atomically; RESERVATION refuses with a pointer to its owner; ISSUE/ADJUSTMENT assert ROW_COUNT (4.6's phantom, with the refused movement's ledger row proving atomicity at the call site - 0010's repoint obligation discharged in `4_6`'s rewrite). The catch-all re-wrap is gone: original SQLSTATEs propagate verbatim. The catch-all's replacement handler exists only to fail a claim so a retry can run. 4.3's divisor claim corrected by measurement: (oh+qty)=0 needs a negative RECEIPT, and a negative RECEIPT cannot reach DO UPDATE - the tentative INSERT row fails the non-negative CHECK first - so the CASE stays as a tripwire and the honest decrease door is ADJUSTMENT. `mark_customer_followup` is the writer 0007 proved absent for `entities.status='follow-up'`: convergent, claim-free, refuses to trample blacklisted. The register's lie about this function (pattern 1 for an ACCUMULATING upsert, standing since 0004 because the ladder reads `ON CONFLICT` and not semantics) is corrected by the claim being real, not by editing the ladder. 4_1's own fixture carried a second, invisible violation ('purchase_order' is not reference_type; the 23502 fired before the CHECK could) - fixed in the same commit, pre-fix output unchanged by measurement |
-| `0015_reservation_locking` | 4.3, 4.2 | handler OUT tuple, `FOR UPDATE`, honour `location_id` — now including the **multi-bin double-decrement** below — no recursive movement insert |
+| `0015_reservation_locking` | 4.3, 4.2, 4.6 (multi-bin half) | **One pick policy instead of two copies.** `afpc_pick_bins` locks the candidate on-hand rows `FOR UPDATE` in drain order (FEFO, then bin, then row id) and returns the PLAN — it writes nothing — so both doors that take stock out decide before they touch and a refusal leaves no trace (4.6's demand, reached from the reservation side). `reserve_inventory_for_order` 6→8 parameters (`p_location_id`, `p_idempotency_key`); `execute_inventory_movement` 12→14 (`p_from_location_id`, `p_to_location_id` — the two ledger columns that have existed since 0001 and had no writer); both old heads DROPPED by full signature. 4.3's crash cause is corrected by measurement: not `SQLERRM` in the text column (that pairing works), the SECOND OUT element — a bare string literal in `RETURN QUERY` is `unknown` and will not coerce into a `varchar` OUT column, so every return path died and the handler was merely the one the review's repro reached. Two walls behind it, invisible until the return worked: the guard's `SELECT ... INTO` reads ONE bin and calls it the warehouse (measured false refusal — "Only 0 available" while 10 units sit in the other bin), and for an item with no rows it compares `NULL < n`, UNKNOWN not false, so with only the cast fixed the door returned SUCCESS having written a commitment against zero on-hand rows. The review's "drop the recursive movement insert" is declined: the RESERVATION ledger row stays — 0014's refusal pointer and 0007's note that RESERVATION is a live vocabulary member both depend on it — and gets what it lacked (unit from the item master, the warehouse columns the shape CHECK demands, and a `reference_type` MAPPED from the order type, because the two published lists share only TRANSFER; probe I derives the mapping's totality from the register rather than restating it). What the kept row distorted, `vw_item_movement_summary` counting a positive-quantity commitment as inbound, is fixed directionally in the migration's own §4 by capture-transform-prove. 4.3's `status='ERROR'` remedy is declined for the same reason 0014 deleted the re-wrap: statuses are the two business outcomes, errors propagate with their own SQLSTATE, and the handler exists to release the claim. Wrong arguments (nonexistent item or warehouse, non-positive quantity, an order type outside the vocabulary) refuse as 22023 BEFORE the pick — a shortage answer to a wrong argument is 4.3's conflation with the numbers rearranged — with the FK and CHECK still the floor for raw writes, both halves probed. One boundary named instead of buried: the pick draws on `quantity_available`, so committed stock is not issuable through the generic door and no fulfilment step exists yet; probe L asserts the wall so the migration that takes it down does so deliberately. `4_3` rewritten version-aware, `4_6`'s second phrase flipped to an observable at the door |
 | `0016_single_add_customer` | 4.4 | one `add_customer` overload instead of two ambiguous ones. The `integer` → `bigint` widening of its OUT columns was done in `0005` (a type fix, not a behaviour fix), so what remains here is the overload collapse — and note that named arguments do **not** disambiguate the current pair either: they share their parameter *names* as well as their first ten positions, so the only call that resolves today supplies 11 or more arguments (measured in 0009's block F, which had to route around this) |
 | `0017_tool_call_log` | 4.5 | create `agent_tool_calls` and `tickets`, or delete the code that writes them |
 | `0018_currencies` | 6.5 | `currencies` + rate history, money vs quantity precision |
@@ -30,30 +30,34 @@ bearing; changing one without the other turns a green row red.
 
 ## Consequences a later migration must pick up
 
-`verify.sh` prints these counts every run, so the deltas are visible rather than
-remembered.
+`verify.sh` prints these counts every run — the catalog line for most, a named check's detail
+for the rest — so the deltas are visible rather than remembered. One row is the exception:
+"callable operations that take an idempotency claim" is printed by nothing, and its cells are
+filled from `vw_idempotency_status` by hand. That is a weaker promise than the table's intro
+otherwise makes, so the cell says where each number came from; if a future migration wants it
+watched, the right move is a B-check over the register, not a wider hand-fill.
 
-| Count | Before 0003 | After 0004 | After 0005 | After 0006 | After 0007 | After 0008 | After 0009 | Why | After 0010 | After 0011 | After 0012 | After 0013 | After 0014 |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| FKs | 30 | 47 | 48 | 48 | 54 | 54 | 54 | `tenant_id` FKs, RESTRICT, on 17 tables; then `thread_root_id`, which 5.2 found had no constraint at all; then 6 to the master-data tables, which is why B17 had to be re-run against them | 54 | 55 | 55 | 56 | 56 |
-| tenant-coded tables | 0 | 18 | 18 | 18 | 18 | 18 | 18 | the review's "0 rows returned" for 5.8 | 18 | 19 | 19 | 20 | 20 |
-| FKs with no index anywhere | 12 | 11 | 11 | **0** | 0 | 0 | 0 | the corrected measure (see below): a column in no key position of any index. Unchanged by 0005 — `idx_comms_thread_root` already covers the new FK. 0006 indexes all of them | 0 | 0 | 0 | 0 | 0 |
-| FK columns leading no index | — | 14 | 14 | **0** | 0 | 0 | 0 | 0006's invariant, now asserted. The judgment 0003 left to be confirmed resolved **against** the tenant-led composites: an FK existence check carries no tenant predicate, so `(tenant_id, col)` cannot serve it — measured, 47 buffers/0.193 ms as a seq scan versus 6 buffers/0.017 ms index-only. Both shapes are kept where both query shapes exist, which is not the duplicate case 5.6 is about | 0 | 0 | 0 | 0 | 0 |
-| redundant index pairs (identical + prefix) | 8 | 3 | 3 | **0** | 0 | 0 | 0 | 4 pairs became single indexes when 0003 replaced the global natural key with a tenant-scoped unique; `0004` removed `idx_on_hand_available`/`idx_on_hand_low_stock`. The remaining 3 are pre-existing `idx_comm_*`/`idx_comms_*` pairs in `communications` (correction C1). 0006 found **3 more of the same defect that the review's measure could not see**: indexes whose column list is a strict leading prefix of another index on the same table (`audit_summary`, `locations`, `inventory_reservations`) — so the honest count of 5.6 is 6, not 3 | 0 | 0 | 0 | 0 | 0 |
-| integer key columns | 19 | 19 | **0** | 0 | 0 | 0 | 0 | 5.1/5.3: four serial PKs and fifteen referencing columns, widened together | 0 | 0 | 0 | 0 | 0 |
-| key columns narrower than their ceiling | 4 | 4 | **0** | 0 | 0 | 0 | 0 | bigint keys fed by an integer sequence — see B14 | 0 | 0 | 0 | 0 | 0 |
-| domain columns with no published answer | 30 | 30 | 30 | 30 | **0** | 0 | 0 | 5.9's count, restated as a question the database can answer. 26 are constrained, 4 are free text with a recorded reason | 0 | 0 | 0 | 0 | 0 |
-| tables | 18 | 19 | 19 | 19 | 21 | 21 | 21 | the two master-data tables, `units_of_measure` and `costing_methods` | 21 | 22 | 22 | 23 | 23 |
-| tables with row security forced | 2 | 2 | 2 | 2 | 2 | 2 | **18** | 5.7's `rls_forced = 0`. Scope is "has a `tenant_id` column", read from the catalog, so a new tenant-coded table joins automatically and B7 fails on it if it does not. The 4 tables without one are declared global in B19 | 18 | 19 | 19 | 20 | 20 |
-| policies in `public` | 3 | 3 | 3 | 3 | 3 | 3 | **36** | 18 × `tenant_isolation` (FOR ALL, qual + WITH CHECK) + 18 × `audit_read_all` (FOR SELECT, `USING (true)`, the read roles' door). 5 dropped first: 3 keyed off `app.current_agent`, 2 of 0002's stopgaps | — | 38 | 38 | 40 | 40 |
-| views | 14 | 14 | 14 | 14 | 14 | 14 | **15** | `vw_rls_status`. All 15 now carry `security_invoker=true` and every one over a tenant table exposes `tenant_id`, which is what closes 0003's deferral NOTICE | **16** | 17 | 17 | 18 | 18 |
-| functions executable by every role | — | — | — | — | 13 | 13 | **0** | 0008's census, swept. Three stay open by declaration — `afpc_current_tenant`, `afpc_policy_tenant`, `afpc_uuid_v7` — because they are called from column defaults and policy quals during an ordinary SELECT | 0 | 0 | 0 | 0 | 0 |
-| CASCADE edges | 6 | 6 | 6 | 6 | 6 | **1** | 1 | 5.10's count. Five flipped to RESTRICT (four inventory, one audit); `locations -> warehouses` retained — bin rows with no stock, no open reservations and no ledger reference are structure, and deleting them with the warehouse is composition, not destruction. B3 checks both sides: no CASCADE on a table that holds facts, and no CASCADE anywhere else beyond that one named edge | 1 | 1 | 1 | 1 | 1 |
-| triggers in `public` | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 13 `afpc_touch_updated_at` triggers plus `trg_on_hand_consistency`. The two bespoke timestamp triggers 0001 ported are retired, and 6.3C's duplicated function with them| **14** | 17 | 17 | 36 | 36 |
-| tables whose `updated_at` is maintained | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 6.3's own measure, which is a behaviour claim rather than a column census: two of eleven before 0010 (the review's two "yes" rows), thirteen of thirteen after| **13** | 14 | 14 | 15 | 15 |
-| tables with no row-creation timestamp | 3 | 3 | 3 | 2 | 2 | 2 | 2 | 6.3's last paragraph named three; measured, `inventory_movements.performed_at` already served, so the real gap was two. `schema_migrations.applied_at` is build bookkeeping| 0 | 0 | 0 | 0 | 0 |
-| base-table vector columns led by hnsw | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 6.4. 0001 gave one of three an ivfflat; measured at 0011, the planner did not use even THAT for an ANN ordering unforced (Seq Scan + Sort at 500 rows), so 0 of 3 were really searchable in a plan anyone would run. 0012 makes it 3 of 3 | 0 | 0 | **3** | 3 | 3 |
-| callable operations that take an idempotency claim | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 6.1/ADR-005 pattern 2, counted from `vw_idempotency_status`, because the register is the only place the claim is visible. 0011 built the mechanism and said where a claim belonged; 0014 is the first function that actually takes one, which is what turns its register row from a regex's guess into a fact | 0 | 0 | 0 | 0 | **1** |
+| Count | Before 0003 | After 0004 | After 0005 | After 0006 | After 0007 | After 0008 | After 0009 | Why | After 0010 | After 0011 | After 0012 | After 0013 | After 0014 | After 0015 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| FKs | 30 | 47 | 48 | 48 | 54 | 54 | 54 | `tenant_id` FKs, RESTRICT, on 17 tables; then `thread_root_id`, which 5.2 found had no constraint at all; then 6 to the master-data tables, which is why B17 had to be re-run against them | 54 | 55 | 55 | 56 | 56 | 56 |
+| tenant-coded tables | 0 | 18 | 18 | 18 | 18 | 18 | 18 | the review's "0 rows returned" for 5.8 | 18 | 19 | 19 | 20 | 20 | 20 |
+| FKs with no index anywhere | 12 | 11 | 11 | **0** | 0 | 0 | 0 | the corrected measure (see below): a column in no key position of any index. Unchanged by 0005 — `idx_comms_thread_root` already covers the new FK. 0006 indexes all of them | 0 | 0 | 0 | 0 | 0 | 0 |
+| FK columns leading no index | — | 14 | 14 | **0** | 0 | 0 | 0 | 0006's invariant, now asserted. The judgment 0003 left to be confirmed resolved **against** the tenant-led composites: an FK existence check carries no tenant predicate, so `(tenant_id, col)` cannot serve it — measured, 47 buffers/0.193 ms as a seq scan versus 6 buffers/0.017 ms index-only. Both shapes are kept where both query shapes exist, which is not the duplicate case 5.6 is about | 0 | 0 | 0 | 0 | 0 | 0 |
+| redundant index pairs (identical + prefix) | 8 | 3 | 3 | **0** | 0 | 0 | 0 | 4 pairs became single indexes when 0003 replaced the global natural key with a tenant-scoped unique; `0004` removed `idx_on_hand_available`/`idx_on_hand_low_stock`. The remaining 3 are pre-existing `idx_comm_*`/`idx_comms_*` pairs in `communications` (correction C1). 0006 found **3 more of the same defect that the review's measure could not see**: indexes whose column list is a strict leading prefix of another index on the same table (`audit_summary`, `locations`, `inventory_reservations`) — so the honest count of 5.6 is 6, not 3 | 0 | 0 | 0 | 0 | 0 | 0 |
+| integer key columns | 19 | 19 | **0** | 0 | 0 | 0 | 0 | 5.1/5.3: four serial PKs and fifteen referencing columns, widened together | 0 | 0 | 0 | 0 | 0 | 0 |
+| key columns narrower than their ceiling | 4 | 4 | **0** | 0 | 0 | 0 | 0 | bigint keys fed by an integer sequence — see B14 | 0 | 0 | 0 | 0 | 0 | 0 |
+| domain columns with no published answer | 30 | 30 | 30 | 30 | **0** | 0 | 0 | 5.9's count, restated as a question the database can answer. 26 are constrained, 4 are free text with a recorded reason | 0 | 0 | 0 | 0 | 0 | 0 |
+| tables | 18 | 19 | 19 | 19 | 21 | 21 | 21 | the two master-data tables, `units_of_measure` and `costing_methods` | 21 | 22 | 22 | 23 | 23 | 23 |
+| tables with row security forced | 2 | 2 | 2 | 2 | 2 | 2 | **18** | 5.7's `rls_forced = 0`. Scope is "has a `tenant_id` column", read from the catalog, so a new tenant-coded table joins automatically and B7 fails on it if it does not. The 4 tables without one are declared global in B19 | 18 | 19 | 19 | 20 | 20 | 20 |
+| policies in `public` | 3 | 3 | 3 | 3 | 3 | 3 | **36** | 18 × `tenant_isolation` (FOR ALL, qual + WITH CHECK) + 18 × `audit_read_all` (FOR SELECT, `USING (true)`, the read roles' door). 5 dropped first: 3 keyed off `app.current_agent`, 2 of 0002's stopgaps | — | 38 | 38 | 40 | 40 | 40 |
+| views | 14 | 14 | 14 | 14 | 14 | 14 | **15** | `vw_rls_status`. All 15 now carry `security_invoker=true` and every one over a tenant table exposes `tenant_id`, which is what closes 0003's deferral NOTICE | **16** | 17 | 17 | 18 | 18 | 18 |
+| functions executable by every role | — | — | — | — | 13 | 13 | **0** | 0008's census, swept. Three stay open by declaration — `afpc_current_tenant`, `afpc_policy_tenant`, `afpc_uuid_v7` — because they are called from column defaults and policy quals during an ordinary SELECT | 0 | 0 | 0 | 0 | 0 | 0 |
+| CASCADE edges | 6 | 6 | 6 | 6 | 6 | **1** | 1 | 5.10's count. Five flipped to RESTRICT (four inventory, one audit); `locations -> warehouses` retained — bin rows with no stock, no open reservations and no ledger reference are structure, and deleting them with the warehouse is composition, not destruction. B3 checks both sides: no CASCADE on a table that holds facts, and no CASCADE anywhere else beyond that one named edge | 1 | 1 | 1 | 1 | 1 | 1 |
+| triggers in `public` | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 13 `afpc_touch_updated_at` triggers plus `trg_on_hand_consistency`. The two bespoke timestamp triggers 0001 ported are retired, and 6.3C's duplicated function with them| **14** | 17 | 17 | 36 | 36 | 36 |
+| tables whose `updated_at` is maintained | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 6.3's own measure, which is a behaviour claim rather than a column census: two of eleven before 0010 (the review's two "yes" rows), thirteen of thirteen after| **13** | 14 | 14 | 15 | 15 | 15 |
+| tables with no row-creation timestamp | 3 | 3 | 3 | 2 | 2 | 2 | 2 | 6.3's last paragraph named three; measured, `inventory_movements.performed_at` already served, so the real gap was two. `schema_migrations.applied_at` is build bookkeeping| 0 | 0 | 0 | 0 | 0 | 0 |
+| base-table vector columns led by hnsw | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 6.4. 0001 gave one of three an ivfflat; measured at 0011, the planner did not use even THAT for an ANN ordering unforced (Seq Scan + Sort at 500 rows), so 0 of 3 were really searchable in a plan anyone would run. 0012 makes it 3 of 3 | 0 | 0 | **3** | 3 | 3 | 3 |
+| callable operations that take an idempotency claim | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 6.1/ADR-005 pattern 2, counted from `vw_idempotency_status`, because the register is the only place the claim is visible. 0011 built the mechanism and said where a claim belonged; 0014 is the first function that actually takes one, which is what turns its register row from a regex's guess into a fact. 0015 makes it two: the reservation door, whose register row had said "pattern 3" because a `version` column exists on a table it writes and nothing had ever compared it | 0 | 0 | 0 | 0 | **1** | **2** |
 
 Also deferred from 0003, deliberately:
 
@@ -218,6 +222,109 @@ Also deferred from 0003, deliberately:
 - **`mark_customer_followup` is the pattern for state-setters 0007 found writerless.** If
   another vocabulary member turns out to be a dead end (the `5_9` probe prints those
   candidates), the answer is a convergent setter, not a trigger with opinions.
+
+### Obligations 0015 creates for the migrations after it
+
+- **A rewrite that changes a signature owes the claim, and the delta table is the only thing
+  watching.** Both doors retook `p_idempotency_key` in this file; `vw_idempotency_status` is
+  derived, so a rewrite that drops the `idempotency_claim` call silently moves a row from
+  pattern 2 back to whatever the ladder guesses. The count of claim-taking functions is
+  written down in this file's delta table (2 after this file) and asserted nowhere, which is
+  the weakest watch in the table — see the note above it.
+- **Whoever adds reservation fulfilment must invert probe L deliberately.** The pick draws on
+  `quantity_available`, so today reserved stock cannot be issued through the generic door and
+  there is no path that consumes a reservation. That is a boundary, not a feature: when the
+  fulfilment step lands, probe L's expectation flips from "23514" to "the issue succeeds", and
+  the flip must be in the same commit as the new code, with §6's COMMENT amended in the same
+  pass. Probe C's balance arithmetic is the other assertion that moves.
+- **The `order_type` → `reference_type` mapping is total over what the register publishes, and
+  probe I reads the register rather than this file's memory of it.** A migration that adds a
+  sixth order type without a mapping line fails there by name. The reverse also holds: a
+  mapping added for a type that the CHECK later stops admitting leaves a dead `CASE` arm, and
+  nothing but reading both sides will notice.
+- **`afpc_pick_bins` is granted to `afpc_app` and revoked from PUBLIC on purpose** — it is a
+  mechanism, not a door. A third function that takes stock out should call it rather than
+  re-implement the drain order (B25's one-implementation-per-rule argument, applied to bodies
+  instead of trigger text); a function that plans a draw and then skips the ledger row would
+  produce the phantom this helper exists to prevent.
+- **Phase-5 tools should pass a key and, where they know the bin, a location id.** Both
+  parameters are DEFAULTed, so nothing breaks without them, and nothing is protected either —
+  ADR-005's client half is still unclaimed, and 0015's bin naming is invisible to a caller that
+  keeps sending NULL.
+
+## Found while building 0015
+
+- **4.3's diagnosis was wrong about which element broke, and right about the crash.** A bare
+  string literal in a `RETURN QUERY` list is `unknown`-typed, and plpgsql will not coerce that
+  into a `character varying` OUT column — 42804. `SQLERRM` in a `text` position is fine. So
+  the review's "the handler's third element is text where the ordering doesn't align" named
+  the correct SQLSTATE for the wrong column, and the consequence was wider than the handler:
+  every `RETURN QUERY` in the body died, so a *successful* reservation could not be reported
+  either. Measured three ways on a clone: uncast literal 42804, same literal with `::varchar`
+  succeeds, `SQLERRM::text` alone in the text position is not the problem.
+- **The finding about the read was "arbitrary single row"; measured, it is two defects that
+  happen to point at the same statement.** `SELECT col INTO var` over several rows raises
+  nothing — plpgsql keeps whichever row the scan returns first and discards the rest (two bins
+  of 10 and 0: the guard printed "Only 0 available, requested 5"). And when *no* row matches,
+  the variable is untouched, so `IF v_available < p_quantity` compares NULL and evaluates
+  UNKNOWN, which is not false: the guard steps aside and the function reserves against nothing.
+  With only the return-path fix applied, a call for an item with zero on-hand rows returned
+  `SUCCESS` and left a commitment behind (measured: 1 reservation row, 0 on-hand rows). The
+  write half is worse than the review said too — every matched row deducted by the full
+  quantity, which `4_6` had already measured at 2 of 2 bins.
+- **The reservation's movement INSERT had a second wall behind 4.1's, and NOT NULL was hiding
+  it.** `p_order_type` was passed into `movements.reference_type`, and the two published
+  vocabularies overlap in one member (TRANSFER): `SALES`, `PURCHASE`, `WORK` and `STOCK` are
+  all legal order types and all illegal reference types. The 23502 on `unit_of_measure` fires
+  first, so no call had ever reached the CHECK. Same shape as 0014's `4_1` fixture, one
+  migration later — fix the visible violation and the invisible one becomes the failure.
+- **A structural check on a function body reads its comments as code.** Probe J was going to
+  assert "no `ERROR` status exists" with `pg_get_functiondef(...) LIKE '%''ERROR''%'`, and it
+  failed — on this file's own explanatory comment about why there is no ERROR status, because
+  `pg_get_functiondef` returns the body including its comments. 0011's register carries the
+  same warning about classifying bodies by text; the lesson repeats one migration later,
+  against an author who had just read it. Replaced with the behavioural form.
+- **A `RAISE EXCEPTION` inside a block whose own `WHEN OTHERS` watches a different SQLSTATE
+  reports its own failure as the finding.** Probe J's first rehearsal failed with "answered
+  P0001" — its own assertion's P0001, caught by its own handler, after the exception it was
+  checking for had been correctly observed. The assertions now sit outside the guarded blocks,
+  against a sentinel set in the handler.
+- **Three catalog facts that the obvious syntax gets wrong.** `allowed_values` in
+  `vw_domain_vocabulary` is `text[]`, so `x = ANY ((SELECT allowed_values ...))` fails with
+  "operator does not exist: character varying = text[]" and needs `= ANY (SELECT unnest(...))`
+  — while the scalar-subquery form is correct inside `unnest()` itself, which is how the same
+  probe gets its loop values. `max(uuid)` does not exist in this build (uuid ordering is 18),
+  so the single-value read is `(array_agg(reservation_id))[1]`. And a `FOR r IN SELECT ...`
+  target must be a `record` declared in the block that runs the loop — a name reused from an
+  outer block's different shape is a compile error at execution time.
+- **Using `regexp_matches` to count occurrences of a needle that contains parentheses counts
+  zero.** The outbound arm of the view transform was guarded by
+  `count(*) FROM regexp_matches(def, '...abs(quantity)...', 'g')` and reported 0 matches while
+  `replace()` found and replaced the identical text: to a regex, `(quantity)` is a capturing
+  group. The guard contradicted the operation it guarded, and the migration refused to run on
+  a definition it could have fixed. Substring occurrence is
+  `array_length(string_to_array(text, needle), 1) - 1`, which is a literal question and gets a
+  literal answer.
+- **`FOR UPDATE` cannot be combined with aggregates, and that constraint is what forced the
+  plan/apply split.** Summing availability across bins needs an aggregate; locking the rows in
+  drain order needs `FOR UPDATE`; PostgreSQL refuses the pair (42809). So the helper locks and
+  plans in a loop and the callers sum the plan — which turned out to be the right shape anyway,
+  because a plan that writes nothing is how a refusal leaves no trace.
+- **Checking what a view returns meant reading `pg_attribute`, and that exposed a second
+  problem.** `blueprint/docs/views.md` - the page `AGENTS.md` sends agents to for the complete
+  view reference - documented `vw_item_movement_summary` with five columns (`sku`, `item_name`,
+  `total_receipts`, `total_shipments`, `net_change`) that the view has never had; the live one
+  has nine. `docs/database/README_VIEWS.md` repeats the same five. That page's example queries
+  also carry the `agent_first_erp_crm.` qualifier 102 times across `blueprint/**/*.md`, which is
+  3.1's twin in prose rather than Python and is not counted by `code:tool_prefix` (33, `.py`
+  only). Fixed here for the one view this migration changed; the class of it is T4.
+- **A probe that sets up a boundary has to exhaust the alternative, not just arrange it.**
+  Probe L first reserved 10 of a two-bin warehouse holding 20, then asserted that issuing 5
+  failed — and the issue succeeded, because the other bin still had units and the pick was
+  entitled to drain it. The failure was the probe's, not the function's, and it is the same
+  error 4_6's simulation arm made in the other direction (restating the new `WHERE` inside the
+  test, which passes forever no matter what the code does). Both were replaced by observable
+  consequences at the door.
 
 ## Found while building 0014
 
