@@ -149,7 +149,7 @@ TLS change, `init.sh` reverts `ssl` rather than leaving a persistent database un
 
 ## Things that will bite you if you do not know them
 
-Forty-five of these, each learned by a check failing on a rehearsal or a
+Forty-nine of these, each learned by a check failing on a rehearsal or a
 migration after the fact - not by reading documentation about the database. Keep the pattern: when a migration surprises
 you, the surprise goes here, and the check that would have caught it goes in verify.sh.
 
@@ -471,3 +471,32 @@ build (uuid ordering is a PG18 feature): read one row out of a set-returning fun
 `regexp_matches` on a needle containing `(` or `)` counts the regex's groups, not the text -
 measured 0 matches for a string that `replace()` found and rewrote. Count a literal substring
 with `array_length(string_to_array(haystack, needle), 1) - 1`.
+
+**A function name with two heads cannot be dropped, altered, or called by name.** With
+`add_customer(text x10)` and `add_customer(text x13, boolean)` both installed, `DROP FUNCTION
+add_customer` fails with "function name ... is not unique" (measured), and so does every call
+whose positions both candidates accept. A collapse migration must name the full old signature
+of every head it removes - and the register view shows the same fact from a different angle:
+`vw_idempotency_status` emits one row per function *object*, so a domain function that appears
+twice there is a fork, not a duplicate query.
+
+**Two backend processes are how a race gets measured here, and the container filesystem is not
+yours.** `docker compose exec -T postgres psql ... -f /tmp/opencode/x.sql` fails with "No such
+file or directory": the host path is not mounted in the container. Pipe the script in on stdin
+(`-f /dev/stdin < file`) and run the two sessions with `&` plus `wait`. That is how 0016 proved
+what the idempotency claim is for: keyless, two calls one second apart leave 2 entities and 2
+contacts; keyed, one customer and both callers answered the same `entity_id`, because the second
+claim INSERT waits on the arbiter's unique index.
+
+**A refusal chain answers with its first rule, not the one you are testing.** `add_customer`
+checks names before contact points, so an all-NULL call reports "First name is required", not
+"At least one of email or phone is required" - a probe asserting the second message fails while
+the function behaves perfectly. Give the fixture only the defect under test, and when a probe's
+verdict depends on *which* guard fired, assert the message as well as the outcome.
+
+**A migration cannot open a second connection, so some assertions belong in CI instead.**
+pgvector and pg_trgm are the only extensions 0000 installs: no `dblink`, no `postgres_fdw`, and
+a `SET LOCAL ROLE` probe still runs in the same backend. Anything whose claim is about two
+transactions at once - a claim that serialises, a lease that expires mid-write - can be measured
+from this host but not shipped as a check, and the honest place for it is T3's replay job, not a
+probe that looks like it tested something.
