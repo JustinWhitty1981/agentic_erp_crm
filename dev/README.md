@@ -149,9 +149,36 @@ TLS change, `init.sh` reverts `ssl` rather than leaving a persistent database un
 
 ## Things that will bite you if you do not know them
 
-Thirty-one of these, each learned by a check failing on a rehearsal or a
+Thirty-five of these, each learned by a check failing on a rehearsal or a
 migration after the fact - not by reading documentation about the database. Keep the pattern: when a migration surprises
 you, the surprise goes here, and the check that would have caught it goes in verify.sh.
+
+**`setval(seq, v, false)` hands out `v` itself, not `v+1`.** A test harness that "restores"
+a sequence to `max(id)` with is_called=false therefore aims the next insert at an existing
+row. Invisible for twelve migrations - every table a test touched rolled back to EMPTY,
+where the value drawn is a formality - until `audit_log` became the first table with
+committed migration-era rows, and the next audited write died on `audit_log_pkey` inside a
+proving-unrelated probe. The mapped-row SURPRISE that surfaced it is the argument for the
+whole scoreboard. Restoring a non-empty table's counter is `setval(v, true)`.
+
+**A plpgsql body is not parsed until it is entered.** `atttypid = 'vector'::regclass`
+where regtype was meant - CREATE FUNCTION succeeds, the statement inside has never been
+analyzed, and the first call is the first compile. Migration files that run their checks
+after creating their functions do not get an early warning from the DDL; only behaviour
+probes parse them.
+
+**`GENERATED ALWAYS AS IDENTITY` rejects explicit ids - including the one your trigger
+needs.** A hash chain whose payload covers the row's position must draw `nextval()` itself
+(under a lock, so key order and commit order agree) and insert the value; ALWAYS raises
+`cannot insert a non-DEFAULT value`. `BY DEFAULT` keeps the guarantee honestly: an id
+manufactured out of order breaks `prev_hash`, which is what verification is for.
+
+**plpgsql substitutes two name levels, and `SELECT INTO` unpacks composites by position.**
+`r.a.tenant_id` over a loop record (loop var → composite field → subfield) reaches the SQL
+parser as a reference to a FROM item `a` - an error at runtime, not an optimization; and
+`SELECT a INTO v_row` with a single composite column fills the target's FIRST field with
+the row, not its fields. Hoist the subfields you filter or order by into the loop's query,
+and expand with `a.*` for row-variable targets.
 
 **`CREATE OR REPLACE VIEW` can add a column and can never drop one.** The first rehearsal of
 0012 died on `cannot drop columns from view` while removing a projected `vector(1536)` -

@@ -19,7 +19,7 @@ bearing; changing one without the other turns a green row red.
 | `0010_timestamp_triggers` | 6.3 | one trigger function, `afpc_touch_updated_at()`, installed as a `BEFORE INSERT OR UPDATE` row trigger on all 13 tables that have an `updated_at` column - scope read from `pg_attribute` rather than from the review's list, because 0003 had since added `tenants` and the finding had grown by following the plan. On UPDATE it stamps the column **unless the statement set it deliberately**, so an ordinary edit cannot forget to maintain it while a backfill carrying real historical timestamps survives - the property 0004's duplicate merge and 0005's key widening needed and did not have. Retires `update_updated_at_column` and `update_communications_updated_at`, asserted by md5 to be the same body twice. Adds `created_at` to `inventory_on_hand` and `inventory_reservations` - the review says all three ledger tables have "no timestamp-shaped column at all"; measured, each has one, and none of them records when the *row* began, which for stock matters because `last_movement_at` is overwritten by every movement. Adds `updated_at` to `addresses` and `inventory_on_hand`, found by asking `pg_proc` which tables its functions `UPDATE` rather than by reading the review, and makes the six nullable `updated_at` declarations uniform so a watermark predicate cannot skip rows by accident. Publishes `vw_timestamp_status` |
 | `0011_idempotency` | 6.1 | ADR-005 pattern 2, because pattern 1 was measured unavailable rather than skipped: no unique index on email exists anywhere (and 0006 indexed `contacts.email` as a trigram GIN precisely because `add_customer` tests `email ILIKE`), so natural uniqueness cannot arbitrate the CRM's main write path. `idempotency_keys` with arbiter `(tenant_id, operation, idempotency_key)` — the tenant-led order is load-bearing, not hygiene: measured on a clone, a GLOBAL claim index under 0009's forced RLS returns `INSERT 0 0` and leaves the second tenant zero visible rows, a write lost with no error. `idempotency_claim` answers a retry with claimed/replay/conflict/in_progress; the request fingerprint (sha256 over canonical jsonb text) makes a settled key reused for a *different* request a conflict, never a cache hit. Two clocks, tied by CHECK, never conflated: a 5-minute lease (crash affordance — a dead claim is taken over with a rotated `claim_token` so the displaced attempt cannot certify work that ran twice) and lease+24h retention (`idempotency_sweep` enforces it; unclaimed work is never collected as history). `afpc_bump_version()` makes the two integer `version` columns 6.1 found decorative count writes — scoped by TYPE so the text-PK migration ledger is invisible to it, installed unconditional on purpose (the deliberate opposite of 0010's timestamp rule: a version a statement could pick is a version that can match what a reader already saw). Declines review 1.7's "index `transaction_id`" with measurements: it is a per-ROW `gen_random_uuid()` nonce no code assigns or reads; `batch_id` is the per-call key and is already indexed. Reuses 0010's touch trigger on the new table rather than writing a second one, and skips `idx_idempotency_keys_tenant` because the arbiter leads with `tenant_id` already. Publishes `vw_idempotency_status` — one row per state-changing function, pattern or UNGUARDED |
 | `0012_vector_indexing` | 6.4 | ivfflat → hnsw on **all three** embedding columns — and the measured correction that 6.4's "1 of 3 searchable" was really 0 of 3: at 500 rows the planner refused even the indexed column (Seq Scan + Sort). No side table: the review's "~6KB/row into every scan" is false of the rows (`attstorage='e'`, out-of-line in toast, 61-byte main tuples) and true only of the one path that PROJECTS the column — so the fix is `vw_customers` dropping `e.embedding` (recreate, not replace: `CREATE OR REPLACE VIEW` cannot drop a column; dependents counted first, `security_invoker` and the three read grants re-applied and asserted). Probes assert usability with alternatives forbidden, top-10 exactness inside the ef budget, and the storage premise by fork-size delta (500 rows: 66 kB main, 4.1 MB toast); planner *preference* is declined as a cost-model detail, with measurements. halfvec deferred: the entire schema vector payload is NULLs, so there is nothing to make dense yet |
-| `0013_audit_log` | 6.2 | row-level immutable audit in `public`, append-only grants |
+| `0013_audit_log` | 6.2 | `audit_log`: one trail row per row-change on **18** tenant-coded tables (census-derived, so the next tenancy migration enrols its table automatically), carrying the tenant, the polymorphic `{pk: value}` identity, the action, and **only the changed columns** for updates (vectors as a sentinel - their stringification costs 60x the rest of an audit row, measured). Append-only **by grant** (afpc_app loses the UPDATE/DELETE 0002's defaults handed it; B27 counts the ACL, the test proves the attempt) and tamper-evident **by chain**: sha256 over a canonical payload prefixed by the previous row's hash, segmented per **(tenant, month)** - per tenant because 0009's wall would hide another tenant's chain head from the chain-walk query (0011's lost-write bug in a new place), by month because 0019's retention answer is DETACH and a segment is a detachable unit of chain. `audit_chain_verify` recomputes through the same function the trigger used (one definition of the payload, B25's principle at a hash) and catches rewrite, deletion, and forgery as three distinct failures; probe E tampers for real, detects, and repairs. The rollup 6.2 found standing with **no writer anywhere in pg_proc** is wired: `audit_summary_refresh` is pattern 1 by the natural key (the register classes it without being told - probe H asserts), and the B24 trip 0010 predicted is paid the prescribed way: `updated_at` + 0010's own touch trigger, not an edit to an exemption list. The identity half of 5.8 is **decided here, deferred on purpose**: db_user (resolvable in pg_authid) + tenant_id (FK), no principals table nothing authenticates against - that's §3.1's twin problem wearing more tables; the registry lands with the code that uses it. `idempotency_keys` and `audit_log` itself are the two exemptions, with reasons the coverage view publishes; a tenant hard-delete is atomic-impossible by ordinary SQL (its history FKs to it and would re-reference the deleted row - 'archived' exists), and probe G's controlled erasure is the primitive 0019 formalises as detach |
 | `0014_movement_contract` | 4.1, 4.2, 4.3 | `p_unit_of_measure`, ISSUE-branch warehouse columns, cost divisor, stop re-wrapping 23502, **and assert `ROW_COUNT` in the ISSUE branch** (the phantom-issue half of 4.2, which no constraint can express; the ON CONFLICT line moved to 0004) |
 | `0015_reservation_locking` | 4.3, 4.2 | handler OUT tuple, `FOR UPDATE`, honour `location_id` — now including the **multi-bin double-decrement** below — no recursive movement insert |
 | `0016_single_add_customer` | 4.4 | one `add_customer` overload instead of two ambiguous ones. The `integer` → `bigint` widening of its OUT columns was done in `0005` (a type fix, not a behaviour fix), so what remains here is the overload collapse — and note that named arguments do **not** disambiguate the current pair either: they share their parameter *names* as well as their first ten positions, so the only call that resolves today supplies 11 or more arguments (measured in 0009's block F, which had to route around this) |
@@ -33,26 +33,26 @@ bearing; changing one without the other turns a green row red.
 `verify.sh` prints these counts every run, so the deltas are visible rather than
 remembered.
 
-| Count | Before 0003 | After 0004 | After 0005 | After 0006 | After 0007 | After 0008 | After 0009 | Why | After 0010 | After 0011 | After 0012 |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| FKs | 30 | 47 | 48 | 48 | 54 | 54 | 54 | `tenant_id` FKs, RESTRICT, on 17 tables; then `thread_root_id`, which 5.2 found had no constraint at all; then 6 to the master-data tables, which is why B17 had to be re-run against them | 54 | 55 | 55 |
-| tenant-coded tables | 0 | 18 | 18 | 18 | 18 | 18 | 18 | the review's "0 rows returned" for 5.8 | 18 | 19 | 19 |
-| FKs with no index anywhere | 12 | 11 | 11 | **0** | 0 | 0 | 0 | the corrected measure (see below): a column in no key position of any index. Unchanged by 0005 — `idx_comms_thread_root` already covers the new FK. 0006 indexes all of them | 0 | 0 | 0 |
-| FK columns leading no index | — | 14 | 14 | **0** | 0 | 0 | 0 | 0006's invariant, now asserted. The judgment 0003 left to be confirmed resolved **against** the tenant-led composites: an FK existence check carries no tenant predicate, so `(tenant_id, col)` cannot serve it — measured, 47 buffers/0.193 ms as a seq scan versus 6 buffers/0.017 ms index-only. Both shapes are kept where both query shapes exist, which is not the duplicate case 5.6 is about | 0 | 0 | 0 |
-| redundant index pairs (identical + prefix) | 8 | 3 | 3 | **0** | 0 | 0 | 0 | 4 pairs became single indexes when 0003 replaced the global natural key with a tenant-scoped unique; `0004` removed `idx_on_hand_available`/`idx_on_hand_low_stock`. The remaining 3 are pre-existing `idx_comm_*`/`idx_comms_*` pairs in `communications` (correction C1). 0006 found **3 more of the same defect that the review's measure could not see**: indexes whose column list is a strict leading prefix of another index on the same table (`audit_summary`, `locations`, `inventory_reservations`) — so the honest count of 5.6 is 6, not 3 | 0 | 0 | 0 |
-| integer key columns | 19 | 19 | **0** | 0 | 0 | 0 | 0 | 5.1/5.3: four serial PKs and fifteen referencing columns, widened together | 0 | 0 | 0 |
-| key columns narrower than their ceiling | 4 | 4 | **0** | 0 | 0 | 0 | 0 | bigint keys fed by an integer sequence — see B14 | 0 | 0 | 0 |
-| domain columns with no published answer | 30 | 30 | 30 | 30 | **0** | 0 | 0 | 5.9's count, restated as a question the database can answer. 26 are constrained, 4 are free text with a recorded reason | 0 | 0 | 0 |
-| tables | 18 | 19 | 19 | 19 | 21 | 21 | 21 | the two master-data tables, `units_of_measure` and `costing_methods` | 21 | 22 | 22 |
-| tables with row security forced | 2 | 2 | 2 | 2 | 2 | 2 | **18** | 5.7's `rls_forced = 0`. Scope is "has a `tenant_id` column", read from the catalog, so a new tenant-coded table joins automatically and B7 fails on it if it does not. The 4 tables without one are declared global in B19 | 18 | 19 | 19 |
-| policies in `public` | 3 | 3 | 3 | 3 | 3 | 3 | **36** | 18 × `tenant_isolation` (FOR ALL, qual + WITH CHECK) + 18 × `audit_read_all` (FOR SELECT, `USING (true)`, the read roles' door). 5 dropped first: 3 keyed off `app.current_agent`, 2 of 0002's stopgaps | — | 38 | 38 |
-| views | 14 | 14 | 14 | 14 | 14 | 14 | **15** | `vw_rls_status`. All 15 now carry `security_invoker=true` and every one over a tenant table exposes `tenant_id`, which is what closes 0003's deferral NOTICE | **16** | 17 | 17 |
-| functions executable by every role | — | — | — | — | 13 | 13 | **0** | 0008's census, swept. Three stay open by declaration — `afpc_current_tenant`, `afpc_policy_tenant`, `afpc_uuid_v7` — because they are called from column defaults and policy quals during an ordinary SELECT | 0 | 0 | 0 |
-| CASCADE edges | 6 | 6 | 6 | 6 | 6 | **1** | 1 | 5.10's count. Five flipped to RESTRICT (four inventory, one audit); `locations -> warehouses` retained — bin rows with no stock, no open reservations and no ledger reference are structure, and deleting them with the warehouse is composition, not destruction. B3 checks both sides: no CASCADE on a table that holds facts, and no CASCADE anywhere else beyond that one named edge | 1 | 1 | 1 |
-| triggers in `public` | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 13 `afpc_touch_updated_at` triggers plus `trg_on_hand_consistency`. The two bespoke timestamp triggers 0001 ported are retired, and 6.3C's duplicated function with them| **14** | 17 | 17 |
-| tables whose `updated_at` is maintained | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 6.3's own measure, which is a behaviour claim rather than a column census: two of eleven before 0010 (the review's two "yes" rows), thirteen of thirteen after| **13** | 14 | 14 |
-| tables with no row-creation timestamp | 3 | 3 | 3 | 2 | 2 | 2 | 2 | 6.3's last paragraph named three; measured, `inventory_movements.performed_at` already served, so the real gap was two. `schema_migrations.applied_at` is build bookkeeping| 0 | 0 | 0 |
-| base-table vector columns led by hnsw | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 6.4. 0001 gave one of three an ivfflat; measured at 0011, the planner did not use even THAT for an ANN ordering unforced (Seq Scan + Sort at 500 rows), so 0 of 3 were really searchable in a plan anyone would run. 0012 makes it 3 of 3 | 0 | 0 | **3** |
+| Count | Before 0003 | After 0004 | After 0005 | After 0006 | After 0007 | After 0008 | After 0009 | Why | After 0010 | After 0011 | After 0012 | After 0013 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| FKs | 30 | 47 | 48 | 48 | 54 | 54 | 54 | `tenant_id` FKs, RESTRICT, on 17 tables; then `thread_root_id`, which 5.2 found had no constraint at all; then 6 to the master-data tables, which is why B17 had to be re-run against them | 54 | 55 | 55 | 56 |
+| tenant-coded tables | 0 | 18 | 18 | 18 | 18 | 18 | 18 | the review's "0 rows returned" for 5.8 | 18 | 19 | 19 | 20 |
+| FKs with no index anywhere | 12 | 11 | 11 | **0** | 0 | 0 | 0 | the corrected measure (see below): a column in no key position of any index. Unchanged by 0005 — `idx_comms_thread_root` already covers the new FK. 0006 indexes all of them | 0 | 0 | 0 | 0 |
+| FK columns leading no index | — | 14 | 14 | **0** | 0 | 0 | 0 | 0006's invariant, now asserted. The judgment 0003 left to be confirmed resolved **against** the tenant-led composites: an FK existence check carries no tenant predicate, so `(tenant_id, col)` cannot serve it — measured, 47 buffers/0.193 ms as a seq scan versus 6 buffers/0.017 ms index-only. Both shapes are kept where both query shapes exist, which is not the duplicate case 5.6 is about | 0 | 0 | 0 | 0 |
+| redundant index pairs (identical + prefix) | 8 | 3 | 3 | **0** | 0 | 0 | 0 | 4 pairs became single indexes when 0003 replaced the global natural key with a tenant-scoped unique; `0004` removed `idx_on_hand_available`/`idx_on_hand_low_stock`. The remaining 3 are pre-existing `idx_comm_*`/`idx_comms_*` pairs in `communications` (correction C1). 0006 found **3 more of the same defect that the review's measure could not see**: indexes whose column list is a strict leading prefix of another index on the same table (`audit_summary`, `locations`, `inventory_reservations`) — so the honest count of 5.6 is 6, not 3 | 0 | 0 | 0 | 0 |
+| integer key columns | 19 | 19 | **0** | 0 | 0 | 0 | 0 | 5.1/5.3: four serial PKs and fifteen referencing columns, widened together | 0 | 0 | 0 | 0 |
+| key columns narrower than their ceiling | 4 | 4 | **0** | 0 | 0 | 0 | 0 | bigint keys fed by an integer sequence — see B14 | 0 | 0 | 0 | 0 |
+| domain columns with no published answer | 30 | 30 | 30 | 30 | **0** | 0 | 0 | 5.9's count, restated as a question the database can answer. 26 are constrained, 4 are free text with a recorded reason | 0 | 0 | 0 | 0 |
+| tables | 18 | 19 | 19 | 19 | 21 | 21 | 21 | the two master-data tables, `units_of_measure` and `costing_methods` | 21 | 22 | 22 | 23 |
+| tables with row security forced | 2 | 2 | 2 | 2 | 2 | 2 | **18** | 5.7's `rls_forced = 0`. Scope is "has a `tenant_id` column", read from the catalog, so a new tenant-coded table joins automatically and B7 fails on it if it does not. The 4 tables without one are declared global in B19 | 18 | 19 | 19 | 20 |
+| policies in `public` | 3 | 3 | 3 | 3 | 3 | 3 | **36** | 18 × `tenant_isolation` (FOR ALL, qual + WITH CHECK) + 18 × `audit_read_all` (FOR SELECT, `USING (true)`, the read roles' door). 5 dropped first: 3 keyed off `app.current_agent`, 2 of 0002's stopgaps | — | 38 | 38 | 40 |
+| views | 14 | 14 | 14 | 14 | 14 | 14 | **15** | `vw_rls_status`. All 15 now carry `security_invoker=true` and every one over a tenant table exposes `tenant_id`, which is what closes 0003's deferral NOTICE | **16** | 17 | 17 | 18 |
+| functions executable by every role | — | — | — | — | 13 | 13 | **0** | 0008's census, swept. Three stay open by declaration — `afpc_current_tenant`, `afpc_policy_tenant`, `afpc_uuid_v7` — because they are called from column defaults and policy quals during an ordinary SELECT | 0 | 0 | 0 | 0 |
+| CASCADE edges | 6 | 6 | 6 | 6 | 6 | **1** | 1 | 5.10's count. Five flipped to RESTRICT (four inventory, one audit); `locations -> warehouses` retained — bin rows with no stock, no open reservations and no ledger reference are structure, and deleting them with the warehouse is composition, not destruction. B3 checks both sides: no CASCADE on a table that holds facts, and no CASCADE anywhere else beyond that one named edge | 1 | 1 | 1 | 1 |
+| triggers in `public` | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 13 `afpc_touch_updated_at` triggers plus `trg_on_hand_consistency`. The two bespoke timestamp triggers 0001 ported are retired, and 6.3C's duplicated function with them| **14** | 17 | 17 | 36 |
+| tables whose `updated_at` is maintained | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 6.3's own measure, which is a behaviour claim rather than a column census: two of eleven before 0010 (the review's two "yes" rows), thirteen of thirteen after| **13** | 14 | 14 | 15 |
+| tables with no row-creation timestamp | 3 | 3 | 3 | 2 | 2 | 2 | 2 | 6.3's last paragraph named three; measured, `inventory_movements.performed_at` already served, so the real gap was two. `schema_migrations.applied_at` is build bookkeeping| 0 | 0 | 0 | 0 |
+| base-table vector columns led by hnsw | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 6.4. 0001 gave one of three an ivfflat; measured at 0011, the planner did not use even THAT for an ANN ordering unforced (Seq Scan + Sort at 500 rows), so 0 of 3 were really searchable in a plan anyone would run. 0012 makes it 3 of 3 | 0 | 0 | **3** | 3 |
 
 Also deferred from 0003, deliberately:
 
@@ -179,6 +179,64 @@ Also deferred from 0003, deliberately:
   be amended in the same commit as the column. And 0009's `IF n <> 18` policy count survives
   replay only because 0009 runs *before* 0011 creates the nineteenth tenant-coded table; a
   migration that reorders the sequence breaks a replay assertion three files away.
+
+### Obligations 0013 creates for the migrations after it
+
+- **Every future probe that writes a business table now writes trail rows, and nothing may
+  count audit_log absolutely.** Row counts of audit_log differ between a database that has
+  replayed 0013 once and one that has replayed it after 0014-0017's self-cleanup deletes.
+  Assert chain_ok and per-subject counts, never totals.
+- **0019: the (tenant, month) segments ARE the detach units, by design.** audit_log is born
+  unpartitioned with a BRIN on occurred_at; when it is partitioned, retention becomes
+  DROP TABLE of a segment, which the chain already understands (verify reports only
+  segments that exist - a gone segment is not a broken one). The session_replication_role
+  erasure in probe G is the migration-time primitive for exactly that removal; it must never
+  ship in application code.
+- **A new exemption from the trail must be edited in TWO places, and probe A is the reason
+  that is safe**: the attach loop's NOT IN list and vw_audit_coverage's exempted CASE. A
+  one-sided edit makes the view disagree with the catalog about one table, and probe A's
+  XOR check fails the migration on the spot. If a third exemption ever earns one, update
+  the count assertion in the same commit.
+- **Tenant hard-delete is structural-impossible by ordinary SQL** (history references the
+  tenant; the delete would need to write history referencing the tenant being deleted).
+  Anything that wants tenant removal - seed cleanup, a future tenants-merge tool - uses the
+  segment-erasure pattern above or the status column, never a bare DELETE.
+
+## Found while building 0013
+
+- **The harness's sequence restore had been off by one for twelve migrations, and only a
+  table that keeps committed rows could catch it.** `setval(seq, max, false)` hands out
+  `max` again - this file's own plan states that fact for the 2^31 probe, and DO_RESTORE
+  did not apply it - which was harmless while every test rolled its tables back to EMPTY.
+  audit_log is the first table with migration-era rows that persist: the first audited
+  write after a test run re-drew an existing audit_id and died on `audit_log_pkey`, inside
+  the UNRELATED 4_1 probe. The mapped-row SURPRISE caught it - the scoreboard mechanism
+  justifying itself once more.
+- **A plpgsql function body is not parsed until it is entered.** `atttypid =
+  'vector'::regclass` - regclass where regtype was meant - CREATEd cleanly and failed only
+  at the first audited write in the first probe. A migration whose behaviour blocks run
+  after the DDL is this same lesson one layer up, and rehearsals are what cash it.
+- **`GENERATED ALWAYS AS IDENTITY` forbids the chain design.** The hash must cover the
+  row's position, the position must be drawn under the segment lock for order to be
+  lock-order, and an explicit insert of the drawn value is the only way to do that -
+  ALWAYS rejects it. BY DEFAULT keeps the guarantee (a hand-made id out of order breaks
+  prev_hash) and adds replay friendliness pg_dump needs.
+- **plpgsql substitutes two name levels, not three.** `r.a.tenant_id` over a loop record
+  whose field `a` is a composite became, at runtime, an SQL reference to FROM item `a` -
+  an error, not a slow path; and `SELECT a INTO v_ref` against a composite variable puts
+  the whole row into the target's FIRST field, type error included. Hoist fields into the
+  loop's query, or expand with `a.*`. Same family as the register's ORDER-BY alias trap:
+  the substitution layer and the SQL layer disagree about what a dotted name means.
+- **A verify function that returns one row per segment makes "count(*) >= 3" a lie waiting
+  to happen.** Probe D's first form counted audit rows by counting SEGMENTS (passed at 1);
+  the honest measures are `sum(audited_rows)` and `bool_and(chain_ok)` - and `bool_and`
+  over NO rows is NULL, which must fail closed (`IS TRUE`), because "saw nothing" is exactly
+  what an invisible history would report as.
+- **The trail FKs the tenant to itself through time.** Probe G's cleanup found that
+  deleting a tenants row fires an audit INSERT referencing the tenant being deleted - so a
+  tenant with history cannot be hard-deleted by ordinary SQL in any order. That is the
+  design saying no on purpose ('archived' is the door), and the sanctioned exception is the
+  segment-erasure primitive recorded above.
 
 ## Found while building 0012
 

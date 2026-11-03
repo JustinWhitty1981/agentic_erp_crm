@@ -462,6 +462,28 @@ check "B12 6.4 hnsw on all embeddings" "0012_vector_indexing" \
          WHERE n.nspname = 'public' AND ix.relkind = 'i' AND am.amname = 'ivfflat')" \
     "vector columns led by no hnsw index, plus any ivfflat 0012 did not name"
 
+# 6.2's scoreboard half, in the register's own shape: the coverage view already answers
+# "which tenant-coded tables have a trail", so the check counts the view disagreeing with
+# itself rather than re-deriving scope - a third copy of the census is how 0006's tiebreak
+# bug happened. The exemptions are allowed to exist; being exempt AND untrailed is the
+# consistent state, and audited-AND-exempt is the drift (a trigger someone forgot to remove
+# from a table someone decided to exempt, or vice versa).
+check "B26 6.2  trail coverage is consistent" "0013_audit_log" \
+    "SELECT count(*) FROM vw_audit_coverage WHERE row_audited IS DISTINCT FROM (NOT exempted)" \
+    "tenant-coded tables whose audited flag contradicts their exemption decision"
+
+# The append-only promise is a GRANT, and grants are exactly what future migrations' default
+# mechanisms re-widen by accident (0002's forward defaults would hand UPDATE back to afpc_app
+# the moment someone recreates the table). Counted from aclexplode: any non-owner role holding
+# a history-altering privilege is the finding, whatever the ACL's prose says.
+check "B27 6.2  history is append-only by grant" "0013_audit_log" \
+    "SELECT count(*) FROM aclexplode((SELECT relacl FROM pg_class
+                                       WHERE oid = 'public.audit_log'::regclass)) x
+       JOIN pg_roles r ON r.oid = x.grantee
+      WHERE x.privilege_type IN ('UPDATE', 'DELETE', 'TRUNCATE')
+        AND r.rolname <> 'postgres'" \
+    "roles other than the owner who could rewrite or erase audit_log"
+
 # ---------- C. live inventory ----------------------------------------------------
 # Domain objects only. Extension-owned functions/views would swamp the signal: 194
 # of the 204 functions in public belong to pgvector, and the counts below are the

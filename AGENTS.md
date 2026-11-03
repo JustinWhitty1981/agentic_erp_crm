@@ -302,6 +302,7 @@ See `.env.example` for required variables.
 | `units_of_measure` | Master data: units an item can be counted, weighed or measured in |
 | `costing_methods` | Master data: how an item's cost is derived |
 | `idempotency_keys` | ADR-005 request claims: one row per (tenant, operation, key) with the cached answer, the lease, and the retention deadline |
+| `audit_log` | Row-level change history: append-only by grant, tamper-evident by a sha256 chain segmented per (tenant, month); one trail row per row-change on every tenant-coded table except itself and `idempotency_keys` |
 
 ### Views for Agents
 | View | Purpose |
@@ -324,6 +325,7 @@ See `.env.example` for required variables.
 | `vw_rls_status` | What row-level security actually does per table: forced or not, which roles, the read and write predicates verbatim, and a verdict |
 | `vw_timestamp_status` | Whether each table's `updated_at` can be trusted: is it maintained, on which commands, is it nullable, and which functions rewrite the table anyway |
 | `vw_idempotency_status` | Which functions change persistent state and whether a retry of them is guarded (ADR-005 pattern) or UNGUARDED |
+| `vw_audit_coverage` | Which tenant-coded tables have a row trail, which are exempted, and the reason each decision was made |
 | `vw_inventory_valuation` | Inventory value by warehouse/category |
 | `vw_item_availability` | Stock levels across warehouses |
 | `vw_item_movement_summary` | 30-day item movement patterns |

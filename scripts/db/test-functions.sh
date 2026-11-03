@@ -43,8 +43,14 @@ BEFORE="$(snapshot)"
 # ceiling has to be pulled back afterwards, or the next run inherits it. This is derived
 # from the catalog rather than named: 0005 added tests that advance entities_id_seq too,
 # and a hand-maintained list of exactly one sequence is how a harness starts lying.
-# Restoring from max(id) with is_called=false means the next nextval() returns max(id)+1,
-# which is what a fresh database would hand out.
+# Restoring: setval(v, true) means the NEXT nextval is v+1, which is what a table whose
+# committed max is v must hand out; setval(v, false) hands out v itself (this file's own
+# plan recorded that fact for the 2^31 probe and the restore block here did not apply it).
+# The old form - setval(max, false), commented as yielding max+1 - was invisible for twelve
+# migrations because every table a test touched rolled back to EMPTY, and an empty table's
+# restore is a formality. audit_log is the first table whose MIGRATION-era rows persist:
+# the next audited write after a test run re-drew an existing audit_id and 4_1 surfaced it
+# as an audit_log_pkey violation. An empty table still lands on 1 via the ELSE branch.
 DO_RESTORE="DO \$\$
 DECLARE r record; v bigint;
 BEGIN
@@ -59,10 +65,11 @@ BEGIN
          ORDER BY 1
     LOOP
         EXECUTE format('SELECT coalesce(max(%I), 0) FROM public.%I', r.col, r.tbl) INTO v;
-        -- greatest(...,1): setval rejects 0, and an empty table's max() is 0. With
-        -- is_called = false the next nextval() is 1, which is what an untouched sequence
-        -- would hand out anyway.
-        EXECUTE format('SELECT setval(%L, %s, false)', r.seq, greatest(v, 1));
+        IF v >= 1 THEN
+            EXECUTE format('SELECT setval(%L, %s, true)', r.seq, v);
+        ELSE
+            EXECUTE format('SELECT setval(%L, 1, false)', r.seq);
+        END IF;
     END LOOP;
 END
 \$\$;"
@@ -203,6 +210,15 @@ CASES=(
 "6_4_vectors|a vector column of a base table leads no hnsw index|6.4|0012_vector_indexing"
 "6_4_vectors|an under-trained ivfflat index is still mounted|6.4|0012_vector_indexing"
 "6_4_vectors|a listing view still projects the vector|6.4|0012_vector_indexing"
+# 6.2 gets four rows: the trail's existence, its accuracy under ordinary DML, the one
+# promise that can only be proven by attempting the forbidden write, and the chain verdict
+# from the seat that writes it. All four print from the existence guard before 0013 (so
+# each reproduces as measured) and from a failure branch after (so each means regression
+# if it returns).
+"6_2_audit|ordinary writes leave no trail|6.2|0013_audit_log"
+"6_2_audit|the audit chain does not verify|6.2|0013_audit_log"
+"6_2_audit|accepted a rewrite|6.2|0013_audit_log"
+"6_2_audit|a tenant-coded table is untrailed|6.2|0013_audit_log"
 )
 
 echo
