@@ -4,8 +4,9 @@
 
 **Location:** `scripts/database/08_create_views.sql`
 
-> **Read this page in two layers.** The note below is 0009's; the four interaction views added by
-> `0017_interaction_readpath` are further down and are current. The column lists for the CRM and
+> **Read this page in layers.** The note below is 0009's; the four interaction views added by
+> `0017_interaction_readpath` and `vw_currency_rates` added by `0018_currencies` are further down
+> and are current. The column lists for the CRM and
 > inventory views were written against the superseded SQL rather than the live catalog, and 0017
 > found one of them is simply wrong in both directions - `vw_agent_activity_summary` is listed
 > with `bot_id`, a column it has never had (the live one is `agent_id`), and is missing
@@ -326,19 +327,65 @@ SELECT * FROM vw_tool_performance;
 
 ### vw_inventory_valuation
 
-Inventory value by warehouse/category.
+Inventory value by warehouse and category, **per currency**.
 
 ```sql
-SELECT * FROM agent_first_erp_crm.vw_inventory_valuation;
+SELECT warehouse_name, category_name, currency_code, sum(total_value) AS value
+  FROM vw_inventory_valuation
+ GROUP BY 1, 2, 3
+ ORDER BY 1, 2, 3;
 ```
 
-**Columns:**
-- `warehouse_name` - Warehouse name
-- `category_name` - Category name
-- `total_value` - Total inventory value
-- `item_count` - Number of items
+**Columns:** (read from `pg_attribute`; the four listed here before 0018 described a view with
+different names and no `tenant_id`)
+- `warehouse_id` - Which warehouse
+- `warehouse_name` - Its name
+- `warehouse_type` - PRIMARY / SECONDARY / TRANSIT
+- `category_id` - Which item category, NULL for uncategorised items
+- `category_name` - Its name
+- `unique_items` - Distinct items counted in this group
+- `total_units` - Quantity on hand
+- `total_value` - On-hand value at average cost
+- `available_value` - Value of what is not reserved
+- `currency_code` - **Added by 0018, and the reason the three numbers above changed grain.** An item's
+  balances are in the item's currency; a warehouse holds many items, so summing `quantity * cost`
+  across a USD item and a JPY item is dollars plus yen. Grouping by it is 0009's argument about
+  `tenant_id` applied to the other axis of the same SELECT list. Nothing converts: there is no
+  tenant base currency and no rule for which rate applies to an averaged cost, so a total across
+  currencies is not available from here and that is a decision, not an omission.
+- `tenant_id` - Aggregate key from 0009
 
-**Use Case:** Financial reporting
+**Use Case:** Financial reporting, per currency
+
+---
+
+### vw_currency_rates
+
+The rate in force for each currency pair the schema has ever held one for.
+
+```sql
+SELECT from_currency, to_currency, rate_in_force, in_force
+  FROM vw_currency_rates
+ WHERE from_currency = 'JPY';
+```
+
+**Columns:** (read from `pg_attribute`, built by `db/migrations/0018_currencies.sql`)
+- `from_currency` - Left side of the pair
+- `to_currency` - Right side. Both come from `currency_rates`, so a pair nobody has quoted is absent
+  from this view rather than present with NULLs - which is what makes `rows_for_pair` meaningful.
+- `rate_in_force` - The number, or NULL when the pair has no row covering now
+- `valid_from` / `valid_to` - The window that row covers; NULL `valid_to` means it is the open row
+- `source` - Where the number came from; NULL is information (an unattributed rate)
+- `in_force` - Whether a covering row exists at all. `false` with `rows_for_pair > 0` means
+  *expired*, which is a different fact from a pair that has no rows; conflating them is how a rate
+  table stops being trusted by the person reading it
+- `rows_for_pair` - How much history this pair has
+- `as_of` - `now()`, stated rather than implicit: a view that quietly contains a clock answers a
+  different question on every scan
+
+**Use Case:** Asking whether a conversion is even possible. Nothing in the schema reads this view
+to price anything - `vw_inventory_valuation` is grouped by currency instead of translated - so it is
+a record with a status, not an input to arithmetic yet.
 
 ---
 

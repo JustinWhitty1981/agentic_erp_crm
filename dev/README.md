@@ -149,7 +149,7 @@ TLS change, `init.sh` reverts `ssl` rather than leaving a persistent database un
 
 ## Things that will bite you if you do not know them
 
-Fifty-six of these, each learned by a check failing on a rehearsal or a
+Sixty-four of these, each learned by a check failing on a rehearsal or a
 migration after the fact - not by reading documentation about the database. Keep the pattern: when a migration surprises
 you, the surprise goes here, and the check that would have caught it goes in verify.sh.
 
@@ -551,4 +551,70 @@ is grouped by tenant and tool, so `WHERE run_id = ...` is not available and the 
 sums every fixture in the database - including the ones earlier migrations left in
 `agent_interactions`. Give each probe its own invented dimension values (0017 uses `c_lookup`,
 `b_update` as tool names) so the number it reads is the number it caused. This is 0013's
-"assert per-subject, never totals" for the case where the view has no subject to name.
+"assert per-subject, never totals" for the case where the view has no subject to name. The same trap
+has a second form, found at 0018: a probe that reports a *disagreement count* across the whole
+schema will count the disagreements its own earlier probes manufactured on purpose, so the report
+prints "1" on a clean database forever. Exclude the fixtures by their probe marker (`sku NOT LIKE
+'0018-%'`) **and** assert that the excluded set is non-empty, so the exclusion cannot become a way of
+making the number quietly disappear (0018's probe K does both).
+
+**A column DEFAULT cannot read another column of its own row, and a generated column cannot read
+another table.** `ALTER TABLE t ALTER COLUMN c SET DEFAULT f(other_id)` fails with `cannot use column
+reference in DEFAULT expression`, and the subquery shape that suggests itself next fails with
+`cannot use subquery in DEFAULT expression`. A generated column *can* name a same-row column, but its
+expression must be immutable (`42P17`), and the only way past that is to mark a table-reading function
+`IMMUTABLE` - which PostgreSQL accepts, and which then stores a value that goes stale on every edit to
+the table it read. So "derive this column from that one" has exactly two homes in this schema: a
+trigger, or the body that writes the row. 0018 chose the bodies, and chose a census probe over a
+guarantee, and says so in its §0 (0018).
+
+**Dropping and recreating a view restores the dependency that blocked your ALTER.** `ALTER COLUMN
+... TYPE` is refused outright while any view reads the column (`cannot alter type of a column used by
+a view or rule`, 0A000), so the pattern is capture, drop, alter, recreate. Doing that *one view at a
+time* gets you exactly one ALTER in: recreating the first view re-establishes a dependency on the
+column the second ALTER needs. Order is capture-all, drop-all, alter-all, recreate-all (0018 §4). And
+when you ask `pg_depend` whether anything depends on a view, exclude the view itself - its `_RETURN`
+rule is recorded as a dependent of it, so a naive census reports every view you are about to drop as
+blocking its own drop.
+
+**A unique index on a partitioned table must include the partition key, and the version that does is
+a different promise.** `UNIQUE (a, b) WHERE open IS NULL` says "at most one live row per pair". On a
+table partitioned by range over a *third* column, that index will not build, and the variant that
+includes the partition key lets the same pair hold an open row in each partition. Partitioning an
+append-only history table therefore quietly removes the arbiter it was written to have. Measured on a
+scratch table (0018's Obligations), because this is the kind of constraint that reads fine in a plan
+and fails in a migration.
+
+**A foreign key check does not apply row-level security.** A derived value that comes from a row the
+caller cannot see is derived from *nothing*: the lookup returns NULL, the referencing FK sees a valid
+code, and the row lands. 0018's probe G' expected `23502` from this and got a successful INSERT
+instead. Anything that reads a tenant-coded table must be `SECURITY INVOKER` for that reason, and
+"the FK will catch it" is not true of a value, only of a key.
+
+**Widening a candidate rule surfaces what it was skipping, including your own new table.**
+`vw_domain_vocabulary`'s filter was `atttypid IN ('text','varchar')` plus a name shape, so the
+`char(3)` currency columns were invisible to the view whose job is to report unconstrained domain
+columns - and the moment bpchar was added to the list, `currencies.currency_code` appeared in it as
+`UNDECIDED`, because a code table's key had started to look like a vocabulary. Master data is *values
+referenced*, not a column that references, so the exemption is `c.oid NOT IN (derived code tables)`,
+derived rather than named: the same fix as B19's global-table declaration and for the same reason (a
+list nobody checks falls behind). The pair `verify.sh`'s B18 and the register are two implementations
+of that one sentence, which is why both changed in the same commit (0018 §5).
+
+**`char` blank padding makes a typo indistinguishable from its correction.** A row written as `'xt'`
+into a `char(3)` matches `= 'xt'`, `= 'xt '` and `= 'xt  '` alike. Measured while writing 0018's
+probe B. This is why the schema's currency vocabulary is now a membership FK with the ISO-4217 shape
+CHECKed once on the master, rather than a shape CHECK repeated on every referencing column: four
+copies of a rule is four chances to drift, and the width of a column was never the wall anyway.
+
+**`now()` does not advance inside a transaction, so "did the trigger move `updated_at`?" is not a
+question you can ask in a probe.** 0010's touch function *honours* a caller that names the column, so
+the answerable pair is: an explicit value survives an UPDATE, and an unnamed UPDATE leaves the column
+at the transaction's `now()`. The first draft of 0018's probe M asserted "it changed" and failed on
+the clock rather than on the trigger (same trap `db/tests/6_3_timestamps.sql` documents; it is here
+again because it is easy to fall into twice).
+
+**A query alias that shadows a plpgsql variable is not an alias.** `FROM pg_trigger t` inside a block
+that declared `t record` resolves `t.tgrelid` against the record and fails with `record "t" has no
+field "tgrelid"`. Rename the alias (`tr`), not the variable. 0018 hit this in a probe and in a
+`pg_namespace n` join in the same block that had `n` as a needle-loop column.

@@ -224,6 +224,19 @@ CASES=(
 "6_2_audit|the audit chain does not verify|6.2|0013_audit_log"
 "6_2_audit|accepted a rewrite|6.2|0013_audit_log"
 "6_2_audit|a tenant-coded table is untrailed|6.2|0013_audit_log"
+# 6.5 gets five rows, one per block, and each is the sentence the *pre-0018* branch prints. The
+# review's evidence for this finding is a column census, and a census cannot say what a column
+# does; the rows below are the four things it does (an invented code that lands, a receipt the
+# column's ceiling refuses, a balance labelled in a currency the item never named, a register
+# that cannot see the column at all) plus the absence 6.5 states outright. The post-0018 branches
+# in the same file that print ERR when a mechanism is broken - a blended average, a refusal that
+# wrote its ledger row first - are deliberately NOT mapped: crediting a migration with closing a
+# case that never reproduced on any database is how the report starts flattering itself.
+"6_5_money_currency|no currency master exists, so an invented code|6.5|0018_currencies"
+"6_5_money_currency|money and quantity share one precision and the door multiplies|6.5|0018_currencies"
+"6_5_money_currency|the balance a door created for a JPY item is kept in|6.5|0018_currencies"
+"6_5_money_currency|there is no rate history anywhere|6.5|0018_currencies"
+"6_5_money_currency|is outside the candidate set|6.5|0018_currencies"
 )
 
 echo

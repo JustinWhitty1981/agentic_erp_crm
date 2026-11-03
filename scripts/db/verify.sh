@@ -154,10 +154,24 @@ check "B18 5.9  domain answers are complete" "0007_domain_constraints" \
           FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid \
           JOIN pg_namespace n ON n.oid=c.relnamespace \
          WHERE n.nspname='public' AND c.relkind='r' AND c.relname<>'_schema_graph' AND a.attnum>0 \
-           AND NOT a.attisdropped AND a.atttypid IN ('text'::regtype,'varchar'::regtype) \
-           AND (a.attname ~ '(_type|_status|_method|_label|_unit|_measure)$|(^|_)status$|(^|_)priority$|(^|_)direction$|(^|_)outcome$' \
+           AND NOT a.attisdropped AND a.atttypid IN ('text'::regtype,'varchar'::regtype,'bpchar'::regtype) \
+           AND (a.attname ~ '(_type|_status|_method|_label|_unit|_measure)$|(^|_)status$|(^|_)priority$|(^|_)direction$|(^|_)outcome$|(^|_)currency(_code)?$' \
                 OR a.attname IN ('role','channel','action_type','item_group')) \
            AND a.attname NOT IN ('industry','website','title','agent_id','reason_code','follow_up_action') \
+           AND c.oid NOT IN (SELECT cc.oid FROM pg_class cc \
+                               JOIN pg_namespace nn ON nn.oid=cc.relnamespace AND nn.nspname='public' \
+                              WHERE cc.relkind='r' \
+                                AND cc.relname NOT IN ('schema_migrations','_schema_graph') \
+                                AND NOT EXISTS (SELECT 1 FROM pg_attribute x \
+                                                 WHERE x.attrelid=cc.oid AND x.attname='tenant_id' \
+                                                   AND x.attnum>0 AND NOT x.attisdropped) \
+                                AND EXISTS (SELECT 1 FROM pg_index ii \
+                                              JOIN pg_attribute pk ON pk.attrelid=cc.oid \
+                                                   AND pk.attnum=(ii.indkey)[0] \
+                                              JOIN pg_type pt ON pt.oid=pk.atttypid \
+                                             WHERE ii.indrelid=cc.oid AND ii.indisprimary \
+                                               AND ii.indnatts=1 \
+                                               AND pt.typname IN ('varchar','bpchar','text'))) \
      ) x WHERE NOT EXISTS (SELECT 1 FROM vw_domain_vocabulary v2 \
                             WHERE v2.table_name||'.'||v2.column_name = x.col))" \
     "domain columns outside vw_domain_vocabulary, or listed twice (a second membership CHECK on one column contradicts the first)"
@@ -254,7 +268,8 @@ check "B19 5.7 global tables declared" "0009_rls_enforcement" \
                          WHERE a.attrelid=c.oid AND a.attname='tenant_id'
                            AND a.attnum>0 AND NOT a.attisdropped)
         AND c.relname NOT IN ('schema_migrations','_schema_graph',
-                              'units_of_measure','costing_methods')" \
+                              'units_of_measure','costing_methods',
+                              'currencies','currency_rates')" \
     "tables outside the tenant model that nothing has declared global"
 
 # 5.7's third failure was a policy keyed off a setting no code sets. The general form of that

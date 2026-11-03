@@ -302,6 +302,8 @@ See `.env.example` for required variables.
 | `audit_summary` | Daily aggregation |
 | `units_of_measure` | Master data: units an item can be counted, weighed or measured in |
 | `costing_methods` | Master data: how an item's cost is derived |
+| `currencies` | Master data: ISO 4217 codes behind the three currency columns, and how many minor units each has; global, so declared in B19 rather than given tenant policies |
+| `currency_rates` | Rate history per currency pair; one open row per pair by partial unique index, gaps and overlaps across closed rows unconstrained; global, and outside 0013's trail because `audit_log.tenant_id` is NOT NULL |
 | `idempotency_keys` | ADR-005 request claims: one row per (tenant, operation, key) with the cached answer, the lease, and the retention deadline |
 | `audit_log` | Row-level change history: append-only by grant, tamper-evident by a sha256 chain segmented per (tenant, month); one trail row per row-change on every tenant-coded table except itself and `idempotency_keys` |
 
@@ -323,12 +325,13 @@ See `.env.example` for required variables.
 | `vw_tool_calls` | One row per tool invocation, derived by position from `agent_interactions` |
 | `vw_tool_performance` | Tool usage statistics — calls counted per call, duration and errors per run |
 | `vw_index_redundancy` | Indexes that are identical to, or a leading prefix of, another index |
-| `vw_domain_vocabulary` | What every status/type column accepts, how it is enforced, and why |
+| `vw_domain_vocabulary` | What every status/type/code column accepts, how it is enforced, and why — `char(3)` code columns included since 0018, and the code tables it lists values for are derived from the catalog rather than named |
 | `vw_rls_status` | What row-level security actually does per table: forced or not, which roles, the read and write predicates verbatim, and a verdict |
 | `vw_timestamp_status` | Whether each table's `updated_at` can be trusted: is it maintained, on which commands, is it nullable, and which functions rewrite the table anyway |
 | `vw_idempotency_status` | Which functions change persistent state and whether a retry of them is guarded (ADR-005 pattern) or UNGUARDED |
 | `vw_audit_coverage` | Which tenant-coded tables have a row trail, which are exempted, and the reason each decision was made |
-| `vw_inventory_valuation` | Inventory value by warehouse/category |
+| `vw_inventory_valuation` | Inventory value by warehouse/category, **per currency** after 0018 — nothing converts, so a warehouse holding a USD item and a JPY item reports two rows, not one sum |
+| `vw_currency_rates` | The rate in force per currency pair, and the difference between *expired* and *never quoted* — `in_force`, `rows_for_pair`, `as_of` |
 | `vw_item_availability` | Stock levels across warehouses |
 | `vw_item_movement_summary` | 30-day item movement patterns. `total_inbound`/`total_outbound` exclude `RESERVATION` rows — a commitment makes stock unavailable, it moves nothing — while `net_quantity` still counts them |
 | `vw_low_stock_alerts` | Items below reorder point |
