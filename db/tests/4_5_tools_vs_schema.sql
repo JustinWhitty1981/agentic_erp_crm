@@ -53,20 +53,63 @@ ROLLBACK;
 -- 5c. Objects the tools reference that no schema in this repository creates.
 DO $$
 DECLARE
-    n int;
+    n     int;
+    m     int;
 BEGIN
-    SELECT count(*) INTO n FROM pg_class WHERE relname = 'agent_tool_calls';
-    IF n = 0 THEN
-        RAISE NOTICE 'VERDICT ERR 00000 | agent_tool_calls does not exist, but tool_logger.py writes to it 5 times';
+    -- 5c, rewritten for what 0017 decided and what it found.
+
+    -- The three views this repository's own documentation tells an agent to query. Measured
+    -- before 0017: 0 of the 3 exist, because 0001 ported the TABLE out of
+    -- blueprint/11_interaction_logging.sql and left that file's VIEWS behind, so the debugging
+    -- instructions and the schema disagreed by a whole read path.
+    SELECT count(*) INTO n FROM pg_class
+     WHERE relnamespace = 'public'::regnamespace AND relkind = 'v'
+       AND relname IN ('vw_recent_interactions','vw_failed_interactions','vw_tool_performance');
+    IF n < 3 THEN
+        RAISE NOTICE 'VERDICT ERR 00000 | the debug views the docs promise are missing (% of 3 '
+                     'exist): AGENTS.md and docs/INTERACTION_LOGGING.md both tell a reader to '
+                     'query them', n;
     ELSE
-        RAISE NOTICE 'VERDICT OK agent_tool_calls exists';
+        RAISE NOTICE 'VERDICT OK the three documented interaction views exist';
     END IF;
 
-    SELECT count(*) INTO n FROM pg_class WHERE relname = 'tickets';
-    IF n = 0 THEN
-        RAISE NOTICE 'VERDICT ERR 00000 | tickets does not exist (it lived only in the vestigial schema)';
+    -- agent_tool_calls: 4.5 asked for it to be created or its code deleted. Neither, measured:
+    -- the only file that touches it is never imported, and its per-call grain is derivable from
+    -- the log the live code does write. So the honest phrase is about whether anything ANSWERS
+    -- the question, not whether a table with a given name exists.
+    SELECT count(*) INTO n FROM pg_class WHERE relname = 'agent_tool_calls';
+    SELECT count(*) INTO m FROM pg_class WHERE relname = 'vw_tool_calls' AND relkind = 'v';
+    IF n = 0 AND m = 0 THEN
+        RAISE NOTICE 'VERDICT ERR 00000 | nothing derives the per-call answer: no '
+                     'agent_tool_calls table and no vw_tool_calls view, so the trajectory is '
+                     'only readable per run';
+    ELSIF n = 0 THEN
+        RAISE NOTICE 'VERDICT INFO agent_tool_calls is absent by decision (0017): the per-call '
+                     'grain comes from agent_interactions, and a second log of the same calls '
+                     'is a second implementation of ADR-001';
+    ELSIF m = 0 THEN
+        RAISE NOTICE 'VERDICT OK agent_tool_calls exists, so 0017''s decision was reversed by '
+                     'some later change - check that the two logs agree';
     ELSE
+        RAISE NOTICE 'VERDICT ERR 00000 | both exist: agent_tool_calls and the derivation are '
+                     'two answers to one question, and they will disagree first or last';
+    END IF;
+
+    -- tickets: no code touches it, and after 0017 nothing in the schema does either. Its only
+    -- reference in the repository is a LEFT JOIN in a superseded file.
+    SELECT count(*) INTO n FROM pg_class WHERE relname = 'tickets';
+    SELECT count(*) INTO m FROM pg_class c
+     WHERE c.relkind = 'v' AND c.relnamespace = 'public'::regnamespace
+       AND pg_get_viewdef(c.oid) ~ '\y(tickets|agent_tool_calls)\y';
+    IF n = 0 AND m = 0 THEN
+        RAISE NOTICE 'VERDICT INFO tickets is absent by decision (0017): nothing in public '
+                     'names it; the support domain is followups';
+    ELSIF n > 0 THEN
         RAISE NOTICE 'VERDICT OK tickets exists';
+    ELSE
+        RAISE NOTICE 'VERDICT ERR 00000 | % view(s) reference tickets or agent_tool_calls, which '
+                     'no migration creates - that is a 42P01 waiting for a reader, which is '
+                     'exactly how 4.5 read', m;
     END IF;
 END
 $$;

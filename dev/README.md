@@ -149,7 +149,7 @@ TLS change, `init.sh` reverts `ssl` rather than leaving a persistent database un
 
 ## Things that will bite you if you do not know them
 
-Forty-nine of these, each learned by a check failing on a rehearsal or a
+Fifty-six of these, each learned by a check failing on a rehearsal or a
 migration after the fact - not by reading documentation about the database. Keep the pattern: when a migration surprises
 you, the surprise goes here, and the check that would have caught it goes in verify.sh.
 
@@ -500,3 +500,55 @@ a `SET LOCAL ROLE` probe still runs in the same backend. Anything whose claim is
 transactions at once - a claim that serialises, a lease that expires mid-write - can be measured
 from this host but not shipped as a check, and the honest place for it is T3's replay job, not a
 probe that looks like it tested something.
+
+**A `LIMIT` inside a view is a filter that runs before yours.** `SELECT ... ORDER BY t DESC
+LIMIT 100` in a view definition means a caller's `WHERE bot_id = 'x'` is applied to the 100 rows
+the view already chose, not to the table. Measured with 5 old rows and 4 newer ones: the view
+returned **0 rows** for the older bot while the table held 5. The order a view promises is not a
+property it can hold either - an outer plan may re-sort - so the fix is to put neither the `LIMIT`
+nor the `ORDER BY` in the view and show both in the documentation instead (0017).
+
+**Fan-out makes a per-row number into a per-element number.** `jsonb_array_elements` over a
+jsonb array column joins one row of the base table to N rows, so `avg(run_duration)` and
+`SUM(error IS NOT NULL)` computed in that query are weighted by how many steps each run happened
+to have. Measured: one errored run that used three tools printed `error_count = 3`, and a 900 ms
+run beside a 100 ms one printed 700 ms where the mean of the two runs is 500. Aggregate the
+elements separately from the rows: deduplicate back to `(group, row id)` with a second CTE, then
+average that. And name the grain in the column, because a reader cannot tell from `avg_duration_ms`
+which question was asked.
+
+**`pg_depend` will not tell you which views read a table if you ask it with `classid = 'pg_class'`.**
+A view's dependency on a base table is recorded against its `pg_rewrite` rule, per column, with
+`refclassid`/`refobjid`/`refobjsubid`; the `pg_class` form returns zero rows and looks like an
+answer. The census that finds dependents is `pg_depend JOIN pg_rewrite ON oid = objid JOIN
+pg_class ON oid = ev_class`, and it repeats a view once per referenced column, which is why the
+list is longer than the number of views.
+
+**`count()` is not `count(*)`, and a scalar JSONB value has no key to index.** PostgreSQL refuses
+bare `count()` as a parameterless aggregate (42601), so a hand-written view fails at creation with
+a message that reads like a syntax slip. Separately: if a view projects `value -> 'output'`, it has
+projected the *element's* field, but if it projects the output **value** - as `vw_tool_calls` does -
+then `observation ->> 'output'` is always NULL, because a JSONB string has no keys, and the read is
+`observation #>> '{}'`. Both mistakes were made in 0017's rehearsal and neither looked like what it
+was in the failure output.
+
+**A `RAISE` with the wrong number of arguments is reported at an unrelated line.** The compiler
+pairs `%` placeholders with the argument list, and when a message is concatenated across several
+lines it is easy to add an argument and not a placeholder: the error is
+`too many parameters specified for RAISE`, and `psql` points at the `DO $$` - not the statement.
+Count them before rehearsing, or grep the file for RAISEs whose placeholder and argument counts
+disagree.
+
+**A `code:` marker with no branch in `closed()` is inert, and the harness reads it as a finding.**
+`_common.sh`'s `closed()` matches `code:*` with a catch-all that answers "not applied", so a CASES
+row mapped to a marker nobody wrote is KNOWN-OPEN forever with a migration name attached that does
+not exist. That is the right verdict for the wrong reason - the same failure as a test that passes
+because a branch was skipped, wearing the opposite sign. `db/MIGRATIONS.md`'s marker table has a
+"Watched by" column for this: say what greps the tree, or say "nothing yet".
+
+**A probe that reads an aggregate view cannot filter by the row it inserted.** `vw_tool_performance`
+is grouped by tenant and tool, so `WHERE run_id = ...` is not available and the assertion silently
+sums every fixture in the database - including the ones earlier migrations left in
+`agent_interactions`. Give each probe its own invented dimension values (0017 uses `c_lookup`,
+`b_update` as tool names) so the number it reads is the number it caused. This is 0013's
+"assert per-subject, never totals" for the case where the view has no subject to name.

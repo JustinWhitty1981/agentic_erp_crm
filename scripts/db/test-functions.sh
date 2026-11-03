@@ -108,8 +108,13 @@ CASES=(
 "4_4_add_customer_ambiguous|4-argument call: function|4.4|0016_single_add_customer"
 "4_4_add_customer_ambiguous|overloads of add_customer are installed|4.4|0016_single_add_customer"
 "4_5_tools_vs_schema|finding 3.1|4.5|code:tool_prefix"
-"4_5_tools_vs_schema|agent_tool_calls does not exist|4.5|0017_tool_call_log"
-"4_5_tools_vs_schema|tickets does not exist|4.5|0017_tool_call_log"
+"4_5_tools_vs_schema|the debug views the docs promise are missing|4.5|0017_interaction_readpath"
+"4_5_tools_vs_schema|nothing derives the per-call answer|4.5|0017_interaction_readpath"
+# 5b's line is the undecided prospect question, not 4.5's name/arity half: the review's own
+# note says prospects are invisible to vw_customers, and measured, no function can write
+# entities.entity_type at all. T2 owns both halves. It is mapped here so a green harness
+# cannot hide a failing reproduction, which is what the row it replaces was doing.
+"4_5_tools_vs_schema|update_customer success=f|4.5|code:vw_customers_filter"
 "5_2_thread_key_ceiling|threading dies here|5.2|0005_key_types"
 "5_2_thread_key_ceiling|thread_root_id has no FK|5.2|0005_key_types"
 # 5.1/5.3 and 5.4 are behavioural: a column of the wrong width and a key distribution that

@@ -4,6 +4,16 @@
 
 **Location:** `scripts/database/08_create_views.sql`
 
+> **Read this page in two layers.** The note below is 0009's; the four interaction views added by
+> `0017_interaction_readpath` are further down and are current. The column lists for the CRM and
+> inventory views were written against the superseded SQL rather than the live catalog, and 0017
+> found one of them is simply wrong in both directions - `vw_agent_activity_summary` is listed
+> with `bot_id`, a column it has never had (the live one is `agent_id`), and is missing
+> `unique_contacts`, `escalated_count` and `first_activity`. Read the lists with
+> `SELECT * FROM pg_attribute WHERE attrelid = 'vw_...'::regclass` as the authority; a
+> documentation sweep that checks every list against the catalog is task T4 in
+> `db/MIGRATIONS.md`.
+
 > **Changed by `db/migrations/0009_rls_enforcement.sql`, and this page describes the old
 > behaviour in three ways.** (1) Every view over a tenant table now exposes `tenant_id` as its
 > last column, so the twelve customer-facing and inventory views have one more column than
@@ -209,60 +219,106 @@ SELECT * FROM agent_first_erp_crm.vw_agent_activity_summary;
 
 ### vw_recent_interactions
 
-Last 100 agent interactions with full trajectory.
+Every interaction the caller's row security reaches, newest first **if the caller says `ORDER BY "timestamp" DESC`**. This page promised "last 100"; a `LIMIT` inside a view runs before the caller's filter, so 0017 leaves the 100 to the caller - `ORDER BY "timestamp" DESC LIMIT 100`.
 
 ```sql
-SELECT * FROM agent_first_erp_crm.vw_recent_interactions;
+SELECT * FROM vw_recent_interactions;
 ```
 
-**Columns:**
-- `human_input` - Raw user input
-- `intent_classification` - Detected intent
-- `confidence_score` - Model confidence
-- `actions_taken` - Tool calls made
-- `final_output` - Response sent
-- `duration_ms` - Total duration
-- `error_message` - Error if failed
-- `timestamp` - When interaction occurred
+**Columns:** (read from `pg_attribute`; the list this page carried before 0017 described a view that did not exist)
+- `tenant_id` - Which tenant's run this is
+- `interaction_id` - The `agent_interactions` primary key
+- `timestamp` - When the run happened
+- `conversation_id` - Conversation the run belongs to
+- `run_id` - Caller-supplied run identifier
+- `telegram_chat_id` - Chat the input arrived from, if any
+- `user_id` - Who the code believed was talking
+- `bot_id` - Which agent ran
+- `human_input` - The raw message
+- `intent_classification` - What the router thought it was
+- `final_output` - What was sent back
+- `error_message` - Set when the run failed
+- `duration_ms` - Whole-run duration
+- `step_count` - How many tool calls the run made, without expanding the payload
 
-**Use Case:** Debugging, reviewing agent behavior
+**Use Case:** Debugging and reviewing agent behaviour. The trajectory itself is in `vw_tool_calls`.
 
 ---
 
 ### vw_failed_interactions
 
-All interactions that resulted in errors.
+Runs that ended with an `error_message`. That column is **run-level**, so this answers "which runs failed", never "which tool failed" - see `vw_tool_calls`.
 
 ```sql
-SELECT * FROM agent_first_erp_crm.vw_failed_interactions;
+SELECT * FROM vw_failed_interactions;
 ```
 
-**Columns:**
-- `human_input` - Raw user input
-- `actions_taken` - Tool calls made
-- `error_message` - Error details
-- `timestamp` - When failed
+**Columns:** (read from `pg_attribute`; the list this page carried before 0017 described a view that did not exist)
+- `tenant_id` - Which tenant's run this is
+- `interaction_id` - The `agent_interactions` primary key
+- `timestamp` - When it failed
+- `conversation_id` - Conversation
+- `run_id` - Run identifier
+- `telegram_chat_id` - Chat, if any
+- `user_id` - Who was talking
+- `bot_id` - Which agent
+- `model_used` - Which model answered
+- `human_input` - The raw message
+- `actions_taken` - The full step array - this view projects it, the listing one does not
+- `error_message` - What the run reported
+- `duration_ms` - How long it took to fail
 
-**Use Case:** Identifying and fixing agent issues
+**Use Case:** Identifying and fixing agent issues.
+
+---
+
+### vw_tool_calls
+
+One row per tool invocation, derived from `agent_interactions` by position: step *n* of `actions_taken` paired with step *n* of `tool_observations`. This is the grain a table named `agent_tool_calls` would have stored, and 0017 decided to derive it rather than keep a second log of the same calls.
+
+```sql
+SELECT * FROM vw_tool_calls;
+```
+
+**Columns:** (read from `pg_attribute`; the list this page carried before 0017 described a view that did not exist)
+- `tenant_id` - Whose call this was
+- `interaction_id` - The run the call belongs to
+- `conversation_id` - Conversation
+- `run_id` - Run identifier
+- `bot_id` - Which agent made the call
+- `interaction_at` - When the run happened
+- `step_number` - 1-based position in the run
+- `tool_name` - The tool called
+- `tool_input` - What was passed, as JSONB
+- `action_at` - The step's own timestamp, as the logger wrote it
+- `observation` - The tool's output *value*, or NULL where the arrays do not line up - a scalar output reads with `#>> '{}'`
+- `observation_type` - Python class name of the output - `str` for a result and for an error
+- `observations_aligned` - Whether the two arrays in that run had the same length
+- `run_errored` - Did the run report an error - a run fact, worn by every one of its calls
+- `run_duration_ms` - The run's duration, not this call's latency
+
+**Use Case:** Reconstructing exactly what an agent did, in order, without a second audit table.
 
 ---
 
 ### vw_tool_performance
 
-Tool usage statistics and error rates.
+Per tool, per tenant: calls, runs, the mean duration of the runs that used it, and how many of those runs errored. Counts are at the call grain, timings and errors at the run grain - the version in `blueprint/11_interaction_logging.sql` mixed them, and `db/migrations/0017_interaction_readpath.sql` carries the two numbers it changed.
 
 ```sql
-SELECT * FROM agent_first_erp_crm.vw_tool_performance;
+SELECT * FROM vw_tool_performance;
 ```
 
-**Columns:**
-- `tool_name` - Tool identifier
-- `call_count` - Number of calls
-- `avg_duration_ms` - Average execution time
-- `error_count` - Number of errors
-- `error_rate` - Error percentage
+**Columns:** (read from `pg_attribute`; the list this page carried before 0017 described a view that did not exist)
+- `tenant_id` - Aggregate key - without it two tenants' usage adds together
+- `tool_name` - The tool
+- `call_count` - Invocations in this tenant
+- `run_count` - Runs that used it at least once
+- `mean_run_duration_ms` - Mean duration of those runs - a run time, not a tool latency
+- `errored_run_count` - How many of those runs ended in an error (anywhere in them)
+- `errored_run_pct` - That share, as a percentage
 
-**Use Case:** Optimizing tool performance, identifying problematic tools
+**Use Case:** Optimizing tool performance and identifying problematic tools.
 
 ---
 

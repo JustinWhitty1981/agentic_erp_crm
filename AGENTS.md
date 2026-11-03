@@ -286,7 +286,8 @@ See `.env.example` for required variables.
 2. **Communications** - All interactions with threading and sentiment
 3. **Audit Logging** - Human sessions, bot actions, interaction tracking
 4. **Inventory** - Products, warehouses, stock levels, movements
-5. **Support** - Tickets and follow-ups
+5. **Support** - Follow-ups (`followups`). Tickets were part of the vestigial schema and are
+   referenced by nothing in the canonical one - see `db/migrations/0017_interaction_readpath.sql`
 
 ### Key Tables
 | Table | Purpose |
@@ -315,11 +316,12 @@ See `.env.example` for required variables.
 | `vw_primary_contact_communications` | Primary contact interactions |
 | `vw_communication_thread` | Communication threading hierarchy |
 | `vw_agent_activity_summary` | Agent activity summary |
-| `vw_entity_contact_details` | Complete entity and contact details |
-| `vw_communication_timeline` | Chronological communication view |
-| `vw_recent_interactions` | Last 100 agent interactions |
-| `vw_failed_interactions` | Error analysis |
-| `vw_tool_performance` | Tool usage statistics |
+| `vw_entity_contact_details` | Complete entity and contact details — **not in the schema**: defined only in the superseded `blueprint/08_create_views.sql` (T4) |
+| `vw_communication_timeline` | Chronological communication view — **not in the schema**: same superseded file (T4) |
+| `vw_recent_interactions` | Every interaction the caller's row security reaches — order and limit belong to the caller, because a `LIMIT` inside a view runs before your filter |
+| `vw_failed_interactions` | Error analysis — which **runs** failed, never which tool |
+| `vw_tool_calls` | One row per tool invocation, derived by position from `agent_interactions` |
+| `vw_tool_performance` | Tool usage statistics — calls counted per call, duration and errors per run |
 | `vw_index_redundancy` | Indexes that are identical to, or a leading prefix of, another index |
 | `vw_domain_vocabulary` | What every status/type column accepts, how it is enforced, and why |
 | `vw_rls_status` | What row-level security actually does per table: forced or not, which roles, the read and write predicates verbatim, and a verdict |

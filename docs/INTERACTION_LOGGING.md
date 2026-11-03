@@ -172,28 +172,67 @@ WHERE id = 'interaction-uuid-here';
 
 ## Views for Quick Analysis
 
-The schema includes several useful views:
+Four views over `agent_interactions`, created by `db/migrations/0017_interaction_readpath.sql`.
+They were documented here long before they existed in the schema - `0001` ported the table out of
+`blueprint/11_interaction_logging.sql` and left that file's views behind, so this page's
+instructions raised `42P01` for fifteen migrations. They also carry the two grain distinctions the
+legacy definitions got wrong, so read the column names, not the habit:
 
 ### `vw_recent_interactions`
-Last 100 interactions with full context
+Every interaction the caller's row security reaches
 
 ```sql
-SELECT * FROM vw_recent_interactions LIMIT 10;
+SELECT * FROM vw_recent_interactions ORDER BY "timestamp" DESC LIMIT 10;
 ```
+
+There is no `LIMIT` inside the view. The legacy one truncated to 100 rows *before* the caller's
+filter ran, so a query for a specific bot's recent runs could answer **0 rows** while the table
+held 5 (measured, and probe D asserts the fix). "Last 100" is a thing the caller writes.
+`step_count` is exposed so a scan does not have to expand `actions_taken` to decide whether a run
+is worth opening.
 
 ### `vw_failed_interactions`
-All interactions that resulted in errors
+Runs that ended with an `error_message`
 
 ```sql
-SELECT * FROM vw_failed_interactions LIMIT 20;
+SELECT * FROM vw_failed_interactions ORDER BY "timestamp" DESC LIMIT 20;
 ```
+
+`error_message` is one column per **run**, so this answers "which runs failed", never "which tool
+failed". Use `vw_tool_calls` to see the steps of a failing run; the finest grain that has an error
+is the run.
+
+### `vw_tool_calls`
+One row per tool invocation, derived by position
+
+```sql
+SELECT step_number, tool_name, tool_input, observation #>> '{}' AS output
+  FROM vw_tool_calls WHERE interaction_id = 'the-run-uuid' ORDER BY step_number;
+```
+
+Step *n* of `actions_taken` paired with step *n* of `tool_observations`. This is the grain a table
+named `agent_tool_calls` would have stored; 0017 derives it rather than keep a second log of the
+same calls, because two writers of one fact drift. `observations_aligned` says whether the two
+arrays in that run had the same length - when they do not, the unpaired steps read `observation IS
+NULL` and the column says so, rather than showing an output against the wrong tool.
 
 ### `vw_tool_performance`
-Tool usage statistics and error rates
+Tool usage statistics and error rates, per tenant
 
 ```sql
-SELECT * FROM vw_tool_performance;
+SELECT tool_name, call_count, run_count, mean_run_duration_ms, errored_run_pct
+  FROM vw_tool_performance;
 ```
+
+Counts are measured at the call grain; durations and errors at the run grain. The legacy version
+mixed them: a run that errored and had used three tools printed `error_count = 3` where the truth
+is one errored run, and averaging a run's duration once per call turned 900 ms beside 100 ms into
+700 ms rather than 500. Both numbers are reproduced in the migration's header. `tenant_id` is a
+grouping key, so two tenants' usage never adds together (0009's rule for aggregate views).
+
+One row whose `actions_taken` holds a JSON object instead of an array contributes nothing to these
+views instead of taking the report down for every reader, which is what it did to the legacy one
+(`22023`, measured).
 
 ## Integration with LangChain
 

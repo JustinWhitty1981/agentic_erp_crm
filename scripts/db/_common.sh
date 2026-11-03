@@ -110,8 +110,14 @@ ensure_database() {
 closed() {
     case "$1" in
         code:tool_prefix)
+            # Scope is the code path, which is what 3.1's risk actually is: a running tool that
+            # names a schema this migration set does not create. blueprint/ also holds superseded
+            # .sql copies (134 references by the same grep) and documentation examples (100), and
+            # those are T4's and db/README's problem, not a live failure. Measured at 0017: 33 in
+            # *.py, 267 across the tree - which is why the branch says --include, so that a sweep
+            # of the 33 is allowed to turn this marker green.
             local n
-            n=$(grep -ro 'agent_first_erp_crm\.' blueprint/ 2>/dev/null | wc -l)
+            n=$(grep -ro --include='*.py' 'agent_first_erp_crm\.' blueprint/ 2>/dev/null | wc -l)
             [ "$n" -eq 0 ] && echo 1 || echo 0 ;;
         code:*)
             echo 0 ;;
