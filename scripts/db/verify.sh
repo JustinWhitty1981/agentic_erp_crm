@@ -435,13 +435,32 @@ check "B25 6.3  one implementation per rule" "0010_timestamp_triggers" \
          GROUP BY 1 HAVING count(*) > 1) x" \
     "trigger functions whose bodies are byte-identical to another one's"
 
+# The shipped B12 could never pass: it joined pg_class to the INDEXED TABLE and asked
+# relname LIKE '%embedding%' - no table is named that, so every vector column counted as
+# an offender forever, which is always-fail where B11 was always-pass (same uncorrelated-
+# predicate class, opposite failure mode; 0012's header records it). Now per-column and
+# correlated: every vector column of a base table (pg_attribute, not information_schema -
+# the B11 lesson: view columns would add three phantom offenders) must lead an hnsw index,
+# and no ivfflat may survive in public, because an index the review counted and this
+# migration did not name is exactly the drift a scoreboard exists to catch.
 check "B12 6.4 hnsw on all embeddings" "0012_vector_indexing" \
-    "SELECT count(*) FROM information_schema.columns c
-      WHERE c.table_schema='public' AND c.udt_name='vector'
-        AND NOT EXISTS (SELECT 1 FROM pg_index i JOIN pg_class t ON t.oid=i.indrelid
-                         JOIN pg_am am ON am.oid=t.relam
-                        WHERE relname LIKE '%embedding%' AND am.amname='hnsw')" \
-    "embedding columns with no hnsw index"
+    "SELECT
+       (SELECT count(*) FROM pg_attribute a
+          JOIN pg_class c ON c.oid = a.attrelid AND c.relkind = 'r'
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          JOIN pg_type t ON t.oid = a.atttypid
+         WHERE n.nspname = 'public' AND t.typname = 'vector'
+           AND a.attnum > 0 AND NOT a.attisdropped
+           AND NOT EXISTS (SELECT 1 FROM pg_index i
+                             JOIN pg_class ix ON ix.oid = i.indexrelid
+                             JOIN pg_am am ON am.oid = ix.relam
+                            WHERE i.indrelid = c.oid AND am.amname = 'hnsw'
+                              AND i.indkey[0] = a.attnum))
+     + (SELECT count(*) FROM pg_class ix
+          JOIN pg_namespace n ON n.oid = ix.relnamespace
+          JOIN pg_am am ON am.oid = ix.relam
+         WHERE n.nspname = 'public' AND ix.relkind = 'i' AND am.amname = 'ivfflat')" \
+    "vector columns led by no hnsw index, plus any ivfflat 0012 did not name"
 
 # ---------- C. live inventory ----------------------------------------------------
 # Domain objects only. Extension-owned functions/views would swamp the signal: 194

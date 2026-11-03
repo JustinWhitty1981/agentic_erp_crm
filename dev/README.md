@@ -149,9 +149,38 @@ TLS change, `init.sh` reverts `ssl` rather than leaving a persistent database un
 
 ## Things that will bite you if you do not know them
 
-Twenty-seven of these, each learned by a check failing on a rehearsal or a
+Thirty-one of these, each learned by a check failing on a rehearsal or a
 migration after the fact - not by reading documentation about the database. Keep the pattern: when a migration surprises
 you, the surprise goes here, and the check that would have caught it goes in verify.sh.
+
+**`CREATE OR REPLACE VIEW` can add a column and can never drop one.** The first rehearsal of
+0012 died on `cannot drop columns from view` while removing a projected `vector(1536)` -
+0009's capture-rewrite-prove pattern only ever restated definitions with *more* columns, so it
+never met the limit. The only mechanism is `DROP` + `CREATE`, which restarts the object's whole
+life: reloptions gone (so `security_invoker` must be re-set), grants come back only via 0002's
+default-privileges records (assert them, don't trust them), and the drop would auto-cascade to
+any dependent view - so count dependents in `pg_depend` first and refuse if there are any.
+
+**Planner *preference* for a vector index is not testable property, because the cost model
+cannot see the thing the index is for.** The sort path's estimate never charges for
+detoasting a 6 KB vector, and generic index costing scales hnsw's estimate with index size
+(which a graph search does not pay), so measured unforced plans flip between the two paths
+twice between 500 and 5000 rows while real buffer counts differ 35x (9053 vs 260). Assert
+*usability* with the alternatives forbidden and *savings* in executed `EXPLAIN (ANALYZE,
+BUFFERS)`, and treat preference as the cost-model detail 0006 called it.
+
+**`pg_column_size()` detoasts, so it is the wrong instrument for a storage claim.** It
+reports ~6148 bytes for a `vector(1536)` whether the row carries it inline or a toast pointer
+does - a threshold on it fails against a schema that is storing things exactly as claimed.
+Fork-size deltas (`pg_relation_size` main vs toast, before and after a known insert) are the
+sound form; 0012's probe D does it that way and fails loudly if a future change ever inlines
+the vectors, which is the evidence that would make the review's side-table prescription right.
+
+**`EXPLAIN`'s per-node `Buffers:` lines are indented, and the root's totals come first.** A
+capture loop matching `LIKE 'Buffers:%'` matches nothing and silently reports a NULL census;
+matching `'%Buffers:%'` and taking the *first* hit takes the whole-tree total, while taking
+the *last* lands inside the InitPlan (measured: 86 blocks of a 9053-block run). Both mistakes
+printed in the same rehearsal of 0012's test file.
 
 **`now()` is the transaction timestamp, so a timestamp test needs a pin, not a sleep.** Read a
 column, update the row, read it again: inside one transaction both reads return the same instant,

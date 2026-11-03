@@ -192,6 +192,17 @@ CASES=(
 "6_1_idempotency|the version columns remain decoration|6.1|0011_idempotency"
 "6_1_idempotency|expired claims are never collected|6.1|0011_idempotency"
 "6_1_idempotency|no register exists to ask which calls are guarded|6.1|0011_idempotency"
+# 6.4 gets five rows. The review's own framing ("the planner prefers hnsw") is deliberately
+# not among them: measured, the ESTIMATES of the two ANN plans cross twice between 500 and
+# 5000 rows because the cost model does not charge the sort path for detoasting vectors, so
+# preference is an estimator property, not a schema one. What is mapped is the usability of
+# the index, the real buffer savings (9053 vs 260 on the rehearsal clone), and the three
+# census claims - each of which reproduces ERR on a pre-0012 database and goes quiet after.
+"6_4_vectors|has no hnsw index to answer it|6.4|0012_vector_indexing"
+"6_4_vectors|saves no reads over the exhaustive scan|6.4|0012_vector_indexing"
+"6_4_vectors|a vector column of a base table leads no hnsw index|6.4|0012_vector_indexing"
+"6_4_vectors|an under-trained ivfflat index is still mounted|6.4|0012_vector_indexing"
+"6_4_vectors|a listing view still projects the vector|6.4|0012_vector_indexing"
 )
 
 echo
