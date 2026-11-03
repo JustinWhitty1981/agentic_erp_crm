@@ -358,11 +358,38 @@ check "B16 5.2  no unvalidated constraints" "0005_key_types" \
        AND contype='f' AND NOT convalidated" \
 "NOT VALID FKs: new writes enforced, existing rows not - repair, then VALIDATE"
 
+# 6.1 needs more than "a table with that name exists": the original version of this check passed on
+# any trigger whose NAME contained "version", which is satisfied by a trigger that only reads the
+# column. So each term asserts the thing 0011 actually promised. The [.] bracket is the house
+# regex style (see B21) - a bare dot would match any character, and `LIKE '%new.version%'` not at
+# all, because LIKE's wildcard is the underscore.
 check "B10 6.1 idempotency implemented" "0011_idempotency" \
-    "SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_class WHERE relname='idempotency_keys')
-        AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname LIKE '%version%')
-       THEN 0 ELSE 1 END" \
-    "ADR-005 table and version triggers"
+    "SELECT
+      -- Every integer version column must be moved by a ROW trigger whose body assigns it.
+      -- A name match proves nothing; this asks the function source for NEW.version :=.
+      (SELECT count(*) FROM pg_class c
+         JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = 'version'
+                            AND a.attnum > 0 AND NOT a.attisdropped
+                            AND a.atttypid = 'integer'::regtype
+        WHERE c.relnamespace = 'public'::regnamespace AND c.relkind = 'r'
+          AND NOT EXISTS (SELECT 1 FROM pg_trigger t
+                            JOIN pg_proc p ON p.oid = t.tgfoid
+                           WHERE t.tgrelid = c.oid AND NOT t.tgisinternal
+                             AND (t.tgtype & 1) = 1
+                             AND lower(p.prosrc) ~ 'new[.]version[[:space:]]*:='))
+      -- The claim API exists, and the arbiter LEADS with tenant_id: 0011 lost a write on a clone
+      -- proving why the order is load-bearing, and a differently-ordered arbiter would fail every
+      -- claim with an inference error rather than a message anyone would recognise.
+    + (CASE WHEN EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'idempotency_claim')
+            THEN 0 ELSE 1 END)
+    + (CASE WHEN EXISTS (SELECT 1 FROM pg_constraint
+                          WHERE conrelid = to_regclass('public.idempotency_keys')
+                            AND contype = 'u'
+                            AND conkey[1] = (SELECT attnum FROM pg_attribute
+                                              WHERE attrelid = to_regclass('public.idempotency_keys')
+                                                AND attname = 'tenant_id'))
+            THEN 0 ELSE 1 END)" \
+    "unguarded version columns, and idempotency objects missing or mis-scoped"
 
 # 6.3's evidence is a table in a document, and the first version of this check reproduced its
 # shape rather than its meaning, in two ways. (1) The bits: tgtype 2 is BEFORE, 4 is INSERT and

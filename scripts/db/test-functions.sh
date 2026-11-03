@@ -184,6 +184,14 @@ CASES=(
 "6_3_timestamps|the same rule is installed twice|6.3|0010_timestamp_triggers"
 "6_3_timestamps|nothing publishes which tables maintain a write timestamp|6.3|0010_timestamp_triggers"
 "6_3_timestamps|own write left updated_at|6.3|0010_timestamp_triggers"
+"6_1_idempotency|a replayed mutation performs its work twice|6.1|0011_idempotency"
+"6_1_idempotency|the same key reused for a different request answers from the cache|6.1|0011_idempotency"
+"6_1_idempotency|a crashed attempt owns its key forever|6.1|0011_idempotency"
+"6_1_idempotency|a displaced attempt can still certify work that ran twice|6.1|0011_idempotency"
+"6_1_idempotency|two tenants collide on one claim key|6.1|0011_idempotency"
+"6_1_idempotency|the version columns remain decoration|6.1|0011_idempotency"
+"6_1_idempotency|expired claims are never collected|6.1|0011_idempotency"
+"6_1_idempotency|no register exists to ask which calls are guarded|6.1|0011_idempotency"
 )
 
 echo

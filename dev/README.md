@@ -149,8 +149,8 @@ TLS change, `init.sh` reverts `ssl` rather than leaving a persistent database un
 
 ## Things that will bite you if you do not know them
 
-Eleven of these, and every one was learned by a check failing on a rehearsal rather than
-by reading documentation about the database. Keep the pattern: when a migration surprises
+Twenty-seven of these, each learned by a check failing on a rehearsal or a
+migration after the fact - not by reading documentation about the database. Keep the pattern: when a migration surprises
 you, the surprise goes here, and the check that would have caught it goes in verify.sh.
 
 **`now()` is the transaction timestamp, so a timestamp test needs a pin, not a sleep.** Read a
@@ -323,3 +323,25 @@ it through `unnest(...) WITH ORDINALITY` and `array_agg` first.
 keys sort *after* a newer one, so the btree walks backward through pages it already passed.
 `afpc_uuid_v7()` puts 48 bits of big-endian millisecond in front instead. See
 `db/migrations/0005_key_types.sql` for the measurements.
+
+**A global unique arbiter under forced row security loses writes silently.** `ON CONFLICT DO
+NOTHING` reports `INSERT 0 0` for both "there was no conflict" and "there was a conflict with a
+row you are not allowed to see" - so a dedup table keyed on the conflicting column alone lets one
+tenant's key wedge another tenant's identical request with no error anywhere. Measured on a clone
+while building 0011: tenant B claimed a key tenant A held, got `INSERT 0 0`, and saw zero rows for
+its own request. The fix is the arbiter's column order - lead with `tenant_id` - and B10 now
+asserts the order, not just the index's existence.
+
+**`pg_get_functiondef()` always qualifies with `public.`**, so a body-scan regex written as
+`(public\\.)?` - double backslash, meaning literal backslash - matches nothing, and a register
+derived from function bodies reports zero rows: empty, which reads as clean, instead of wrong,
+which reads as broken. Write `(public\.)?`. Every table-touching predicate in
+`vw_idempotency_status` and `vw_timestamp_status` is built against that single backslash, and the
+probe that compares the register against `pg_proc` is the guard against getting it wrong again.
+
+**A test phrase a harness can only find after the fix reports SURPRISE, not progress.**
+`test-functions.sh` decides KNOWN-OPEN from a grep of the run output, so a mapped phrase that lives
+only in a post-migration failure branch - a stale-token refusal, say - cannot print before the
+migration exists, and the harness says "stopped reproducing with no migration to explain why."
+Migration-era test blocks therefore print their mapped phrases from the existence guard too, and
+when adding a CASES row, put the phrase where the pre-fix database can reach it.

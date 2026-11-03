@@ -301,6 +301,7 @@ See `.env.example` for required variables.
 | `audit_summary` | Daily aggregation |
 | `units_of_measure` | Master data: units an item can be counted, weighed or measured in |
 | `costing_methods` | Master data: how an item's cost is derived |
+| `idempotency_keys` | ADR-005 request claims: one row per (tenant, operation, key) with the cached answer, the lease, and the retention deadline |
 
 ### Views for Agents
 | View | Purpose |
@@ -322,6 +323,7 @@ See `.env.example` for required variables.
 | `vw_domain_vocabulary` | What every status/type column accepts, how it is enforced, and why |
 | `vw_rls_status` | What row-level security actually does per table: forced or not, which roles, the read and write predicates verbatim, and a verdict |
 | `vw_timestamp_status` | Whether each table's `updated_at` can be trusted: is it maintained, on which commands, is it nullable, and which functions rewrite the table anyway |
+| `vw_idempotency_status` | Which functions change persistent state and whether a retry of them is guarded (ADR-005 pattern) or UNGUARDED |
 | `vw_inventory_valuation` | Inventory value by warehouse/category |
 | `vw_item_availability` | Stock levels across warehouses |
 | `vw_item_movement_summary` | 30-day item movement patterns |
