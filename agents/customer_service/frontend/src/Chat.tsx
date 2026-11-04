@@ -112,8 +112,8 @@ const Chat: React.FC<ChatProps> = ({ messages, isLoading, statusMessage, isStrea
   return (
     <div className="chat-container">
       <header className="chat-header">
-        <h1>J.A.D.A</h1>
-        <p className="subtitle">AI Assistant with Search, Memory & HighByte MCP Tools</p>
+        <h1>Customer Service</h1>
+        <p className="subtitle">CRM access, a memory in the database, and every run written down</p>
       </header>
 
       <div className="chat-messages">

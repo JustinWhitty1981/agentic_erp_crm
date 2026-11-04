@@ -11,7 +11,7 @@ function App() {
     {
       id: '1',
       role: 'assistant',
-      content: 'Hello! I\'m J.A.D.A. I can help you with:\n\n- **Current time**: Get the current date and time\n- **Web search & Scraping**: Search the web and extract web page content\n- **Memory storage**: Save and retrieve persistent information\n- **Industrial MCP Tools**: Query paint defects, UNS snapshots, workorder analytics, and HighByte pipeline metrics',
+      content: 'Customer service agent. Ask me to:\n\n- **Look up a customer** - contact details, status, their history and how often we have resolved anything for them\n- **Log an interaction** - "I just called Alice about the shipping delay", and it goes in the book\n- **Add or update a customer** - one function per change, so the schema decides what is valid\n- **Say who needs a call back** - the follow-up list, with the reason each name is on it\n- **Remember something** - preferences and facts, kept in the database rather than in this tab\n\nWhatever I answer, the run itself is recorded: the tools I called, in order, and which records the answer came from.',
       timestamp: new Date()
     }
   ])

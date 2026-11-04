@@ -765,14 +765,17 @@ func optionalInt(args map[string]any, name string) (any, error) {
 // timestamp parses the ISO-8601 forms a model actually emits. Accepting four and refusing a
 // fifth with a message that names them is cheaper than silently reading "2026-11-01" as UTC
 // midnight when the caller meant local, which is 0022's finding in miniature.
-func timestamp(v any) (any, error) {
-	s, ok := v.(string)
-	if !ok || strings.TrimSpace(s) == "" {
-		return nil, nil
-	}
-	s = strings.TrimSpace(s)
-
-	// Longest and most explicit first: RFC3339 carries its own offset and needs no interpretation.
+// parseTemporal reads a string a date or timestamp column is being given, and reports whether the input
+// named a zone. The two callers part company on what to do with that answer: timestamp() anchors a
+// zone-less value in the container's zone, because a person writing "3 November, 2pm" means their own
+// 2pm; dateOnly() has no use for the answer at all, because a calendar day has no zone to be wrong about.
+//
+// The anchor is the whole content of this function. time.Parse of a value with no zone in it yields that
+// calendar day at midnight **UTC**, and the old code then called .Local() - which does not move the
+// clock, it relabels the same instant. So in a container six hours behind UTC, "2026-11-03" meant
+// 03:00 on the 3rd, and a bare date handed to a `date` column came back as the day before once anything
+// formatted it in local time. ParseInLocation is the one call that means what the comment claimed.
+func parseTemporal(s string) (t time.Time, bare bool, ok bool) {
 	layouts := []struct {
 		layout string
 		bare   bool // no zone in the input, so local time is the caller's meaning
@@ -783,20 +786,38 @@ func timestamp(v any) (any, error) {
 		{"2006-01-02", true},
 	}
 	for _, l := range layouts {
-		t, err := time.Parse(l.layout, s)
+		p, err := time.Parse(l.layout, s)
 		if err != nil {
 			continue
 		}
 		if l.bare {
-			// Interpreted in the container's zone, which is what a human writing "3 November,
-			// 2pm" means. Reading it as UTC would be wrong by hours, and hours is the difference
-			// between a follow-up being due today and due tomorrow.
-			return t.Local(), nil
+			p = time.Date(p.Year(), p.Month(), p.Day(), p.Hour(), p.Minute(), p.Second(),
+				p.Nanosecond(), time.Local)
 		}
-		return t, nil
+		return p, l.bare, true
 	}
-	return nil, fmt.Errorf("%q is not a date this tool reads "+
+	return time.Time{}, false, false
+}
+
+// errUnreadable is one message for both readers of a date-shaped argument, because a refusal that names
+// the accepted forms in two places is a list that will be corrected in one of them.
+func errUnreadable(s string) error {
+	return fmt.Errorf("%q is not a date this tool reads "+
 		"(try 2026-11-03T14:30:00Z, 2026-11-03 14:30:00 or 2026-11-03)", s)
+}
+
+func timestamp(v any) (any, error) {
+	s, ok := v.(string)
+	if !ok || strings.TrimSpace(s) == "" {
+		return nil, nil
+	}
+	s = strings.TrimSpace(s)
+
+	t, _, ok := parseTemporal(s)
+	if !ok {
+		return nil, errUnreadable(s)
+	}
+	return t, nil
 }
 
 func dateOnly(v any) (any, error) {
@@ -804,15 +825,19 @@ func dateOnly(v any) (any, error) {
 	if !ok || strings.TrimSpace(s) == "" {
 		return nil, nil
 	}
-	t, err := timestamp(strings.TrimSpace(s))
-	if err != nil {
-		return nil, fmt.Errorf("follow_up_date: %w", err)
-	}
-	tt, ok := t.(time.Time)
+	t, _, ok := parseTemporal(strings.TrimSpace(s))
 	if !ok {
-		return nil, nil
+		return nil, fmt.Errorf("follow_up_date: %w", errUnreadable(strings.TrimSpace(s)))
 	}
-	// p_follow_up_date is a date, not a timestamptz: sending "2026-11-06T00:00:00Z" would make the
-	// day depend on the server's zone, and the whole point of the column is that it does not.
-	return tt.Format("2006-01-02"), nil
+	// p_follow_up_date is a `date`, not a timestamptz: it names a calendar day and carries no zone, so
+	// the day must be read out of the value without any zone conversion at all. This used to go through
+	// timestamp(), which anchored a bare input at midnight UTC and then relabelled it local - and
+	// Format, applied to that relabelled instant in a container west of UTC, printed **the day before**.
+	// A live turn asked for "next Tuesday", the reply said 2026-11-10, and the row stored 2026-11-09, a
+	// Monday: the prose and the row disagreed and only the row is what vw_pending_followups acts on.
+	//
+	// Format takes the day from the location the parsed value already has, which for a bare input is the
+	// day that was typed and for an input with an offset is the day in the zone the string states. Those
+	// are the only two claims about a date that a caller can make.
+	return t.Format("2006-01-02"), nil
 }

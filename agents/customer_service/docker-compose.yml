@@ -15,7 +15,9 @@
 # There is no memory_store volume, and that is the point: 0023 moved what the agent remembers into
 # agent_memories, so a bind mount would be a second, divergent copy of a thing that now has one home.
 
-version: '3.8'
+# No `version:` key. It is obsolete in Compose v2 and every file here predates that, so it is a line
+# that prints a warning on every `up` while doing nothing - and `agents/customer_service` carried it
+# until this deployment was actually started rather than reviewed.
 
 services:
   customer-service-agent:
@@ -31,7 +33,12 @@ services:
       # The database credentials live in dev/.env and are not duplicated here. That file is
       # gitignored, and it is the source of truth: scripts/db/roles.sql sets the role passwords from
       # it, so a password written in two places can only be wrong in one of them.
-      - ../dev/.env
+      #
+      # ../../ and not ../: paths in a compose file resolve against *this file's* directory, which is
+      # agents/customer_service, one level deeper than the dev/ directory this line was written for.
+      # The wrong depth fails with "env file ... not found" before the container is even created, and
+      # only when the stack is actually started - a review of this file could not have caught it.
+      - ../../dev/.env
     environment:
       # --- which model to talk to ---------------------------------------------
       - LLM_PROVIDER=${LLM_PROVIDER:-local}
@@ -48,8 +55,17 @@ services:
       - AFPC_PG_PORT=${AFPC_PG_PORT:-5432}
       - AFPC_PG_DB=${AFPC_PG_DB:-agent_first_erp_crm}
       - AFPC_PG_USER=${AFPC_PG_USER:-afpc_app}
-      # AFPC_PG_PASSWORD comes from env_file, not from here: a value with a ${...} default in this
-      # map is a plaintext fallback waiting to be committed.
+      # The password arrives from env_file above, under the name dev/.env and scripts/db/roles.sql use:
+      # AFPC_APP_PASSWORD, the afpc_app role's password. The server reads that name as well as
+      # AFPC_PG_PASSWORD - pkg/db's resolvePassword explains the order - and nothing translates it here,
+      # because `- AFPC_PG_PASSWORD=${AFPC_APP_PASSWORD}`, the obvious way to write the translation,
+      # silently does nothing: Compose interpolates ${...} from its own process environment and the
+      # project's .env, *not* from a file named under env_file:. The expansion is empty, the agent
+      # starts without a database, and the secret sits one line away under the other name. That is why
+      # this deployment went degraded on its first real `up`, and why the answer is a resolution rule in
+      # the one place that can see both variables at runtime.
+      #
+      # AFPC_PG_PASSWORD is the name to set when this file is not the one supplying the credential.
       - AFPC_PG_SSLMODE=${AFPC_PG_SSLMODE:-verify-full}
       - AFPC_PG_SSLROOTCERT=/etc/ssl/certs/afpc-ca.crt
       - AFPC_PG_APPNAME=${AFPC_PG_APPNAME:-customer-service-agent}
@@ -88,7 +104,11 @@ services:
       - ALLOW_INTERNAL_SCRAPE=${ALLOW_INTERNAL_SCRAPE:-false}
 
     volumes:
-      - ../dev/tls/afpc-ca.crt:/etc/ssl/certs/afpc-ca.crt:ro
+      # Same depth correction as env_file above. Getting this one wrong is worse than the other:
+      # Docker creates a missing bind source as an empty *directory*, so the mount succeeds and the
+      # agent fails at connect with "certificate signed by unknown authority" - a path that reads as a
+      # certificate problem and is really a typo.
+      - ../../dev/tls/afpc-ca.crt:/etc/ssl/certs/afpc-ca.crt:ro
 
     extra_hosts:
       # Not used for the database, for the certificate reason above. It is here because the model

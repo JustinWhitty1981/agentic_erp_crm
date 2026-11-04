@@ -14,13 +14,33 @@ import (
 	"jada-backend/pkg/tools"
 )
 
+// TestCurrentTimeTool asserts the weekday is named, because that is the one thing this tool exists to
+// provide and the thing it left out. A live turn was asked to move a follow-up to "next Tuesday", had no
+// weekday to read, computed one from the date, and stored the Monday: the reply said Tuesday and the row
+// said Monday, and vw_pending_followups will act on the row.
+//
+// The assertion checks each of the seven names is producible rather than checking today's, which would
+// make the test depend on the day it runs. It also drops the `!A && !B` the first version had - that
+// shape passed when either half went missing, so a tool that printed only UTC was green.
 func TestCurrentTimeTool(t *testing.T) {
 	res, err := tools.GetCurrentTime()
 	if err != nil {
 		t.Fatalf("GetCurrentTime returned error: %v", err)
 	}
-	if !strings.Contains(res, "Current UTC time") && !strings.Contains(res, "Current Local time") {
-		t.Errorf("Unexpected GetCurrentTime result: %s", res)
+	for _, want := range []string{"Current UTC time", "Current Local time", "ISO week number"} {
+		if !strings.Contains(res, want) {
+			t.Errorf("output is missing %q:\n%s", want, res)
+		}
+	}
+
+	named := false
+	for _, day := range []string{"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"} {
+		if strings.Contains(res, day) {
+			named = true
+		}
+	}
+	if !named {
+		t.Errorf("no weekday named in the output, so a caller has to compute one:\n%s", res)
 	}
 }
 
@@ -248,5 +268,3 @@ func TestAgentPolicyEnforcement(t *testing.T) {
 
 	os.Unsetenv("INSIGHT_HUMAN_IN_THE_LOOP")
 }
-
-

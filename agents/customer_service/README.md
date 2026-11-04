@@ -36,7 +36,7 @@ appears here and not in the code, or in the code and not here.
 | `save_memory_tool` | write | Append one fact under one key, into `agent_memories`. |
 | `get_memory_tool` | read | A key's entries, newest first. |
 | `list_memories_tool` | read | Every key, with how many entries each holds. |
-| `current_time` | local | UTC and the container's local time, for anything date-shaped. |
+| `current_time` | local | UTC and the container's local time, **each with its weekday named**, plus the local ISO week number. It exists because "next Tuesday" is not answerable from a date: a live turn that had to compute the weekday stored a Monday and told the customer Tuesday, and the row is what the follow-up list acts on. |
 | `search_web` | local | Tavily search. Registered always; refuses without `TAVILY_API_KEY`. |
 | `scrape_url` | local | One HTTP GET, read into text. Refuses private addresses unless `ALLOW_INTERNAL_SCRAPE` says otherwise. |
 
@@ -64,11 +64,11 @@ absent, which is worth knowing when a deployment "works differently" on another 
 | `AFPC_PG_PORT` | `5432` | |
 | `AFPC_PG_DB` | `agent_first_erp_crm` | |
 | `AFPC_PG_USER` | `afpc_app` | The runtime role. Read-only roles cannot write, and the tools would fail at the grant. |
-| `AFPC_PG_PASSWORD` | *(required)* | Never defaulted, never logged. |
+| `AFPC_PG_PASSWORD` | *(required)* | Never defaulted, never logged. `AFPC_APP_PASSWORD` is accepted as the same credential, because that is the name `dev/.env` and `scripts/db/roles.sql` use; the first non-empty of the two wins, and `pkg/db`'s `resolvePassword` says why a compose line cannot do that translation. |
 | `AFPC_TENANT_ID` | *(required)* | The tenant every connection claims. Refusing to start without it is deliberate: the server-side fallback is a real tenant, and not necessarily the intended one (review 2.3). |
 | `AFPC_PG_SSLMODE` | `verify-full` | `require` encrypts without checking the name; `verify-ca` checks the chain but not the name, which is the mode that works when the host is reached through a name that is not in the certificate. |
 | `AFPC_PG_SSLROOTCERT` | *(unset)* | The CA. Required by both `verify-*` modes. The container mounts `dev/tls/afpc-ca.crt` at `/etc/ssl/certs/afpc-ca.crt`. |
-| `AFPC_PG_APPNAME` | `jada-customer-service` | What appears in `pg_stat_activity`. |
+| `AFPC_PG_APPNAME` | `customer-service-agent` | What appears in `pg_stat_activity`, and the name to grep when the question is "which process wrote this". It is a label and not a credential, so it is safe to see in the log line the pool prints. |
 
 The pool is lazy: a database that is down when the container starts does not stop the process. It
 leaves the CRM tools unregistered and `/api/health` reporting `degraded`, which is a visible state
@@ -237,6 +237,10 @@ imports, and the fourth package that needed it resolved the cycle by copying the
 go test ./...           # everything below the loop, against fakes
 go vet ./...
 ```
+
+The module is named `jada-backend`, which is why test output reads `ok jada-backend/pkg/agent` for code
+that lives in this directory. Renaming a module path touches every import and no behaviour, so the label
+stayed; the packages under it are this agent's.
 
 `pkg/llm` has one failing test that predates this directory: `TestGetAzureConfig` expects an
 `openai.azure.us` endpoint and `azure_oauth.go` builds a `cognitiveservices.azure.us` one. Both files

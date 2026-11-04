@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"jada-backend/pkg/tools"
 	"jada-backend/pkg/turn"
@@ -387,6 +388,76 @@ func TestDateArgumentIsADate(t *testing.T) {
 	}
 	if got, ok := f.calls[0].args[16].(string); !ok || got != "2026-12-31" {
 		t.Errorf("p_follow_up_date = %#v, want 2026-12-31", f.calls[0].args[16])
+	}
+}
+
+// TestDateArgumentIsNotMovedByTheServersZone is the one the last commit's test did not cover, and the
+// gap is the lesson: TestDateArgumentIsADate feeds an input with a Z on it, which round-trips through
+// any zone intact. The value the model actually sends is bare - "2026-11-10" - and a bare input was
+// parsed as midnight UTC, relabelled local, and then formatted in that local zone. Six hours west of
+// UTC that prints 2026-11-09. The day the caller named and the day stored differed by one, on every
+// follow-up booked from this process, silently, and the reply to the customer quoted the correct one.
+//
+// A fixed offset is used rather than a named zone so the test does not depend on the tz database being
+// present in whatever image runs it - and so it fails on the old code in both directions, which a zone
+// the CI happens to sit in would not have shown.
+func TestDateArgumentIsNotMovedByTheServersZone(t *testing.T) {
+	saved := time.Local
+	defer func() { time.Local = saved }()
+
+	for _, zone := range []*time.Location{
+		time.FixedZone("UTC-6", -6*3600), // a container in America/Chicago, which is where this was found
+		time.FixedZone("UTC+8", 8*3600),  // the mirror case: the same bug loses nothing but gains a day
+		time.UTC,
+	} {
+		time.Local = zone
+		for _, in := range []string{"2026-11-10", "2026-11-10T09:00:00", "2026-11-10 09:00:00"} {
+			got, err := dateOnly(in)
+			if err != nil {
+				t.Fatalf("%s in %v: %v", in, zone, err)
+			}
+			if got != "2026-11-10" {
+				t.Errorf("dateOnly(%q) with the server in %v = %v, want 2026-11-10 - a `date` argument "+
+					"must never change the day it was given", in, zone, got)
+			}
+		}
+
+		// An input that states its own zone keeps the day in *that* zone, which is the only claim the
+		// string makes: 23:00Z on the 10th is the 10th wherever the server is.
+		if got, _ := dateOnly("2026-11-10T23:00:00Z"); got != "2026-11-10" {
+			t.Errorf("an explicit-Z input became %v in %v", got, zone)
+		}
+	}
+}
+
+// TestBareTimestampIsAnchoredLocally pins the other half of parseTemporal: a value with no zone in it is
+// the caller's local time, which is what the comment has always said and what time.Parse plus .Local()
+// did not do. Midnight local is twelve hours behind 06:00 UTC here; under the old code the instant was
+// 2026-11-10T00:00:00Z, which is 18:00 on the 9th for the customer, and started_at is the column 0022's
+// staleness clock reads.
+func TestBareTimestampIsAnchoredLocally(t *testing.T) {
+	saved := time.Local
+	defer func() { time.Local = saved }()
+	time.Local = time.FixedZone("UTC-6", -6*3600)
+
+	v, err := timestamp("2026-11-10T00:00:00")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := v.(time.Time)
+	if !ok {
+		t.Fatalf("timestamp returned %T", v)
+	}
+	if want := time.Date(2026, 11, 10, 0, 0, 0, 0, time.Local); !got.Equal(want) {
+		t.Errorf("a bare timestamp resolved to %s, want local midnight %s - the difference is six hours, "+
+			"which is a follow-up being due a day early or a day late", got.Format(time.RFC3339),
+			want.Format(time.RFC3339))
+	}
+
+	// And a value that names UTC still means UTC; the fix must not have made everything local.
+	w, _ := timestamp("2026-11-10T00:00:00Z")
+	if wt, ok := w.(time.Time); !ok || !wt.Equal(time.Date(2026, 11, 10, 0, 0, 0, 0, time.UTC)) {
+		t.Errorf("an explicit-Z timestamp moved: %v", w)
 	}
 }
 

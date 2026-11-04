@@ -83,3 +83,44 @@ func TestSettingsRefusesAnEmptyTenant(t *testing.T) {
 		t.Error("Settings() accepted an empty tenant, so the pool would fall back to whatever the server defaults to")
 	}
 }
+
+// TestResolvePasswordTakesTheFirstNonEmpty is the credential-name rule, and it is testable without a
+// database because the bug was in reading, not in connecting.
+//
+// The deployment started degraded with the secret present in the container, because compose expands
+// ${AFPC_APP_PASSWORD} from its own process environment rather than from the env_file it was pointed at,
+// so AFPC_PG_PASSWORD arrived empty - and an empty-but-set variable is exactly what a naive
+// `if _, ok := os.Getenv(a); ok` would have preferred over the real value sitting in the other name.
+func TestResolvePasswordTakesTheFirstNonEmpty(t *testing.T) {
+	t.Setenv(EnvPassword, "")
+	t.Setenv(EnvRolePassword, "from-the-role")
+	if got := resolvePassword(); got != "from-the-role" {
+		t.Errorf("resolvePassword() = %q, want the role password when the connection name is empty", got)
+	}
+
+	t.Setenv(EnvPassword, "explicit")
+	if got := resolvePassword(); got != "explicit" {
+		t.Errorf("resolvePassword() = %q, want the connection-specific name to win when both are set", got)
+	}
+
+	// Whitespace is empty. A secret pasted with a trailing newline is the kind of thing that happens
+	// when a password is piped through a shell, and connecting with it fails as "access denied"
+	// somewhere far away rather than here.
+	t.Setenv(EnvPassword, " \n ")
+	t.Setenv(EnvRolePassword, "  ")
+	if got := resolvePassword(); got != "" {
+		t.Errorf("resolvePassword() = %q, want empty so Settings refuses to start the CRM half", got)
+	}
+
+	// And the refusal, at the place it actually happens. Settings describes the configuration and never
+	// reads the credential - that is deliberate, since d.safe is what the pool prints to the log - so the
+	// check that a deployment cannot start the CRM half without a password is Open's. Host and tenant are
+	// pinned to inert values first because this test runs in the same environment as the integration ones
+	// above, and an assertion that inherits its inputs from them would pass or fail depending on who set
+	// AFPC_PG_HOST.
+	t.Setenv(EnvHost, "db.invalid")
+	t.Setenv(EnvTenant, "00000000-0000-0000-0000-000000000001")
+	if _, err := Open(context.Background()); err == nil {
+		t.Error("Open built a pool with no usable password; the agent would start degraded and say nothing")
+	}
+}

@@ -150,7 +150,10 @@ Follow [QUICKSTART.md](QUICKSTART.md) for Docker-based deployment.
 2. `GET /api/interactions?view=recent` is the agent reading its own trajectory; `docker logs -f
    afpc-customer-service` is the same run while it happens, at `LOG_LEVEL=debug`
 3. `audit_log` is who changed what, `human_sessions` and `bot_actions` are the login and the action;
-   `vw_audit_coverage` says which tables have a trail and which are exempted, with the reason
+   `vw_audit_coverage` says which tables have a trail and which are exempted, with the reason. One
+   row's history is `WHERE table_name = 'communications' AND row_pk->>'id' = '15'` - `row_pk` is
+   **jsonb** (`{"id": 15}`), not a bigint, because one trigger serves eighteen tables with different
+   keys, and `row_pk = 15` and `row_pk::text = '15'` both answer zero rows and read like a missing trail
 4. Use the `vw_*` views to verify data state - they are the same read path the agent uses, which is the
    point: a state the views cannot show is a state the agent cannot see either
 5. Query `agent_interactions` for full trajectory analysis, and `vw_tool_calls` to see it one call at a
@@ -204,7 +207,7 @@ agent_first/
 │   │           ├── memory/         # agent_memories, with the file store as an explicit fallback
 │   │           ├── tools/          # the registry, and the non-CRM tools
 │   │           └── turn/           # what turn a call is running in; a leaf, and on purpose
-│   └── jada/                       # the reference drop: unmodified, unreadable to the build user, not the deployment
+│   └── jada/                       # the reference drop: unmodified, unreadable to the build user, gitignored
 │
 ├── db/                             # THE SCHEMA, and the harness that asserts it
 │   ├── README.md                   # single source of truth: which SQL files are superseded

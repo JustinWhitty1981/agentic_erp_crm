@@ -51,3 +51,17 @@ Thumbs.db
 tmp/
 .cache/
 *.log
+
+# The JADA reference drop's archive, left at the repository root when it was unpacked into
+# agents/jada/. The tree is what matters and it is untracked on purpose (see dev/README); the zip is
+# neither, so it is ignored by name rather than deleted, because a download that has to be repeated is
+# worse than one line here. A "(1)" suffix is a browser resolving a second download of the same file.
+dumb_agent-jw_improvements*.zip
+
+# agents/jada/ is the reference drop, and it is ignored rather than merely untracked. The difference is
+# the point: untracked-but-not-ignored means `git add -A` sweeps a 16 MB vendored tree into the next
+# commit, which is what happened the first time this directory was staged around - the intent was to
+# commit the deployment and the index filled with files that are not deployment. Keeping it out of the
+# index is the machine-readable form of the decision that the reference stays what it was when it
+# arrived, unmodified and not this project's source. Read-only to the build user for the same reason.
+agents/jada/

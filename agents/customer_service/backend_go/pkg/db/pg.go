@@ -39,10 +39,15 @@ const (
 	EnvDatabase = "AFPC_PG_DB"
 	EnvUser     = "AFPC_PG_USER"
 	EnvPassword = "AFPC_PG_PASSWORD"
-	EnvTenant   = "AFPC_TENANT_ID"
-	EnvSSLMode  = "AFPC_PG_SSLMODE"
-	EnvRootCert = "AFPC_PG_SSLROOTCERT"
-	EnvAppName  = "AFPC_PG_APPNAME"
+	// EnvRolePassword is the same secret under the name this repository provisions it by: dev/.env and
+	// scripts/db/roles.sql speak of the afpc_app role's password, which is what that name means, and
+	// EnvPassword is what a connection string would call it. Both are read, and the reason is not
+	// tidiness - see resolvePassword.
+	EnvRolePassword = "AFPC_APP_PASSWORD"
+	EnvTenant       = "AFPC_TENANT_ID"
+	EnvSSLMode      = "AFPC_PG_SSLMODE"
+	EnvRootCert     = "AFPC_PG_SSLROOTCERT"
+	EnvAppName      = "AFPC_PG_APPNAME"
 )
 
 // Defaults are the values dev/README documents for this server. The host default is an address
@@ -53,7 +58,7 @@ const (
 	defaultDB      = "agent_first_erp_crm"
 	defaultUser    = "afpc_app"
 	defaultSSLMode = "verify-full"
-	defaultApp     = "jada-customer-service"
+	defaultApp     = "customer-service-agent"
 )
 
 var (
@@ -84,6 +89,28 @@ type DB struct {
 	appName   string
 	safe      string
 	createdAt time.Time
+}
+
+// resolvePassword is the credential, whichever name it arrived under, and it is a function rather than
+// one os.Getenv call because the first deployment of this container started degraded over the answer.
+//
+// Compose interpolates ${VAR} from its own process environment and from the project directory's .env -
+// and *not* from the files listed under env_file:. So `- AFPC_PG_PASSWORD=${AFPC_APP_PASSWORD}`, which
+// reads like a translation between the two names, expands to nothing at parse time and the container got
+// an empty AFPC_PG_PASSWORD while the real secret sat beside it under the role's name. The process
+// started, declined the CRM tools, and answered 503; the health endpoint was the only thing telling the
+// truth.
+//
+// So the server resolves it, in this order, taking the first non-empty value: EnvPassword, because an
+// operator who named the connection variable meant it for this connection; then EnvRolePassword, which
+// is what this repository actually sets. The two are never both expected to be present, and a value
+// that is present-but-empty must not shadow one that is real - which is the difference between this and
+// a fallback chain, and why os.Getenv alone was the bug.
+func resolvePassword() string {
+	if v := strings.TrimSpace(os.Getenv(EnvPassword)); v != "" {
+		return v
+	}
+	return strings.TrimSpace(os.Getenv(EnvRolePassword))
 }
 
 // Settings reads the environment without connecting.
@@ -126,8 +153,9 @@ func Open(ctx context.Context) (*DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if os.Getenv(EnvPassword) == "" {
-		return nil, fmt.Errorf("%s is empty: the runtime role cannot connect without it", EnvPassword)
+	if resolvePassword() == "" {
+		return nil, fmt.Errorf("neither %s nor %s is set to a non-empty value: the runtime role "+
+			"cannot connect without its password", EnvPassword, EnvRolePassword)
 	}
 
 	// ParseConfig on a minimal DSN, then assign the fields. Assembling one string with the
@@ -139,7 +167,7 @@ func Open(ctx context.Context) (*DB, error) {
 		return nil, fmt.Errorf("parse postgres config: %w", err)
 	}
 	cfg.ConnConfig.User = d.user
-	cfg.ConnConfig.Password = os.Getenv(EnvPassword)
+	cfg.ConnConfig.Password = resolvePassword()
 	cfg.ConnConfig.Database = d.database
 	cfg.ConnConfig.RuntimeParams["application_name"] = d.appName
 

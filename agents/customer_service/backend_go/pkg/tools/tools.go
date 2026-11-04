@@ -120,11 +120,24 @@ func GetCurrentTime() (string, error) {
 		tzName = "America/Chicago"
 	}
 
+	// The weekday is the reason this tool exists, and it was not in its output. A model asked to set a
+	// follow-up for "next Tuesday" has to derive the day of week from a numeric date, which is calendar
+	// arithmetic rather than reading, and a live turn did exactly that: it stored 2026-11-09 - a Monday -
+	// while telling the customer the call was moved to Tuesday. The prose and the row disagreed, and only
+	// the row is what vw_pending_followups surfaces on the due date. Naming the day turns the reasoning
+	// into one subtraction.
+	//
+	// The ISO week number is printed for the other phrasing that reaches this tool, "later this week" and
+	// "next week", which are week questions rather than day questions.
+	_, isoWeek := nowLocal.ISOWeek()
 	return fmt.Sprintf(
-		"Current UTC time (for UTC ISO parameters): %s\nCurrent Local time (%s): %s",
-		nowUTC.Format("2006-01-02T15:04:05Z"),
+		"Current UTC time (for UTC ISO parameters): %s, a %s\n"+
+			"Current Local time (%s): %s, a %s\n"+
+			"Local ISO week number: %d (weeks start on Monday)",
+		nowUTC.Format("2006-01-02T15:04:05Z"), nowUTC.Weekday(),
 		tzName,
-		nowLocal.Format("2006-01-02 15:04:05"),
+		nowLocal.Format("2006-01-02 15:04:05"), nowLocal.Weekday(),
+		isoWeek,
 	), nil
 }
 
@@ -274,8 +287,14 @@ func ScrapeURL(urlStr string) (string, error) {
 func GetLocalTools() []ToolDefinition {
 	return []ToolDefinition{
 		{
-			Name:        "current_time",
-			Description: "Get the current date and time in both UTC (for ISO database queries) and local timezone.",
+			Name: "current_time",
+			Description: "Get the current date and time in UTC (for ISO database parameters) and in the " +
+				"server's local timezone, each with its weekday named, plus the local ISO week number. " +
+				"Call it before resolving any relative date the caller gives you - \"next Tuesday\", " +
+				"\"end of this week\", \"a fortnight\" - because the weekday is a fact about today that a " +
+				"date alone does not carry, and an off-by-one in a follow-up date is stored in a row that " +
+				"someone will act on. When the phrasing is ambiguous (\"next Tuesday\" from a Monday could " +
+				"be in six days or thirteen), ask; do not pick silently.",
 			Parameters: map[string]interface{}{
 				"type":       "object",
 				"properties": map[string]interface{}{},

@@ -80,7 +80,7 @@ Two implementations exist, and they share the requirements and the rules:
 | `add_communication` | Log new interaction | `add_communication(...)`. **Not** an `INSERT`. This row said `INSERT INTO communications (...)` for as long as the page existed, which is requirement 5 written as a caller-side write - the shape `0021` replaced, and the reason `4_5` is a test rather than a note |
 | `mark_customer_followup` | Set or clear the follow-up mark | `mark_customer_followup(p_entity_id, p_followup)` (`0014`), which is the only door allowed to set `entities.status` after creation - so the mark is a function's decision with a grant behind it, not a tool that can write any column it names |
 | `save_memory_tool`, `get_memory_tool`, `list_memories_tool` | Remember what the caller asked the agent to remember | `save_memory` / `get_memory` / `list_memories` over `agent_memories` (`0023`). In the blueprint these are files in a directory, which is what 0023 was for |
-| `current_time` | Date and time | No database query, and the reason the tool exists at all is that a model without a clock cannot answer "since last Tuesday" |
+| `current_time` | Date and time | No database query. The reason the tool exists at all is that a model without a clock cannot answer "since last Tuesday" - and it names the **weekday**, because a date on its own forces the model to compute one, which is how a follow-up meant for Tuesday lands on a Monday |
 
 ### Requirement by requirement
 

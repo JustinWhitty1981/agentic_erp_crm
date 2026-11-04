@@ -181,7 +181,10 @@ The `PATH` is not decoration: `golang:1.23-alpine`'s `sh -lc` rebuilds PATH from
 `justin`, so a `sudo chown` is not available without a password and a build that writes into it fails
 with a permission error that names nothing useful. The deployed agent therefore lives in
 `agents/customer_service/`, tracked, with the reference drop left untouched - which is also the point:
-the reference should stay what it was when it arrived, or it stops being a reference.
+the reference should stay what it was when it arrived, or it stops being a reference. `agents/jada/` is
+therefore in `.gitignore` rather than merely untracked: an exclusion is the one form of that decision
+that survives a `git add -A` - which would otherwise commit 68 files of vendored tree, as it did once,
+and make the reference look like ours.
 
 **`migrate.sh` refuses a number at or below the highest applied.** Correctly, but it means a planned
 migration's number is *spent* the moment a later one is applied: 0019 and 0020 were plans, 0021-0023
@@ -201,6 +204,37 @@ before `0021` announces itself instead of failing on the first write.
 client incrementally; anything that buffers the response turns a working agent into one that appears
 frozen at the first token. `LLM_STREAM=false` answers the same turn in a single body, and that switch
 exists for exactly this and nothing else.
+
+**Compose does not interpolate `${...}` from an `env_file:` entry.** Variable expansion reads the shell
+environment and the project directory's `.env` only, so a line like
+`- AFPC_PG_PASSWORD=${AFPC_APP_PASSWORD}` - which looks like a translation between two names for one
+secret - expands to *nothing* and sets the variable to the empty string. The agent starts, declines its
+CRM tools, and answers `/api/health` 503 with a `degraded_reason`, while the credential sits one line
+away in the file named under `env_file:`. This is how the first real `docker compose up` of
+`agents/customer_service/` went degraded. The fix is not a compose line: `pkg/db` reads both names and
+takes the first non-empty one. Related, and learned in the same start: paths in a compose file resolve
+against **the compose file's own directory**, so `dev/.env` from `agents/customer_service/` is
+`../../dev/.env`, and a wrong depth on a *certificate* bind mount is worse than a wrong depth on an env
+file - Docker creates the missing source as an empty directory, the mount succeeds, and the failure
+arrives as "certificate signed by unknown authority".
+
+**A date column and a timestamp column need different parsing, and using one helper for both loses a
+day.** `time.Parse("2006-01-02", "2026-11-10")` returns midnight **UTC**, and `.Local()` does not move
+the clock - it relabels the same instant - so in a container six hours behind UTC the value formats back
+out as `2026-11-09`. The customer service agent's `dateOnly` went through the timestamp helper, so every
+follow-up booked from `agents/customer_service` stored the day before the one the caller named, while the
+reply quoted the correct date. Two symptoms, then, and one cause: `2026-11-10` in prose, `2026-11-09` in
+`communications.follow_up_date`, and `to_char(follow_up_date,'Day')` saying Monday about a Tuesday. A
+`date` is a calendar day and must never pass through a zone; a bare *timestamp* has to be anchored with
+`time.ParseInLocation`, which is the call that says what "local time is the caller's meaning" claims.
+`pkg/crm`'s `TestDateArgumentIsNotMovedByTheServersZone` and `TestBareTimestampIsAnchoredLocally` pin
+both, against fixed offsets rather than named zones so the assertion holds in whatever image runs it, and
+both fail on the old code with the exact date this produced.
+
+The rows that were already wrong are repaired, and `audit_log` says so: two UPDATE trail rows, `was`
+2026-11-09, `became` 2026-11-10, `db_user` postgres. That trail is also the reason the repair was done in
+SQL rather than through a function - 0021's door creates an interaction and nothing amends one, and a
+correction to a mis-stored day is not an interaction with a customer.
 
 **`set_config('app.tenant_id', $1, true)` inside a connection hook sets nothing.** The third argument
 is `is_local`: the setting then belongs to the *transaction*, and a connect hook runs outside one, so the
