@@ -12,21 +12,22 @@ A **Database-First, Agent-Native** business operating system.
 > **Warning:** This project is in **active development** and should be considered an **experimental prototype**.
 
 ### What This Is
-- A **vision** for a database-first, agent-native business operating system
-- A **blueprint** for how specialized AI agents can run operations through conversation
-- A **foundation** for building self-contained, deployable agents
+- A **deployed customer service agent** - Go backend, React UI, HTTP and SSE, in `agents/customer_service/`, writing through the database's own functions
+- A **schema that enforces what the documentation claims**: 22 applied migrations, row-level security on every tenant-coded table, a tamper-evident row trail, and idempotency claims for retryable writes
+- A **blueprint** for how specialized agents can run operations through conversation - `blueprint/bot.py`, the same rules in one Python file
+- And a method: every claim in `db/` and in these pages has a check that fails when the claim stops being true
 
 ### What's Under Construction
--  **Tool Library:** Shared utilities (`database.py`, `vector_search.py`, `logger.py`) are not yet implemented
--  **Agent Registry:** No versioning, dependency resolution, or discovery system
--  **Observability:** No centralized logging, monitoring, or error alerting
--  **Security Hardening:** Row-level security and permission models are conceptual
--  **Production Testing:** Not tested at scale or in real-world scenarios
+- **Semantic search:** the hnsw indexes exist (`0012`) and nothing writes the vectors, because no embedder in this deployment produces the dimensions the columns declare. "Find customers who complained about shipping last week" is not implemented
+- **Agent registry:** no versioning, dependency resolution, or discovery. An agent is a process with an `AGENT_ROLE` and a set of grants
+- **More agents:** the customer service agent is the only one deployed. The inventory schema side is ready; the agent is not
+- **Escalation:** requirement 7's detection half exists (sentiment, outcomes, per-customer stats); there is no second agent to escalate *to*
+- **Observability beyond the table:** the trajectory is queryable (`vw_recent_interactions`, `vw_tool_calls`, `vw_tool_performance`) but nothing aggregates it into an alert
+
+What is *not* under construction, and was listed here as though it were: row-level security (enforced, `FORCE ROW LEVEL SECURITY`, with `vw_rls_status` publishing what each policy actually does), the tool library (fourteen tools in the deployed agent, nine of them in the blueprint), and logging (one row per run, every tool call, plus the PII-masked process log).
 
 ### What You Can Do Now
-1. **Run the working blueprint agent** (`blueprint/bot.py`) - A fully functional customer service agent with 8 tools:
-   - Customer lookup, communications history, entity statistics
-   - Log new interactions, add/update customers, follow-up lists
+1. **Run the deployed agent** - `cd agents/customer_service && docker compose up --build -d`, then `curl -s localhost:4550/api/health | jq`. Eleven tools: customer lookup, communications history, entity statistics, follow-up lists, add/update customer, log an interaction, mark a follow-up, remember a fact, the clock, and two web tools
 2. **Study the blueprint** to understand the agent pattern and tool library architecture
 3. **Build your own agent** using the reference implementation as a guide
 4. **Contribute** to the tool library, registry, or documentation
@@ -35,7 +36,7 @@ A **Database-First, Agent-Native** business operating system.
 ### Roadmap
 | Phase | Goal | Status |
 |-------|------|--------|
-| **Alpha** | Core blueprint + 1 working agent | 🟡 In Progress |
+| **Alpha** | Core blueprint + 1 working agent | 🟢 Done: the blueprint, and a deployed agent behind it |
 | **Beta** | Tool library + 3 agents + basic registry | ⚪ Planned |
 | **1.0** | Production-ready with monitoring, security, docs | ⚪ Future |
 
@@ -47,7 +48,7 @@ A **Database-First, Agent-Native** business operating system.
 
 If you're an AI agent working on this project, start here:
 - **[AGENTS.md](AGENTS.md)** - Complete guide for AI agents navigating this project
-- **[blueprint/bot.py](blueprint/bot.py)** - Reference implementation
+- **[agents/customer_service/](agents/customer_service/)** - The deployed agent; **[blueprint/bot.py](blueprint/bot.py)** - the reference implementation
 - **[QUICKSTART.md](QUICKSTART.md)** - Setup and deployment instructions
 
 ## Vision

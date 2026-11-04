@@ -47,7 +47,7 @@ def get_followup_customers_tool(days_threshold: int = 7) -> str:
         with conn.cursor() as cur:
             query = """
                 SELECT entity_id, name, email, phone, last_communication_date, follow_up_reason
-                FROM agent_first_erp_crm.get_followup_customers(%s)
+                FROM get_followup_customers(%s)
                 ORDER BY last_communication_date ASC NULLS LAST
             """
             cur.execute(query, (days_threshold,))

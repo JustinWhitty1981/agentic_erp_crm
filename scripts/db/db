@@ -81,10 +81,23 @@ case "$cmd" in
     verify)   "$DB/verify.sh" "$@" ;;
     test)     "$DB/test-functions.sh" "$@" ;;
     seed)     "$DB/seed.sh" "$@" ;;
-    shell)    "${COMPOSE[@]}" exec postgres psql -X -U postgres -d agent_first_erp_crm ;;
+    shell)    # Arguments are forwarded, and they had not been: `db shell -c "SELECT ..."` printed
+              # nothing, exited 0, and `make docs-schema` therefore "wrote" three empty files. An
+              # interactive session still gets a pseudo-TTY; a piped one must not, or psql's banner
+              # and the ^M framing land in the generated document.
+              if [ "$#" -gt 0 ]; then
+                  "${COMPOSE[@]}" exec -T postgres psql -X -U postgres -d agent_first_erp_crm "$@"
+              else
+                  "${COMPOSE[@]}" exec postgres psql -X -U postgres -d agent_first_erp_crm
+              fi ;;
     audit)
-        "${COMPOSE[@]}" exec -e PGPASSWORD="$(sed -n 's/^AFPC_AUDITOR_PASSWORD=//p' "$ROOT/dev/.env")" \
-            postgres psql "host=127.0.0.1 port=5432 dbname=agent_first_erp_crm user=afpc_auditor sslmode=require" ;;
+              if [ "$#" -gt 0 ]; then
+                  "${COMPOSE[@]}" exec -T -e PGPASSWORD="$(sed -n 's/^AFPC_AUDITOR_PASSWORD=//p' "$ROOT/dev/.env")" \
+                      postgres psql "host=127.0.0.1 port=5432 dbname=agent_first_erp_crm user=afpc_auditor sslmode=require" "$@"
+              else
+                  "${COMPOSE[@]}" exec -e PGPASSWORD="$(sed -n 's/^AFPC_AUDITOR_PASSWORD=//p' "$ROOT/dev/.env")" \
+                      postgres psql "host=127.0.0.1 port=5432 dbname=agent_first_erp_crm user=afpc_auditor sslmode=require"
+              fi ;;
     backup)
         mkdir -p "$ROOT/backup"
         local_file="agent_first_erp_crm_$(date +%Y%m%d_%H%M%S).dump"

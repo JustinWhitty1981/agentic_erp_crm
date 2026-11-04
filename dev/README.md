@@ -10,6 +10,7 @@ development server, so **the data volume is durable and is never recreated impli
 | Secrets | `dev/.env`, mode 600, gitignored. Not in the repo, not in the image |
 | TLS | volume `afpc_tls` at `/certs`; CA copy in `dev/tls/afpc-ca.crt` |
 | Migrations | `db/migrations/`, applied in order by `scripts/db/migrate.sh` |
+| The agent | container `afpc-customer-service` from `agents/customer_service/`, publishing `:4550`; `agents/jada` is the reference drop it was derived from and `:4545` is the container that predates it |
 | Not here | the LiteLLM database (`litellm-db-1`) publishes no host port and is on its own network; nothing in this setup reads or routes to it |
 
 ## Auditing from any server on the network
@@ -149,9 +150,73 @@ TLS change, `init.sh` reverts `ssl` rather than leaving a persistent database un
 
 ## Things that will bite you if you do not know them
 
-Sixty-four of these, each learned by a check failing on a rehearsal or a
-migration after the fact - not by reading documentation about the database. Keep the pattern: when a migration surprises
-you, the surprise goes here, and the check that would have caught it goes in verify.sh.
+Every one of these was learned by a check failing on a rehearsal or a migration after the fact, not by
+reading documentation about the database - and the count is deliberately not given, because the last
+time this page carried one it had already drifted by seven entries, which is the exact failure this
+session's whole documentation sweep is about. Keep the pattern: when something surprises you here, the
+surprise goes in this section, and the check that would have caught it goes in `verify.sh` or a
+`code:*` marker. An entry with no check behind it is a rumour, and it is also the one nobody re-reads.
+
+**The leaf certificate has IP subjectAltNames and nothing else.** `sslmode=verify-full` therefore
+validates against `192.168.0.53` and `100.70.251.57` and fails against `afpc-pg`, `localhost`,
+`host.docker.internal` and any DNS name that reaches the same server - including from inside a
+container on this box, which can route to the LAN address and should use it. The error reads like a
+network fault (`x509: certificate is valid for 192.168.0.53, not afpc-pg` reads like neither), and the
+wrong fix is `require`, which encrypts and checks nothing. `agents/customer_service/docker-compose.yml`
+sets the IP for this reason and says so at its top.
+
+**There is no `go`, and no `make`, on the host's PATH** - the toolchain lives in an image. Build and
+test with
+
+```bash
+docker run --rm -v "$PWD/agents/customer_service/backend_go":/src -w /src \
+  -e PATH=/usr/local/go/bin:/usr/bin:/bin -e GOCACHE=/tmp/gc -e GOFLAGS=-mod=mod \
+  golang:1.23-alpine go test ./...
+```
+
+The `PATH` is not decoration: `golang:1.23-alpine`'s `sh -lc` rebuilds PATH from profile and drops
+`/usr/local/go/bin`, so without it `go` is "not found" inside a command that otherwise looks correct.
+
+**`agents/jada/` is not yours.** It is owned by uid 10001 and its ACL mask makes it read-only to
+`justin`, so a `sudo chown` is not available without a password and a build that writes into it fails
+with a permission error that names nothing useful. The deployed agent therefore lives in
+`agents/customer_service/`, tracked, with the reference drop left untouched - which is also the point:
+the reference should stay what it was when it arrived, or it stops being a reference.
+
+**`migrate.sh` refuses a number at or below the highest applied.** Correctly, but it means a planned
+migration's number is *spent* the moment a later one is applied: 0019 and 0020 were plans, 0021-0023
+were needed first, so the plans moved to 0024 and 0025. `0013` names `0019` four times in prose, and an
+applied migration is checksum-frozen, so that number could not be reclaimed either. Renumber rather
+than re-edit, and write the reason in db/MIGRATIONS.md - which is where this rule lives now.
+
+**The agent starts degraded, and that is the failure mode to look for.** A database that is configured
+and not answering does not stop the process: the CRM tools are not registered and `/api/health` answers
+**503** with `degraded_reason`, so a monitor can page on the difference between "the container is up"
+and "the agent can work". `docker ps` will say `healthy` only after the healthcheck's own probe
+passes, so a 503 with no obvious error is the state to check first. Startup also probes for
+`add_communication`, `save_memory` and `get_followup_customers`, which is how a database migrated to
+before `0021` announces itself instead of failing on the first write.
+
+**A streaming turn hangs for the whole timeout behind a buffering proxy.** SSE needs to reach the
+client incrementally; anything that buffers the response turns a working agent into one that appears
+frozen at the first token. `LLM_STREAM=false` answers the same turn in a single body, and that switch
+exists for exactly this and nothing else.
+
+**`set_config('app.tenant_id', $1, true)` inside a connection hook sets nothing.** The third argument
+is `is_local`: the setting then belongs to the *transaction*, and a connect hook runs outside one, so the
+implicit transaction carrying the SELECT ends immediately and the claim disappears. Every query that
+follows resolves `afpc_current_tenant()` from `app.default_tenant_id` instead - which on this box is the
+tenant the agent means, so the agent works, the writes land correctly, and the identity the row security
+policies are built on is being inherited rather than asserted. Use `false` for a session-scoped claim
+when the process serves one tenant, and set it inside the transaction when a pool is ever shared across
+two. `agents/customer_service/backend_go/pkg/db`'s `TestTenantSurvivesTheConnection` reads
+`current_setting('app.tenant_id', true)` back and requires the configured value; it skips without a
+database, and it fails on the `true` form, which is the only reason the difference is recorded anywhere.
+
+**A run's identity reaches a tool through a context value, or the writes silently lose their claim.**
+If the loop stops putting the run in the context the tools run against, every write goes out with a
+NULL idempotency key: no error, no log line, and a duplicate row per retry. `pkg/agent`'s
+`TestRunIDReachesTheTool` is what notices, and it is the reason `pkg/turn` exists as a leaf package.
 
 **`CREATE OR REPLACE FUNCTION` with a changed parameter list creates a SECOND function.**
 "Or replace" matches by signature, and a new signature matches nothing: 0014 added two

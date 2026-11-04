@@ -112,13 +112,44 @@ closed() {
         code:tool_prefix)
             # Scope is the code path, which is what 3.1's risk actually is: a running tool that
             # names a schema this migration set does not create. blueprint/ also holds superseded
-            # .sql copies (134 references by the same grep) and documentation examples (100), and
-            # those are T4's and db/README's problem, not a live failure. Measured at 0017: 33 in
-            # *.py, 267 across the tree - which is why the branch says --include, so that a sweep
-            # of the 33 is allowed to turn this marker green.
+            # .sql copies and documentation examples, and those are T4's and db/README's problem
+            # rather than a live failure - the prose half is watched by
+            # code:agent_docs_match_surface, section 5 of the script behind it.
+            #
+            # 33 at 0017, swept to 0 in this session. The sweep is what turned
+            # code:cs_writes_through_doors red, and that is the story worth reading below: the
+            # INSERTs had been failing on the missing schema, so the marker's own regex - which
+            # allowed `public.` or nothing, because qualified forms could not run - had never seen
+            # them. De-qualifying the SQL made four real write bypasses visible at once.
             local n
             n=$(grep -ro --include='*.py' 'agent_first_erp_crm\.' blueprint/ 2>/dev/null | wc -l)
             [ "$n" -eq 0 ] && echo 1 || echo 0 ;;
+        code:cs_writes_through_doors)
+            # 0021's rule, watched: recording an interaction goes through add_communication, and
+            # not through an INSERT that whichever caller wrote it last happens to have kept
+            # correct. Scope is every implementation that can run: the deployment in
+            # agents/customer_service, the blueprint tools it was derived from, and the reference
+            # drop. A .sql copy under scripts/database/ is superseded by db/README and grepping it
+            # would only re-report §3.3.
+            #
+            # The qualified alternative is in the pattern on purpose. It was not in the first draft,
+            # and that omission is how long the rule went unbroken-looking: four blueprint tools were
+            # INSERTing into `agent_first_erp_crm.communications`, which matches nothing, fails at
+            # runtime, and reads as a clean marker.
+            local n
+            n=$(grep -rn --include='*.go' --include='*.py' -E 'INSERT[[:space:]]+(INTO)[[:space:]]+((public|agent_first_erp_crm)\.)?communications' \
+                    agents/customer_service agents/jada blueprint/ 2>/dev/null | wc -l)
+            [ "$n" -eq 0 ] && echo 1 || echo 0 ;;
+        code:agent_docs_match_surface)
+            # The documentation claim, watched by the script that can check it. A .md file that
+            # lists a tool the binary does not register, or an env var the compose file stopped
+            # setting, is the same class of rot as a stale view list, and it is why this session's
+            # changes carry their doc edits in the same commit.
+            if "$DBROOT/scripts/docs/check_agent_docs.sh" --quiet >/dev/null 2>&1; then
+                echo 1
+            else
+                echo 0
+            fi ;;
         code:*)
             echo 0 ;;
         *)

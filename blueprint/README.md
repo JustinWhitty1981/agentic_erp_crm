@@ -54,18 +54,21 @@ Send a message to your Telegram bot:
 
 ## Database Schema
 
-The bot uses the `agent_first_erp_crm` schema in your `agent_first_erp_crm` database with these tables/views:
+Everything lives in **`public`** of the `agent_first_erp_crm` database. This section used to say the bot
+uses an `agent_first_erp_crm` *schema*, which review 3.1 measured no migration creates - and the
+difference is not cosmetic, because a qualified name raises 42P01 while an unqualified one resolves, so
+the sentence was a description of the failure rather than of the system.
 
-| Table/View | Purpose |
-|------------|---------|
-| `agent_first_erp_crm.customers` | Customer information (name, email, phone, address, status) |
-| `agent_first_erp_crm.communications` | Communication history (entity_id, type, direction, summary, timestamp) |
-| `agent_first_erp_crm.entity_communication_stats` | Aggregated stats per entity |
-| `agent_first_erp_crm.recent_communications` | Recent communication view (last 7 days) |
-| `agent_first_erp_crm.entities` | Entity records |
-| `agent_first_erp_crm.entity_relationships` | Entity-contact relationships |
-| `agent_first_erp_crm.contacts` | Contact details |
-| `agent_first_erp_crm.addresses` | Address information |
+| Table or view | Purpose |
+|---------------|---------|
+| `entities` | The organisation side: what a "customer" is in this model |
+| `contacts` | The people, with the name, email, phone and status the tools read |
+| `entity_relationships` | Which contact belongs to which entity, and which one is primary |
+| `addresses` | Where they are; one entity can have several, with `address_type` naming which |
+| `communications` | Interaction history - one row per interaction, and `add_communication` is the only door |
+| `vw_customers` | The backward-compatibility view: `entities` and `contacts` shaped like the old `customers` table |
+| `vw_recent_communications` | The last seven days |
+| `vw_entity_communication_stats` | Aggregated metrics per entity |
 
 ### Database Functions
 

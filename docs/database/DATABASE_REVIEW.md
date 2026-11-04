@@ -1,5 +1,12 @@
 # Database Review — Agent First ERP/CRM
 
+<!-- docs-check: historical-record
+     The review every numbered finding in db/MIGRATIONS.md points back to, and a record of the
+     database as it was found. It quotes the `agent_first_erp_crm.` qualification it was reporting on;
+     §5 of scripts/docs/check_agent_docs.sh skips marked files because sweeping a finding's own words
+     would destroy the evidence the finding is made of. Nothing here is instructions: apply
+     db/migrations, and read db/README.md for where objects live now. -->
+
 Deep review of the data model: structures, keys, relationships, constraints, indexes,
 functions, views — assessed against what this system needs to become (SAP / Salesforce /
 Oracle / JDE class), not against what the DDL currently claims.

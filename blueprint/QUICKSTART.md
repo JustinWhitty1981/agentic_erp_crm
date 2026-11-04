@@ -90,7 +90,7 @@ Send these messages to your Telegram bot:
 
 After logging a communication, check the database:
 ```bash
-psql -h {your-postgres-host} -U agent_first_erp_crm -d agent_first_erp_crm -c "SELECT * FROM agent_first_erp_crm.recent_communications WHERE entity_name ILIKE '%Alice%' ORDER BY started_at DESC LIMIT 5;"
+psql -h {your-postgres-host} -U agent_first_erp_crm -d agent_first_erp_crm -c "SELECT * FROM vw_recent_communications WHERE entity_name ILIKE '%Alice%' ORDER BY started_at DESC LIMIT 5;"
 ```
 
 ## Troubleshooting

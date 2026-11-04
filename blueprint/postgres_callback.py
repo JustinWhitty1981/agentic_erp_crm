@@ -32,49 +32,19 @@ class PostgresAgentLogger(BaseCallbackHandler):
             password=os.getenv("POSTGRES_PASSWORD", ""),
         )
     
-    def _create_table_if_not_exists(self):
-        """Create the agent_interactions table in agent_first_erp_crm schema if it doesn't exist."""
-        conn = self.get_db_connection()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS agent_first_erp_crm.agent_interactions (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        conversation_id UUID NOT NULL,
-                        run_id TEXT NOT NULL,
-                        telegram_chat_id TEXT,
-                        telegram_message_id BIGINT,
-                        bot_id TEXT,
-                        user_id TEXT,
-                        timestamp TIMESTAMPTZ DEFAULT NOW(),
-                        human_input TEXT,
-                        intent_classification TEXT,
-                        confidence_score FLOAT,
-                        agent_thoughts TEXT[],
-                        actions_taken JSONB,
-                        tool_observations JSONB,
-                        final_output TEXT,
-                        response_sources JSONB,
-                        model_used TEXT,
-                        token_usage JSONB,
-                        error_message TEXT,
-                        duration_ms INTEGER,
-                        feedback_score FLOAT,
-                        created_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                """)
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_conv ON agent_first_erp_crm.agent_interactions(conversation_id)")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_user ON agent_first_erp_crm.agent_interactions(user_id)")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON agent_first_erp_crm.agent_interactions(timestamp DESC)")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_actions ON agent_first_erp_crm.agent_interactions USING GIN(actions_taken)")
-            conn.commit()
-        finally:
-            conn.close()
-    
+    # No schema here, on purpose. This class used to carry a _create_table_if_not_exists that ran
+    # CREATE TABLE IF NOT EXISTS agent_interactions with twenty-one columns and four indexes, and it is
+    # the clearest example in the tree of what "idempotent" fails to mean: on a migrated database the
+    # statement is a no-op, and on one that is not yet migrated it *wins*, creating a table with no
+    # tenant_id column - so no row-level security, because there is no column for the policy to read -
+    # and adding indexes that lead on conversation_id rather than tenant_id, against 0006's rule that
+    # every index on a tenant-coded table starts with the tenant. IF NOT EXISTS cannot tell the two
+    # databases apart; that is the point of a migration file. Schema is owned by db/migrations, and a
+    # process that cannot find agent_interactions should say so at startup rather than define its own.
+
     def on_llm_start(self, serialized: Dict[str, Any], prompts: List[str], **kwargs):
         """Called when the LLM starts running."""
         self.start_time = datetime.now()
-        self._create_table_if_not_exists()
         print(f"🔵 Agent started for conversation: {self.conversation_id}")
     
     def on_llm_end(self, response, **kwargs):
@@ -88,12 +58,12 @@ class PostgresAgentLogger(BaseCallbackHandler):
         try:
             with conn.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO agent_first_erp_crm.agent_interactions 
+                    INSERT INTO agent_interactions 
                     (conversation_id, run_id, final_output, duration_ms, model_used)
                     VALUES (%s, %s, %s, %s, %s)
                 """, (self.conversation_id, self.run_id, final_output, duration_ms, "ornith:35b"))
             conn.commit()
-            print(f"✅ Logged interaction {self.run_id} to agent_first_erp_crm.agent_interactions")
+            print(f"✅ Logged interaction {self.run_id} to agent_interactions")
         except Exception as e:
             print(f"❌ Error logging to database: {e}")
         finally:
@@ -105,7 +75,7 @@ class PostgresAgentLogger(BaseCallbackHandler):
         try:
             with conn.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO agent_first_erp_crm.agent_interactions 
+                    INSERT INTO agent_interactions 
                     (conversation_id, run_id, error_message)
                     VALUES (%s, %s, %s)
                 """, (self.conversation_id, self.run_id, str(error)))

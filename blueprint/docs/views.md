@@ -2,30 +2,33 @@
 
 **Purpose:** Simplified query interfaces for agents and developers.
 
-**Location:** `scripts/database/08_create_views.sql`
+**Definitions:** `db/migrations/0001_baseline_canonical_port.sql`, widened by `0009` (tenancy),
+`0017` (the interaction read path) and `0018` (currency). **Not**
+`scripts/database/08_create_views.sql`, which `db/README.md` lists among the superseded copies - this
+page named that file as the location for long enough that two of its view lists described a schema no
+migration creates.
 
-> **Read this page in layers.** The note below is 0009's; the four interaction views added by
-> `0017_interaction_readpath` and `vw_currency_rates` added by `0018_currencies` are further down
-> and are current. The column lists for the CRM and
-> inventory views were written against the superseded SQL rather than the live catalog, and 0017
-> found one of them is simply wrong in both directions - `vw_agent_activity_summary` is listed
-> with `bot_id`, a column it has never had (the live one is `agent_id`), and is missing
-> `unique_contacts`, `escalated_count` and `first_activity`. Read the lists with
-> `SELECT * FROM pg_attribute WHERE attrelid = 'vw_...'::regclass` as the authority; a
-> documentation sweep that checks every list against the catalog is task T4 in
-> `db/MIGRATIONS.md`.
+> **The column lists below are read from `pg_attribute`, in declared order, and a check re-runs that
+> claim.** They used to be prose that someone had copied from the SQL: `vw_agent_activity_summary` was
+> listed with `bot_id`, a column it never had, and without `unique_contacts`, `escalated_count` or
+> `first_activity`, three it always did; every tenant view was missing the `tenant_id` 0009 gave it.
+> That is T4's class, and `scripts/docs/check_agent_docs.sh` - the script behind
+> `code:agent_docs_match_surface` - now compares all seventeen lists against the catalog, so the page
+> cannot rot into a description of a database that is not there. Read the column list as authority and
+> the prose above each one as intent; where they disagree, the check is wrong or the migration is, and
+> either is a bug worth reporting.
+>
+> The definitions themselves remain in SQL. This page is not where a view is authored: `CREATE OR
+> REPLACE VIEW` belongs in a numbered migration, and a change made only here is the same mistake in
+> the other direction.
 
-> **Changed by `db/migrations/0009_rls_enforcement.sql`, and this page describes the old
-> behaviour in three ways.** (1) Every view over a tenant table now exposes `tenant_id` as its
-> last column, so the twelve customer-facing and inventory views have one more column than
-> listed below. (2) The four aggregate views (`vw_agent_activity_summary`,
-> `vw_entity_communication_stats`, `vw_inventory_valuation`, `vw_item_movement_summary`) also
-> group by it, because grouping without it adds two tenants' numbers together. (3) They are all
-> `security_invoker` now, which is what makes row-level security apply to a query that goes
-> through a view; an agent sees one tenant and the audit account sees all of them, which is the
-> reason for (1). The canonical definitions live in `0001` (port) plus `0009` (this change) -
-> not in the SQL file named above, which is one of the superseded copies listed in
-> `db/README.md`.
+> **Changed by `db/migrations/0009_rls_enforcement.sql`, in three ways.** (1) Every view over a tenant
+> table exposes `tenant_id` as its last column, which the lists now carry. (2) The four aggregate views
+> (`vw_agent_activity_summary`, `vw_entity_communication_stats`, `vw_inventory_valuation`,
+> `vw_item_movement_summary`) also group by it, because grouping without it adds two tenants' numbers
+> together. (3) They are all `security_invoker` now, which is what makes row-level security apply to a
+> query that goes through a view; an agent sees one tenant and the audit account sees all of them,
+> which is the reason for (1).
 
 
 ## Overview
@@ -41,10 +44,12 @@ Views provide simplified, agent-friendly interfaces to complex database queries.
 Backward compatibility view mapping entities/contacts to legacy customer format.
 
 ```sql
-SELECT * FROM agent_first_erp_crm.vw_customers;
+SELECT * FROM vw_customers;
 ```
 
-**Columns:**
+**Columns:** (in declared order, read from `pg_attribute`. T4's sweep regenerated every
+list on this page: the ones it replaced had been written against the superseded SQL, and were wrong
+in both directions - names the view never had, and columns 0009 added to every tenant view. `code:agent_docs_match_surface` re-checks them against the catalog, so this cannot quietly rot again)
 - `id` - Entity ID
 - `name` - Entity name
 - `email` - Primary contact email
@@ -53,7 +58,7 @@ SELECT * FROM agent_first_erp_crm.vw_customers;
 - `status` - Entity status
 - `created_at` - Creation timestamp
 - `updated_at` - Last update timestamp
-- `embedding` - Vector embedding for semantic search
+- `tenant_id` - Whose row this is. Every tenant-coded view exposes it last (0009), which is what makes an agent's and an auditor's result sets differ without two views
 
 **Use Case:** Legacy code compatibility
 
@@ -64,25 +69,38 @@ SELECT * FROM agent_first_erp_crm.vw_customers;
 All communications for customers with full context.
 
 ```sql
-SELECT * FROM agent_first_erp_crm.vw_customer_communications_summary;
+SELECT * FROM vw_customer_communications_summary;
 ```
 
-**Columns:**
+**Columns:** (in declared order, read from `pg_attribute`. T4's sweep regenerated every
+list on this page: the ones it replaced had been written against the superseded SQL, and were wrong
+in both directions - names the view never had, and columns 0009 added to every tenant view. `code:agent_docs_match_surface` re-checks them against the catalog, so this cannot quietly rot again)
+- `id` - The view's own key, carried from the underlying row
+- `started_at` - When communication started
 - `entity_id` - Customer entity ID
 - `entity_name` - Customer name
 - `entity_type` - Type (customer/vendor/prospect)
+- `entity_status` - The customer's own status
 - `contact_id` - Contact ID
 - `contact_name` - Full contact name
+- `contact_title` - The person's title, from `contacts`
 - `communication_type` - Type of communication
 - `direction` - Inbound/outbound/internal
 - `subject` - Communication subject
 - `summary` - AI-generated summary
+- `channel` - How the interaction arrived, where the table distinguishes it from the type
+- `duration_seconds` - How long the interaction took, in seconds
 - `outcome` - Resolution status
 - `priority` - Priority level
+- `sentiment_score` - The numeric sentiment, where one was recorded
 - `sentiment_label` - Positive/neutral/negative
-- `started_at` - When communication started
 - `follow_up_required` - Requires follow-up?
 - `follow_up_date` - Follow-up date
+- `agent_id` - Which agent recorded the row; `agent_interactions.bot_id` is the same idea on the trajectory side, and this view groups by `agent_id` because that is the column `communications` has
+- `human_agent_id` - The person who handled it, when a person did
+- `parent_id` - The message this one answers
+- `thread_root_id` - The first message of the thread this reply belongs to
+- `tenant_id` - Whose row this is. Every tenant-coded view exposes it last (0009), which is what makes an agent's and an auditor's result sets differ without two views
 
 **Use Case:** Agent queries, customer service dashboards
 
@@ -93,17 +111,27 @@ SELECT * FROM agent_first_erp_crm.vw_customer_communications_summary;
 Last 7 days of all communications.
 
 ```sql
-SELECT * FROM agent_first_erp_crm.vw_recent_communications;
+SELECT * FROM vw_recent_communications;
 ```
 
-**Columns:**
+**Columns:** (in declared order, read from `pg_attribute`. T4's sweep regenerated every
+list on this page: the ones it replaced had been written against the superseded SQL, and were wrong
+in both directions - names the view never had, and columns 0009 added to every tenant view. `code:agent_docs_match_surface` re-checks them against the catalog, so this cannot quietly rot again)
+- `id` - The view's own key, carried from the underlying row
+- `started_at` - Timestamp
+- `entity_id` - The `entities` row this is about
 - `entity_name` - Entity name
+- `entity_type` - customer or prospect; the CHECK is the list
 - `contact_name` - Contact name
+- `contact_title` - The person's title, from `contacts`
 - `communication_type` - Type of communication
+- `direction` - inbound, outbound or internal
 - `subject` - Subject line
 - `summary` - Summary
 - `outcome` - Resolution status
-- `started_at` - Timestamp
+- `priority` - How soon this matters, from the column's own vocabulary
+- `agent_id` - Which agent recorded the row; `agent_interactions.bot_id` is the same idea on the trajectory side, and this view groups by `agent_id` because that is the column `communications` has
+- `tenant_id` - Whose row this is. Every tenant-coded view exposes it last (0009), which is what makes an agent's and an auditor's result sets differ without two views
 
 **Use Case:** Activity feeds, monitoring
 
@@ -114,18 +142,26 @@ SELECT * FROM agent_first_erp_crm.vw_recent_communications;
 All communications requiring follow-up.
 
 ```sql
-SELECT * FROM agent_first_erp_crm.vw_pending_followups;
+SELECT * FROM vw_pending_followups;
 ```
 
-**Columns:**
-- `communication_id` - Communication ID
+**Columns:** (in declared order, read from `pg_attribute`. T4's sweep regenerated every
+list on this page: the ones it replaced had been written against the superseded SQL, and were wrong
+in both directions - names the view never had, and columns 0009 added to every tenant view. `code:agent_docs_match_surface` re-checks them against the catalog, so this cannot quietly rot again)
+- `id` - The view's own key, carried from the underlying row
+- `entity_id` - The `entities` row this is about
+- `contact_id` - The `contacts` row this is about, or NULL when no person was named
+- `description` - What is owed
+- `due_date` - When the follow-up is owed
+- `priority` - Priority level
+- `status` - The row's status, from that table's own vocabulary - `vw_domain_vocabulary` lists it
+- `completed_at` - When it was done
+- `completion_notes` - Notes left at completion
+- `created_at` - When the row was written, which is not the same fact and 0022 is the finding that says so
+- `updated_at` - When the row last changed, if the table keeps one - `vw_timestamp_status` says which do
 - `entity_name` - Customer name
 - `contact_name` - Contact name
-- `follow_up_date` - Due date
-- `follow_up_action` - Required action
-- `priority` - Priority level
-- `communication_type` - Type
-- `summary` - Summary
+- `tenant_id` - Whose row this is. Every tenant-coded view exposes it last (0009), which is what makes an agent's and an auditor's result sets differ without two views
 
 **Use Case:** Task lists, agent action items
 
@@ -136,18 +172,27 @@ SELECT * FROM agent_first_erp_crm.vw_pending_followups;
 Aggregated communication metrics per entity.
 
 ```sql
-SELECT * FROM agent_first_erp_crm.vw_entity_communication_stats;
+SELECT * FROM vw_entity_communication_stats;
 ```
 
-**Columns:**
+**Columns:** (in declared order, read from `pg_attribute`. T4's sweep regenerated every
+list on this page: the ones it replaced had been written against the superseded SQL, and were wrong
+in both directions - names the view never had, and columns 0009 added to every tenant view. `code:agent_docs_match_surface` re-checks them against the catalog, so this cannot quietly rot again)
 - `entity_id` - Entity ID
 - `entity_name` - Entity name
 - `entity_type` - Entity type
+- `status` - The row's status, from that table's own vocabulary - `vw_domain_vocabulary` lists it
 - `total_communications` - Total count
 - `resolved_count` - Resolved count
 - `escalated_count` - Escalated count
+- `pending_count` - Interactions still pending
+- `positive_count` - Interactions labelled positive
+- `negative_count` - Interactions labelled negative
 - `avg_sentiment` - Average sentiment score
 - `last_contact_date` - Most recent contact
+- `first_contact_date` - The oldest interaction
+- `avg_duration_seconds` - Mean interaction length
+- `tenant_id` - Whose row this is. Every tenant-coded view exposes it last (0009), which is what makes an agent's and an auditor's result sets differ without two views
 
 **Use Case:** Customer health scores, engagement metrics
 
@@ -158,18 +203,28 @@ SELECT * FROM agent_first_erp_crm.vw_entity_communication_stats;
 Communications only with primary contacts.
 
 ```sql
-SELECT * FROM agent_first_erp_crm.vw_primary_contact_communications;
+SELECT * FROM vw_primary_contact_communications;
 ```
 
-**Columns:**
+**Columns:** (in declared order, read from `pg_attribute`. T4's sweep regenerated every
+list on this page: the ones it replaced had been written against the superseded SQL, and were wrong
+in both directions - names the view never had, and columns 0009 added to every tenant view. `code:agent_docs_match_surface` re-checks them against the catalog, so this cannot quietly rot again)
+- `id` - The view's own key, carried from the underlying row
+- `started_at` - Timestamp
+- `entity_id` - The `entities` row this is about
 - `entity_name` - Entity name
+- `entity_type` - customer or prospect; the CHECK is the list
+- `contact_id` - The `contacts` row this is about, or NULL when no person was named
 - `primary_contact` - Primary contact name
 - `contact_title` - Contact title
 - `communication_type` - Type
+- `direction` - inbound, outbound or internal
 - `subject` - Subject
 - `summary` - Summary
 - `outcome` - Outcome
-- `started_at` - Timestamp
+- `priority` - How soon this matters, from the column's own vocabulary
+- `agent_id` - Which agent recorded the row; `agent_interactions.bot_id` is the same idea on the trajectory side, and this view groups by `agent_id` because that is the column `communications` has
+- `tenant_id` - Whose row this is. Every tenant-coded view exposes it last (0009), which is what makes an agent's and an auditor's result sets differ without two views
 
 **Use Case:** Executive-level interaction tracking
 
@@ -180,17 +235,23 @@ SELECT * FROM agent_first_erp_crm.vw_primary_contact_communications;
 Shows communication threading hierarchy.
 
 ```sql
-SELECT * FROM agent_first_erp_crm.vw_communication_thread;
+SELECT * FROM vw_communication_thread;
 ```
 
-**Columns:**
-- `communication_id` - Communication ID
+**Columns:** (in declared order, read from `pg_attribute`. T4's sweep regenerated every
+list on this page: the ones it replaced had been written against the superseded SQL, and were wrong
+in both directions - names the view never had, and columns 0009 added to every tenant view. `code:agent_docs_match_surface` re-checks them against the catalog, so this cannot quietly rot again)
+- `id` - The view's own key, carried from the underlying row
 - `parent_id` - Parent communication ID
 - `thread_root_id` - Root of conversation thread
+- `started_at` - Timestamp
 - `entity_name` - Entity name
 - `contact_name` - Contact name
 - `communication_type` - Type
-- `started_at` - Timestamp
+- `subject` - The line a human would recognise as what it was about
+- `summary` - What happened, in the space the schema budgets for it
+- `outcome` - How the interaction ended, from the CHECKed list in `vw_domain_vocabulary`
+- `tenant_id` - Whose row this is. Every tenant-coded view exposes it last (0009), which is what makes an agent's and an auditor's result sets differ without two views
 
 **Use Case:** Reconstructing conversation flows
 
@@ -203,16 +264,22 @@ SELECT * FROM agent_first_erp_crm.vw_communication_thread;
 Summary of activity per bot agent.
 
 ```sql
-SELECT * FROM agent_first_erp_crm.vw_agent_activity_summary;
+SELECT * FROM vw_agent_activity_summary;
 ```
 
-**Columns:**
-- `bot_id` - Agent identifier
+**Columns:** (in declared order, read from `pg_attribute`. T4's sweep regenerated every
+list on this page: the ones it replaced had been written against the superseded SQL, and were wrong
+in both directions - names the view never had, and columns 0009 added to every tenant view. `code:agent_docs_match_surface` re-checks them against the catalog, so this cannot quietly rot again)
+- `agent_id` - Which agent recorded the row; `agent_interactions.bot_id` is the same idea on the trajectory side, and this view groups by `agent_id` because that is the column `communications` has
 - `total_actions` - Total actions performed
 - `unique_entities` - Unique entities served
+- `unique_contacts` - How many people, which is not the same count
 - `resolved_count` - Resolved communications
+- `escalated_count` - Interactions escalated to someone
 - `avg_sentiment` - Average sentiment
 - `last_activity` - Last activity timestamp
+- `first_activity` - The earliest row this agent wrote
+- `tenant_id` - Whose row this is. Every tenant-coded view exposes it last (0009), which is what makes an agent's and an auditor's result sets differ without two views
 
 **Use Case:** Performance monitoring, workload balancing
 
@@ -226,7 +293,9 @@ Every interaction the caller's row security reaches, newest first **if the calle
 SELECT * FROM vw_recent_interactions;
 ```
 
-**Columns:** (read from `pg_attribute`; the list this page carried before 0017 described a view that did not exist)
+**Columns:** (in declared order, read from `pg_attribute`. T4's sweep regenerated every
+list on this page: the ones it replaced had been written against the superseded SQL, and were wrong
+in both directions - names the view never had, and columns 0009 added to every tenant view. `code:agent_docs_match_surface` re-checks them against the catalog, so this cannot quietly rot again)
 - `tenant_id` - Which tenant's run this is
 - `interaction_id` - The `agent_interactions` primary key
 - `timestamp` - When the run happened
@@ -254,7 +323,9 @@ Runs that ended with an `error_message`. That column is **run-level**, so this a
 SELECT * FROM vw_failed_interactions;
 ```
 
-**Columns:** (read from `pg_attribute`; the list this page carried before 0017 described a view that did not exist)
+**Columns:** (in declared order, read from `pg_attribute`. T4's sweep regenerated every
+list on this page: the ones it replaced had been written against the superseded SQL, and were wrong
+in both directions - names the view never had, and columns 0009 added to every tenant view. `code:agent_docs_match_surface` re-checks them against the catalog, so this cannot quietly rot again)
 - `tenant_id` - Which tenant's run this is
 - `interaction_id` - The `agent_interactions` primary key
 - `timestamp` - When it failed
@@ -281,7 +352,9 @@ One row per tool invocation, derived from `agent_interactions` by position: step
 SELECT * FROM vw_tool_calls;
 ```
 
-**Columns:** (read from `pg_attribute`; the list this page carried before 0017 described a view that did not exist)
+**Columns:** (in declared order, read from `pg_attribute`. T4's sweep regenerated every
+list on this page: the ones it replaced had been written against the superseded SQL, and were wrong
+in both directions - names the view never had, and columns 0009 added to every tenant view. `code:agent_docs_match_surface` re-checks them against the catalog, so this cannot quietly rot again)
 - `tenant_id` - Whose call this was
 - `interaction_id` - The run the call belongs to
 - `conversation_id` - Conversation
@@ -310,7 +383,9 @@ Per tool, per tenant: calls, runs, the mean duration of the runs that used it, a
 SELECT * FROM vw_tool_performance;
 ```
 
-**Columns:** (read from `pg_attribute`; the list this page carried before 0017 described a view that did not exist)
+**Columns:** (in declared order, read from `pg_attribute`. T4's sweep regenerated every
+list on this page: the ones it replaced had been written against the superseded SQL, and were wrong
+in both directions - names the view never had, and columns 0009 added to every tenant view. `code:agent_docs_match_surface` re-checks them against the catalog, so this cannot quietly rot again)
 - `tenant_id` - Aggregate key - without it two tenants' usage adds together
 - `tool_name` - The tool
 - `call_count` - Invocations in this tenant
@@ -336,7 +411,23 @@ SELECT warehouse_name, category_name, currency_code, sum(total_value) AS value
  ORDER BY 1, 2, 3;
 ```
 
-**Columns:** (read from `pg_attribute`; the four listed here before 0018 described a view with
+**Columns:** (in declared order, read from `pg_attribute`. T4's sweep regenerated every
+list on this page: the ones it replaced had been written against the superseded SQL, and were wrong
+in both directions - names the view never had, and columns 0009 added to every tenant view. `code:agent_docs_match_surface` re-checks them against the catalog, so this cannot quietly rot again)
+- `warehouse_id` - The `warehouses` row this is about
+- `warehouse_name` - The warehouse's name
+- `warehouse_type` - What the warehouse is for
+- `category_id` - The `item_categories` row this is about
+- `category_name` - The category's name
+- `unique_items` - How many distinct items the group holds
+- `total_units` - How many of this item, across the group
+- `total_value` - Units times cost, summed within the group and no further
+- `available_value` - The value of what could actually be shipped
+- `currency_code` - What the numbers on this row are in. Nothing converts (0018)
+- `tenant_id` - Whose row this is. Every tenant-coded view exposes it last (0009), which is what makes an agent's and an auditor's result sets differ without two views
+
+different names and no `tenant_id`)
+
 different names and no `tenant_id`)
 - `warehouse_id` - Which warehouse
 - `warehouse_name` - Its name
@@ -348,6 +439,7 @@ different names and no `tenant_id`)
 - `total_value` - On-hand value at average cost
 - `available_value` - Value of what is not reserved
 - `currency_code` - **Added by 0018, and the reason the three numbers above changed grain.** An item's
+
   balances are in the item's currency; a warehouse holds many items, so summing `quantity * cost`
   across a USD item and a JPY item is dollars plus yen. Grouping by it is 0009's argument about
   `tenant_id` applied to the other axis of the same SELECT list. Nothing converts: there is no
@@ -369,18 +461,32 @@ SELECT from_currency, to_currency, rate_in_force, in_force
  WHERE from_currency = 'JPY';
 ```
 
-**Columns:** (read from `pg_attribute`, built by `db/migrations/0018_currencies.sql`)
+**Columns:** (in declared order, read from `pg_attribute`. T4's sweep regenerated every
+list on this page: the ones it replaced had been written against the superseded SQL, and were wrong
+in both directions - names the view never had, and columns 0009 added to every tenant view. `code:agent_docs_match_surface` re-checks them against the catalog, so this cannot quietly rot again)
 - `from_currency` - Left side of the pair
 - `to_currency` - Right side. Both come from `currency_rates`, so a pair nobody has quoted is absent
+- `rate_in_force` - The number to multiply by, or NULL when no row is in force
+- `valid_from` - When this row's authority starts
+- `valid_to` - And ends; NULL means still in force
+- `source` - Where the quote came from
+- `in_force` - Whether a row covers the instant the view was asked at
+- `rows_for_pair` - How many rows the pair has ever had, so *expired* and *never quoted* read differently
+- `as_of` - The instant the view measured at - a `now()` in a view answers a different question on every scan, so it is named
+
+  from this view rather than present with NULLs - which is what makes `rows_for_pair` meaningful.
+
   from this view rather than present with NULLs - which is what makes `rows_for_pair` meaningful.
 - `rate_in_force` - The number, or NULL when the pair has no row covering now
 - `valid_from` / `valid_to` - The window that row covers; NULL `valid_to` means it is the open row
 - `source` - Where the number came from; NULL is information (an unattributed rate)
 - `in_force` - Whether a covering row exists at all. `false` with `rows_for_pair > 0` means
+
   *expired*, which is a different fact from a pair that has no rows; conflating them is how a rate
   table stops being trusted by the person reading it
 - `rows_for_pair` - How much history this pair has
 - `as_of` - `now()`, stated rather than implicit: a view that quietly contains a clock answers a
+
   different question on every scan
 
 **Use Case:** Asking whether a conversion is even possible. Nothing in the schema reads this view
@@ -394,16 +500,38 @@ a record with a status, not an input to arithmetic yet.
 Stock levels across warehouses.
 
 ```sql
-SELECT * FROM agent_first_erp_crm.vw_item_availability;
+SELECT * FROM vw_item_availability;
 ```
 
-**Columns:**
+**Columns:** (in declared order, read from `pg_attribute`. T4's sweep regenerated every
+list on this page: the ones it replaced had been written against the superseded SQL, and were wrong
+in both directions - names the view never had, and columns 0009 added to every tenant view. `code:agent_docs_match_surface` re-checks them against the catalog, so this cannot quietly rot again)
+- `item_id` - The `inventory_items` row this is about
 - `sku` - Item SKU
-- `item_name` - Item name
+- `name` - The entity's or item's own name column
+- `base_unit_of_measure` - What the quantity means, from `units_of_measure`
+- `category_id` - The `item_categories` row this is about
+- `category_name` - The category's name
+- `warehouse_id` - The `warehouses` row this is about
 - `warehouse_name` - Warehouse name
+- `warehouse_code` - The warehouse's code
+- `location_id` - The `locations` row this is about
+- `location_code` - The bin's code
 - `quantity_on_hand` - Total quantity
 - `quantity_available` - Available quantity
+- `quantity_reserved` - What is committed and still on the shelf
+- `quantity_in_transit` - Expected, not arrived
+- `reorder_point` - Below this, the item is on the list
+- `safety_stock` - The buffer the reorder arithmetic keeps
+- `lead_time_days` - How long a replenishment takes, per supplier
+- `is_serialized` - Whether the item is tracked by serial number
+- `is_lot_controlled` - Whether the item is tracked by lot
+- `expiry_date` - When a tracked lot stops being good
+- `average_cost` - The item's cost as this balance carries it, in `cost_currency`
+- `cost_currency` - Which currency `average_cost` is in
 - `stock_status` - NORMAL/LOW_STOCK/CRITICAL/OUT_OF_STOCK
+- `needs_reorder` - Whether the level is at or below the reorder point
+- `tenant_id` - Whose row this is. Every tenant-coded view exposes it last (0009), which is what makes an agent's and an auditor's result sets differ without two views
 
 **Use Case:** Checking item availability
 
@@ -414,10 +542,24 @@ SELECT * FROM agent_first_erp_crm.vw_item_availability;
 30-day movement patterns, grouped by item, day, and movement type.
 
 ```sql
-SELECT * FROM agent_first_erp_crm.vw_item_movement_summary;
+SELECT * FROM vw_item_movement_summary;
 ```
 
-**Columns:** (read from `pg_attribute`, not from the earlier draft of this page, which named
+**Columns:** (in declared order, read from `pg_attribute`. T4's sweep regenerated every
+list on this page: the ones it replaced had been written against the superseded SQL, and were wrong
+in both directions - names the view never had, and columns 0009 added to every tenant view. `code:agent_docs_match_surface` re-checks them against the catalog, so this cannot quietly rot again)
+- `item_id` - The `inventory_items` row this is about
+- `movement_date` - The day the movements happened
+- `movement_type` - RECEIPT, ISSUE, TRANSFER, ADJUSTMENT, RETURN or RESERVATION
+- `net_quantity` - What the stock level moved by, reservations included
+- `movement_count` - How many ledger rows the window holds
+- `avg_unit_cost` - Mean cost per unit over the window
+- `total_inbound` - Receipts in the window, reservations excluded - a commitment makes stock unavailable, it moves nothing (0019's note)
+- `total_outbound` - Issues in the window, reservations excluded, for the same reason
+- `tenant_id` - Whose row this is. Every tenant-coded view exposes it last (0009), which is what makes an agent's and an auditor's result sets differ without two views
+
+five columns this view has never had)
+
 five columns this view has never had)
 - `item_id` - The item the movements are for
 - `movement_date` - Day, truncated
@@ -440,16 +582,29 @@ counts in `net_quantity` and in neither of the two direction columns - see
 Items below reorder point.
 
 ```sql
-SELECT * FROM agent_first_erp_crm.vw_low_stock_alerts;
+SELECT * FROM vw_low_stock_alerts;
 ```
 
-**Columns:**
+**Columns:** (in declared order, read from `pg_attribute`. T4's sweep regenerated every
+list on this page: the ones it replaced had been written against the superseded SQL, and were wrong
+in both directions - names the view never had, and columns 0009 added to every tenant view. `code:agent_docs_match_surface` re-checks them against the catalog, so this cannot quietly rot again)
+- `item_id` - The `inventory_items` row this is about
 - `sku` - Item SKU
-- `item_name` - Item name
-- `warehouse_name` - Warehouse name
-- `quantity_available` - Available quantity
+- `name` - The entity's or item's own name column
 - `reorder_point` - Reorder threshold
-- `shortage_amount` - How much below threshold
+- `safety_stock` - The buffer the reorder arithmetic keeps
+- `lead_time_days` - How long a replenishment takes, per supplier
+- `category_id` - The `item_categories` row this is about
+- `category_name` - The category's name
+- `warehouse_id` - The `warehouses` row this is about
+- `warehouse_name` - Warehouse name
+- `quantity_on_hand` - What the count says is there
+- `quantity_available` - Available quantity
+- `quantity_in_transit` - Expected, not arrived
+- `total_available` - Available across every row the group covers
+- `alert_level` - The same comparison, named for the alert rather than for the shelf
+- `stock_percentage` - How far the level is from full, as a number the UI can bar
+- `tenant_id` - Whose row this is. Every tenant-coded view exposes it last (0009), which is what makes an agent's and an auditor's result sets differ without two views
 
 **Use Case:** Replenishment tasks
 
@@ -465,7 +620,7 @@ SELECT
     summary,
     outcome,
     sentiment_label
-FROM agent_first_erp_crm.customer_communications_summary
+FROM customer_communications_summary
 WHERE entity_id = 123
 ORDER BY started_at DESC
 LIMIT 10;
@@ -480,7 +635,7 @@ SELECT
     follow_up_action,
     follow_up_date,
     priority
-FROM agent_first_erp_crm.pending_followups
+FROM pending_followups
 WHERE priority IN ('high', 'critical')
 ORDER BY follow_up_date ASC;
 ```
@@ -492,7 +647,7 @@ SELECT
     bot_id,
     total_actions,
     ROUND(avg_sentiment::numeric, 2) as avg_sentiment
-FROM agent_first_erp_crm.agent_activity_summary
+FROM agent_activity_summary
 ORDER BY total_actions DESC;
 ```
 
@@ -505,7 +660,7 @@ SELECT
     warehouse_name,
     quantity_available,
     stock_status
-FROM agent_first_erp_crm.vw_item_availability
+FROM vw_item_availability
 WHERE sku = 'WIDGET-A';
 ```
 
@@ -516,15 +671,15 @@ WHERE sku = 'WIDGET-A';
 To create a new view:
 
 ```sql
-CREATE OR REPLACE VIEW agent_first_erp_crm.vw_my_custom_view AS
+CREATE OR REPLACE VIEW vw_my_custom_view AS
 SELECT 
     e.name as entity_name,
     c.first_name || ' ' || c.last_name as contact_name,
     comm.summary
-FROM agent_first_erp_crm.entities e
-JOIN agent_first_erp_crm.entity_relationships er ON er.entity_id = e.id
-JOIN agent_first_erp_crm.contacts c ON c.id = er.contact_id
-JOIN agent_first_erp_crm.communications comm ON comm.entity_id = e.id
+FROM entities e
+JOIN entity_relationships er ON er.entity_id = e.id
+JOIN contacts c ON c.id = er.contact_id
+JOIN communications comm ON comm.entity_id = e.id
 WHERE comm.started_at >= NOW() - INTERVAL '30 days';
 ```
 

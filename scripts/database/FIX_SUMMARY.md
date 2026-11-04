@@ -1,5 +1,12 @@
 # Customer Functions Fix Summary
 
+<!-- docs-check: historical-record
+     A dated record of one debugging session. Its value is that it quotes what the tools and the SQL
+     files said before the fix, including the `agent_first_erp_crm.` qualification that review 3.1
+     later measured was never created by any migration. scripts/docs/check_agent_docs.sh §5 skips
+     marked files for that reason: de-qualifying a record would make it describe an edit nobody made.
+     The live surface is db/README.md and agents/customer_service/README.md, not this page. -->
+
 ## Problem
 The customer service bot tools (`add_customer_tool`, `update_customer_tool`, `get_followup_customers_tool`) were broken because they were calling PostgreSQL functions that didn't exist in the `agent_first_erp_crm` schema.
 

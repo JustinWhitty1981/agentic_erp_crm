@@ -3,7 +3,6 @@ Update Customer Tool - Update existing customer information.
 """
 
 import re
-from datetime import datetime
 from typing import Optional
 from langchain_core.tools import tool
 import psycopg2
@@ -116,7 +115,7 @@ def update_customer_tool(
         with conn.cursor() as cur:
             # Call the update_customer function
             query = """
-                SELECT * FROM agent_first_erp_crm.update_customer(
+                SELECT * FROM update_customer(
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
             """
@@ -128,19 +127,13 @@ def update_customer_tool(
             
             result = cur.fetchone()
             success, entity_id, contact_id, message = result
-            
-            if success:
-                # Log the update to communications
-                cur.execute("""
-                    INSERT INTO agent_first_erp_crm.communications 
-                    (entity_id, contact_id, communication_type, direction, summary, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                """, (
-                    entity_id, contact_id, 'system', 'outbound',
-                    f'Customer information updated: {first_name or ""} {last_name or ""}',
-                    datetime.now()
-                ))
-            
+
+            # See add_customer.py for why no `communications` row is written here. The shorter
+            # version: 'system' is not in that column's CHECK list, so the INSERT this replaces
+            # raised 23514 and the rollback undid the update it was meant to describe, and the
+            # change is in audit_log anyway - one row per row-change, with the actor, which is what
+            # a field edit is. `communications` is for contact with a customer.
+
             conn.commit()
             return message if success else f"Failed to update customer: {message}"
     

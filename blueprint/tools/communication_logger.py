@@ -1,12 +1,26 @@
 """
 Communication Logger Tools
 
-Example implementations for logging customer communications to the database.
-These tools demonstrate patterns for recording interactions, tracking outcomes, and maintaining audit trails.
+Patterns for recording interactions, tracking outcomes and reading them back. Two rules run through
+this file, and both are here because the earlier revision broke them:
+
+  - **A write goes through `add_communication` in SQL, never through an INSERT here.** The CHECK
+    constraints, the tenant predicate and the idempotency claim live in the database; an INSERT in a
+    tool restates some of them and silently skips the rest, which is finding 4.5. The visible symptom
+    was a `WHERE name ILIKE %s LIMIT 1` that filed an interaction against whichever customer the scan
+    reached first, with no error to report it.
+  - **A read names a `vw_*` view.** The views are the published answer to "what may an agent ask
+    about" (ADR-003); a hand-composed join to `entities` is a second copy of that decision, and it
+    rots the day the view changes.
+
+This module is also the reason the whole file was worth reading: until now it did not import. The
+`query` assignment in get_communication_history was indented one level past its own block, so Python
+raised IndentationError on import - and nothing caught it, because `bot.py` imports
+`tools/add_communication.py` instead of this file. Documentation that happens to be executable has to
+stay executable, or it is not documentation.
 """
 
 import psycopg2
-from datetime import datetime
 from typing import Optional
 import os
 from dotenv import load_dotenv
@@ -68,61 +82,50 @@ def log_communication(
 
     try:
         with conn.cursor() as cur:
-            # First, get the entity_id from the customers view
+            # The row is created by add_communication in SQL, not here. Finding 4.5 is this
+            # function's earlier shape: it resolved the customer itself with
+            # `WHERE name ILIKE %s LIMIT 1` and then INSERTed. That query keeps whichever row the scan
+            # reaches first and discards the rest without an error, so two customers sharing a
+            # substring meant filing a real interaction against the wrong one - and the trail then
+            # recorded the mistake faithfully. The function refuses that case and lists the
+            # candidates instead, which is not something a caller-side INSERT can do.
+            #
+            # No contact_id is passed, and this function used to fill one in by looking up the
+            # entity's primary contact. That treats an `entities -> contacts` relationship as evidence
+            # of a conversation, and it makes the row show up in vw_primary_contact_communications, a
+            # view whose whole meaning is "interactions with this person". contact_id is what the
+            # caller was told, or nothing.
             cur.execute(
-                "SELECT id FROM agent_first_erp_crm.vw_customers WHERE name ILIKE %s LIMIT 1",
-                (f"%{customer_name}%",)
+                """SELECT success, communication_id, entity_id, message
+                   FROM add_communication(
+                       p_customer_name := %s,
+                       p_communication_type := %s,
+                       p_direction := %s,
+                       p_subject := %s,
+                       p_summary := %s,
+                       p_outcome := %s,
+                       p_sentiment_label := %s,
+                       p_agent_id := %s,
+                       p_follow_up_required := %s,
+                       p_follow_up_date := %s)""",
+                (customer_name, communication_type, direction, subject, summary,
+                 outcome, sentiment, agent_name, follow_up_required, follow_up_date),
             )
-            entity_row = cur.fetchone()
-            
-            if not entity_row:
-                return f"Could not find customer '{customer_name}' in the system."
-            
-            entity_id = entity_row[0]
-            
-            # Get contact_id if available
-            contact_id = None
-            cur.execute("""
-                SELECT c.id 
-                FROM agent_first_erp_crm.contacts c
-                JOIN agent_first_erp_crm.entity_relationships er ON c.id = er.contact_id
-                WHERE er.entity_id = %s AND er.is_primary = TRUE
-                LIMIT 1
-            """, (entity_id,))
-            contact_row = cur.fetchone()
-            if contact_row:
-                contact_id = contact_row[0]
-            
-            now = datetime.now()
-            
-            # Prepare the summary with agent name if provided
-            final_summary = summary
-            if agent_name:
-                final_summary = f"Handled by {agent_name}. {summary}"
-            
-            # Insert into communications table
-            cur.execute("""
-                INSERT INTO agent_first_erp_crm.communications 
-                (entity_id, contact_id, communication_type, direction, subject, summary, 
-                 outcome, sentiment_label, follow_up_required, follow_up_date, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING id
-            """, (
-                entity_id, contact_id, communication_type, direction, subject,
-                final_summary, outcome, sentiment, follow_up_required, 
-                follow_up_date, now
-            ))
-            
-            comm_id = cur.fetchone()[0]
+            success, comm_id, entity_id, message = cur.fetchone()
             conn.commit()
-            
+
+            if not success:
+                # The refusal is the database's sentence, and it already explains itself: the name was
+                # ambiguous or unknown, the flag and the date disagreed, or a value is outside its
+                # CHECK list. Re-wording it here would be a second copy of a rule with two owners.
+                return f"⚠️  Communication not logged: {message}"
+
             response = (
                 f"✅ Communication logged successfully!\n\n"
                 f"📋 Details:\n"
                 f"   Customer: {customer_name}\n"
                 f"   Type: {direction.upper()} {communication_type}\n"
-                f"   Time: {now.strftime('%Y-%m-%d %H:%M')}\n"
-                f"   Summary: {final_summary}"
+                f"   Summary: {summary}"
             )
             
             if subject:
@@ -274,16 +277,20 @@ def get_communication_history(
 
     try:
         with conn.cursor() as cur:
-                query = """
-                    SELECT id, started_at, communication_type, direction, subject, summary,
-                           outcome, sentiment_label, follow_up_required, follow_up_date
-                    FROM agent_first_erp_crm.communications c
-                    JOIN agent_first_erp_crm.entities e ON c.entity_id = e.id
-                    WHERE e.name ILIKE %s 
-                    AND c.started_at >= NOW() - INTERVAL '%s days'
-                    ORDER BY c.started_at DESC
-                    LIMIT %s
-                """
+            # One view, one predicate, no join composed here. vw_customer_communications_summary
+            # already resolves the entity name (ADR-003), and make_interval takes the day count as a
+            # parameter instead of INTERVAL '%s days', which only works because psycopg2 substitutes
+            # textually - a server-side prepared statement would reject it, and a reader cannot tell
+            # from the source which driver a caller uses.
+            query = """
+                SELECT id, started_at, communication_type, direction, subject, summary,
+                       outcome, sentiment_label, follow_up_required, follow_up_date
+                FROM vw_customer_communications_summary
+                WHERE entity_name ILIKE %s
+                  AND started_at >= now() - make_interval(days => %s)
+                ORDER BY started_at DESC
+                LIMIT %s
+            """
             cur.execute(query, (f"%{customer_name}%", days, limit))
             rows = cur.fetchall()
             
@@ -330,26 +337,45 @@ def get_follow_ups(due_date: Optional[str] = None, status: str = "pending") -> s
 
     try:
         with conn.cursor() as cur:
+            # `status` is the parameter this function declared and never read, which 0022 found in
+            # get_followup_customers at the same time: a DEFAULTed argument no statement uses is a
+            # dial that turns nothing. It filters on outcome now, using the same split 0022's
+            # "Unresolved communication" branch uses - pending and escalated still need someone,
+            # resolved and closed do not - so the two follow-up paths cannot disagree about what
+            # "still open" means.
+            #
+            # The rows come from communications, not from vw_pending_followups. That view reads the
+            # `followups` table, which has no writer anywhere in the schema (0021 §5 hands the decision
+            # to whoever owns the task queue); following it here would make this function answer "no
+            # follow-ups" forever, quietly.
+            unresolved = """(outcome IS NULL OR outcome IN ('pending', 'escalated'))"""
+            if status == "completed":
+                where_status = "outcome IN ('resolved', 'closed')"
+            elif status == "pending":
+                where_status = unresolved
+            else:
+                return (f"status must be 'pending' or 'completed', not '{status}'. Those are the two "
+                        f"readings of outcome the column's vocabulary supports; 'open' and 'done' are "
+                        f"not members of it.")
+
             if due_date:
-                query = """
-                    SELECT c.id, e.name as entity_name, c.started_at, 
-                           c.communication_type, c.summary, c.follow_up_date
-                    FROM agent_first_erp_crm.communications c
-                    JOIN agent_first_erp_crm.entities e ON c.entity_id = e.id
-                    WHERE c.follow_up_required = TRUE
-                    AND c.follow_up_date = %s
-                    ORDER BY c.follow_up_date, c.started_at DESC
+                query = f"""
+                    SELECT id, entity_name, started_at, communication_type, summary, follow_up_date
+                    FROM vw_customer_communications_summary
+                    WHERE follow_up_required = TRUE
+                      AND follow_up_date = %s
+                      AND {where_status}
+                    ORDER BY follow_up_date, started_at DESC
                 """
                 cur.execute(query, (due_date,))
             else:
-                query = """
-                    SELECT c.id, e.name as entity_name, c.started_at,
-                           c.communication_type, c.summary, c.follow_up_date
-                    FROM agent_first_erp_crm.communications c
-                    JOIN agent_first_erp_crm.entities e ON c.entity_id = e.id
-                    WHERE c.follow_up_required = TRUE
-                    AND c.follow_up_date >= CURRENT_DATE
-                    ORDER BY c.follow_up_date, c.started_at DESC
+                query = f"""
+                    SELECT id, entity_name, started_at, communication_type, summary, follow_up_date
+                    FROM vw_customer_communications_summary
+                    WHERE follow_up_required = TRUE
+                      AND follow_up_date >= CURRENT_DATE
+                      AND {where_status}
+                    ORDER BY follow_up_date, started_at DESC
                     LIMIT 50
                 """
                 cur.execute(query)

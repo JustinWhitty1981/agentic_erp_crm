@@ -237,6 +237,26 @@ CASES=(
 "6_5_money_currency|the balance a door created for a JPY item is kept in|6.5|0018_currencies"
 "6_5_money_currency|there is no rate history anywhere|6.5|0018_currencies"
 "6_5_money_currency|is outside the candidate set|6.5|0018_currencies"
+# 4.5's remaining half is the customer service agent's own surface, and it is three findings
+# wearing one number: a write path that lived in a Python file, a read path whose parameter
+# reached no comparison, and an agent memory that lived in a container directory. Each row below
+# prints from an existence guard on a pre-fix database and from a failure branch on a post-fix
+# one, which is the pair that lets the report say KNOWN-OPEN and CLOSED honestly and REGRESSION
+# if either ever comes back. 7a's "the refusal wrote a row" is scoped to this file by the
+# per-file grep, so a similar phrase elsewhere cannot satisfy it.
+"4_7_cs_agent_surface|there is no door for interactions|4.5|0021_communication_write"
+"4_7_cs_agent_surface|an ambiguous name was resolved anyway|4.5|0021_communication_write"
+"4_7_cs_agent_surface|the refusal wrote a row|4.5|0021_communication_write"
+"4_7_cs_agent_surface|one idempotency key produced|4.5|0021_communication_write"
+"4_7_cs_agent_surface|no door to create the interaction it tests|4.5|0021_communication_write"
+"4_7_cs_agent_surface|the threshold is decorative|4.5|0022_followup_threshold"
+"4_7_cs_agent_surface|moves the answer the wrong way|4.5|0022_followup_threshold"
+"4_7_cs_agent_surface|labels it the interaction time|4.5|0022_followup_threshold"
+"4_7_cs_agent_surface|cannot fire (rows=|4.5|0022_followup_threshold"
+"4_7_cs_agent_surface|memory lives outside the database|ADR-002|0023_agent_memory"
+"4_7_cs_agent_surface|normalisation is not agreed|ADR-002|0023_agent_memory"
+"4_7_cs_agent_surface|append-only is a comment, not a wall|ADR-002|0023_agent_memory"
+"4_7_cs_agent_surface|attaches by census is missing|ADR-002|0023_agent_memory"
 )
 
 echo

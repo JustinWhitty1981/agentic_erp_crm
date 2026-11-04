@@ -42,17 +42,27 @@ For every interaction, we capture:
 
 ## Database Schema
 
-The `agent_interactions` table is created by running:
-
-```bash
-psql -h {your-database-host} -U {your-username} -d {your-database-name} -f scripts/database/11_interaction_logging.sql
-```
+`agent_interactions` is created by `db/migrations/0001_baseline_canonical_port.sql` and altered by the
+migrations after it; apply the directory in filename order (`scripts/db/db up`) rather than any single
+file. The page that lists which of the numbered `scripts/database/*.sql` files are superseded, and why
+this one is among them, is `db/README.md` - and 0017's finding about that file is the reason this
+section used to tell you to run it: 0001 ported the *table* out of it and left its *views* behind, so
+the debugging instructions on this page raised 42P01 for as long as they pointed there.
 
 Key fields:
-- `agent_thoughts[]`: Array of thought strings
-- `actions_taken[]`: JSON array of tool calls
-- `tool_observations[]`: JSON array of tool outputs
-- Full-text search enabled on `human_input`
+- `agent_thoughts text[]`: one entry per reasoning step
+- `actions_taken jsonb`: a JSON **array**, one object per tool call, in the order they ran
+- `tool_observations jsonb`: a JSON array, same order - the pairing `vw_tool_calls` depends on, which is
+  why a writer must append to both in one loop
+- `run_id`: NOT NULL, and the key a retry is claimed under (`idempotency_keys`, ADR-005). A writer that
+  omits it fails with 23502, which is what `interaction_logger.py` did until this session
+- `response_sources jsonb`: which records the answer was built from, collected as the tools ran
+- `error_message`: why the run failed. **Per run**, not per call - which is why `vw_tool_calls` labels a
+  column `run_errored` rather than pretending to know which call broke
+
+There is **no full-text index** on `human_input`, and this page claimed there was one. Searching the
+trajectory is a `LIKE` or an `ILIKE` over the rows a caller's row security reaches, which on a large
+table is a scan; `idx_timestamp` and `idx_agent_interactions_tenant_time` are what bounds it.
 
 ## Usage in Code
 
@@ -77,7 +87,9 @@ log_id = log_agent_trajectory(
 
 ### In the Telegram Bot
 
-The `bot_with_logging.py` file automatically logs all interactions:
+The blueprint's `bot.py` logs every turn it serves. (`bot_with_logging.py` is the name this page used
+for it; that file is not in the repository, which is the kind of thing `T4`'s check looks for in the
+docs rather than in the code.)
 
 ```python
 # AgentExecutor is created with return_intermediate_steps=True

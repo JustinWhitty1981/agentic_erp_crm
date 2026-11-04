@@ -98,10 +98,11 @@ The agent uses the `agent_first_erp_crm` schema in PostgreSQL:
 - `addresses` - Customer addresses
 - `communications` - Communication history
 
-**Key Views**:
-- `customers` - Backward compatibility view
-- `recent_communications` - Last 7 days of communications
-- `entity_communication_stats` - Aggregated metrics
+**Key Views** (all in `public`; the names below are the views, not tables - `vw_` is the prefix, and
+`blueprint/docs/views.md` lists each one's columns against `pg_attribute`):
+- `vw_customers` - Backward compatibility view over `entities` and `contacts`
+- `vw_recent_communications` - Last 7 days of communications
+- `vw_entity_communication_stats` - Aggregated metrics
 
 **Custom Functions** (in `docs/database/09_customer_functions.sql`):
 - `add_customer()` - Add customer with validation

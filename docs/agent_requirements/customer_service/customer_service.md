@@ -3,7 +3,17 @@
 ## Core Identity
 - **Role:** First-line support for customer inquiries.
 - **Interface:** Telegram (Natural Language).
-- **Database Access:** Read/Write to `customers`, `communications`, `vw_entity_communication_stats`.
+- **Database Access:** Reads through the `vw_*` views the schema publishes (`vw_customers`,
+  `vw_customer_communications_summary`, `vw_entity_communication_stats`); writes only through
+  `add_customer`, `update_customer`, `add_communication` and `mark_customer_followup`. The first draft
+  of this line said "Read/Write to `customers`, `communications`" - a table that is a view, and a table
+  no caller may write to directly, which is the arrangement 0021 exists to make true. Worth knowing, because it changes what "through the database" buys: all four functions are
+  **security invoker** (`prosecdef = false`, measured), and `afpc_app` holds `INSERT` on
+  `communications` directly. So the door is not a privilege boundary - an agent with the grant could
+  skip it - it is a *single implementation*: the CHECKs, the name resolution, the thread root and the
+  claim ladder exist in one place, so a caller that bypasses the door does not gain access it lacks, it
+  loses the rules. That is what `code:cs_writes_through_doors` watches, and why the rule is checked in
+  code rather than granted in SQL.
 - **Implementation:** Follows the blueprint pattern (`blueprint/bot.py`).
 
 ## Functional Requirements
@@ -48,32 +58,59 @@
 - CAO validates by re-querying the database to confirm the change.
 - Failed validations trigger an immediate alert to the human owner.
 
-## Blueprint Implementation Details
+## Implementation
 
-The customer service agent is implemented in `blueprint/bot.py` with:
+Two implementations exist, and they share the requirements and the rules:
+
+- **Deployed**: `agents/customer_service/` - Go backend, HTTP and SSE, React UI. The reference for what
+  this agent actually does.
+- **Reference**: `blueprint/` - the same surface in Python and LangChain, on Telegram. Read it for the
+  pattern; do not deploy it and expect this schema.
 
 ### Tools
-| Tool | Purpose | Database Query |
+
+| Tool | Purpose | How it reaches the data |
 |------|---------|----------------|
-| `get_customer_info` | Look up customer by name | `SELECT name, email, phone, address, status FROM agent_first_erp_crm.vw_customers WHERE name ILIKE %s` |
-| `get_customer_communications` | Get recent interactions | `SELECT started_at, entity_name, communication_type, direction, summary FROM agent_first_erp_crm.vw_recent_communications` |
-| `get_entity_stats` | View communication metrics | `SELECT entity_name, entity_type, status, total_communications, resolved_count, pending_count FROM agent_first_erp_crm.vw_entity_communication_stats` |
-| `add_communication` | Log new interaction | `INSERT INTO agent_first_erp_crm.communications (entity_id, communication_type, direction, summary, started_at)` |
-| `current_time` | Get current date/time | No database query |
-| `get_followup_customers` | Get customers needing contact | `SELECT * FROM get_followup_customers(days_threshold)` |
+| `get_customer_info` | Look up customer by name, email, phone, or id | `SELECT ... FROM vw_customers WHERE ...` - one selector per call, because two `ILIKE` clauses on one row set answers for whichever column matched first |
+| `get_customer_communications` | Get recent interactions | `SELECT ... FROM vw_customer_communications_summary ... ORDER BY started_at DESC LIMIT 5` |
+| `get_entity_stats` | View communication metrics | `SELECT ... FROM vw_entity_communication_stats` |
+| `get_followup_customers` | Get customers needing contact | `SELECT * FROM get_followup_customers(p_days_threshold := 7)` - the parameter this requirement named, and which `0022` found the function had never read |
+| `add_customer` | Create a customer | `add_customer(...)`: the entity, the contact, the relationship and the address, in one function |
+| `update_customer` | Change a customer's details | `update_customer(...)`, selected by name plus a contact point |
+| `add_communication` | Log new interaction | `add_communication(...)`. **Not** an `INSERT`. This row said `INSERT INTO communications (...)` for as long as the page existed, which is requirement 5 written as a caller-side write - the shape `0021` replaced, and the reason `4_5` is a test rather than a note |
+| `mark_customer_followup` | Set or clear the follow-up mark | `mark_customer_followup(p_entity_id, p_followup)` (`0014`), which is the only door allowed to set `entities.status` after creation - so the mark is a function's decision with a grant behind it, not a tool that can write any column it names |
+| `save_memory_tool`, `get_memory_tool`, `list_memories_tool` | Remember what the caller asked the agent to remember | `save_memory` / `get_memory` / `list_memories` over `agent_memories` (`0023`). In the blueprint these are files in a directory, which is what 0023 was for |
+| `current_time` | Date and time | No database query, and the reason the tool exists at all is that a model without a clock cannot answer "since last Tuesday" |
+
+### Requirement by requirement
+
+| # | Requirement | Status | Where the gap is, if there is one |
+|---|---|---|---|
+| 1 | Retrieve customer info | Structured half done | **Semantic search is not implemented.** The hnsw indexes exist (`0012`) and nothing writes the vectors: no embedder in this deployment produces the 1536 dimensions the columns declare (measured: 1024 and 4096). "Find customers who complained about shipping last week" is therefore unimplemented rather than approximated, and a keyword tool was declined too - `communications.summary` has no trigram index, so it would be a sequential scan behind a call the agent makes constantly |
+| 2 | Update customer info | Done, with one hole | `update_customer` changes name, contact points, address and `status`. It cannot change `entity_type`, so `prospect` - a documented member of that vocabulary - has no door. That is **T2** in `db/MIGRATIONS.md`, and `code:vw_customers_filter` is the marker that keeps it visible |
+| 3 | Communication history | Done | Five most recent, per the requirement. The `vw_*` read is `security_invoker`, so what "recent" can show is what row security lets the caller see |
+| 4 | Entity statistics | Done | `vw_entity_communication_stats`, and it counts what the `communications` table holds rather than what a session remembers |
+| 5 | Log new interactions | Done through the door | `add_communication` (`0021`). Three things a caller-side `INSERT` could not promise: an ambiguous name is refused **with the candidates listed** rather than filed against whichever row the scan reached first; the six vocabularies are the CHECKs' own; and `thread_root_id` gets a writer, so a reply to a reply lands on the thread the first message started. **It creates no `followups` row** - that table has no writer anywhere in the schema, and 0021 §5 says so rather than deciding it here |
+| 6 | Follow-up customers | Done, with two caveats stated by the tool | `0022` made the threshold real and made the third reason branch reachable at all; staleness is measured on the interaction, not on the row's write time. Caveats: results are unordered, and **the function returns no status column, so a blacklisted account appears in the follow-up list** - the tool says this in its own description, because a model that is not told will present the list as "customers to call" |
+| 7 | Escalation | Detection only | Sentiment, `escalated` outcomes and `get_entity_stats` are all reachable. There is no CAO agent to route one to, so the format the requirement specifies has never been sent anywhere |
+| 8 | Agent logging | Done | One row per run in `agent_interactions`, written by `pkg/logging` (Go) or `blueprint/interaction_logger.py` (Python), with the per-call grain in `actions_taken` / `tool_observations` and `vw_tool_calls` to read it one call at a time. The requirement names `tool_logger.py`, and that file now accumulates in process memory and hands the run to the trajectory writer; it used to `CREATE TABLE` at runtime into a table that was never in the schema, which is why nothing noticed it was logging nothing |
 
 ### System Prompt Highlights
-- Proactively offers to log communications when user mentions real-world interactions.
+- Proactively offers to log communications when a user mentions real-world interactions.
 - Uses tools only when needed (doesn't force tool calls).
-- Explains errors plainly if tools fail.
+- Explains errors plainly if tools fail, including the database's own refusal - a name that matches two
+  customers is a question the agent should ask, not a guess it should make.
 - Keeps responses friendly and concise.
+- Never supplies `agent_id` or `bot_id`: those columns come from `AGENT_ROLE`, because an audit column a
+  model can type is an audit column a caller can be asked to type.
 
 ### Deployment
-- **Run:** `python bot.py` in `/home/justin/.openclaw/workspace/customer-service-bot` (background process)
-- **Model:** `ornith:35b` via Ollama at `http://{your-ollama-host}:11434`
-- **Database:** PostgreSQL at `{your-postgres-host}:5432` (database: `agent_first_erp_crm`, schema: `agent_first_erp_crm`)
-- **Telegram:** Bot token from `.env` file
-- **Note:** Not Docker-based. Runs as a native Python process.
+
+- **Run:** `docker compose up --build -d` in `agents/customer_service/` (publishes `:4550`); `python bot.py` in `blueprint/` for the reference implementation
+- **Model:** `LLM_PROVIDER=local` against an OpenAI-compatible endpoint (`VLLM_BASE_URL`), or `azure_gcc_high`
+- **Database:** PostgreSQL at `AFPC_PG_HOST:AFPC_PG_PORT`, database `agent_first_erp_crm`, and every object in **`public`**. The environment table in `agents/customer_service/README.md` explains why the host has to be an IP address
+- **Tenant:** `AFPC_TENANT_ID`, required. It is resolved once at startup and set on every pooled connection, so a per-request tenant is not something this process can be asked to fake
+- **Telegram:** in the reference implementation only. The deployed agent has no transport but HTTP and SSE, and the loop does not care which is attached
 
 ## Testing Scenarios
 

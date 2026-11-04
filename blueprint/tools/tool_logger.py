@@ -1,37 +1,45 @@
 """
 Tool Logger for Agent First ERP CRM
 
-This module provides a wrapper for LangChain tools that logs all tool calls
-and observations to PostgreSQL for full interaction tracing.
+A wrapper that records every tool invocation a run makes, so ADR-001's promise - "we log every tool
+call" - is kept by something other than a hope.
+
+This module does not touch the database, and that is the whole content of the change. It used to
+`CREATE TABLE IF NOT EXISTS agent_tool_calls` on first use and INSERT a row per call, which was wrong
+three times over:
+
+  - **Code creating schema** is the inverse of ADR-002. The table had no migration, so it existed only
+    on databases where this module happened to run, and `IF NOT EXISTS` meant a later, different
+    definition would never replace the first one it met. dev/README's "two heads" failure mode,
+    arriving from the application side.
+  - **A second tool-call table** duplicates `agent_interactions.actions_taken` / `tool_observations`,
+    which is what `vw_tool_calls` and `vw_tool_performance` derive from. Two copies of one fact, and
+    the dashboard reads the one this module never wrote to.
+  - **The DDL never ran anyway.** The INSERT was qualified to `agent_first_erp_crm`, the schema review
+    3.1 measured no migration creates, so the statement failed and `except: print` swallowed it. The
+    module's name promised a trail that was not being written, which is the most expensive kind of
+    bug: the absence is invisible exactly when it matters.
+
+So the accumulation lives here and the write lives in `interaction_logger.log_agent_trajectory`, one
+row per run, with the two arrays aligned by position - the contract `vw_tool_calls` depends on. A tool
+that runs and never gets flushed is a run that never ended; the pending calls stay in `_calls` where a
+`take()` can still find them.
 """
 
-import os
 import json
-import psycopg2
-from typing import Any, Callable
-from datetime import datetime
+import threading
+from datetime import datetime, timezone
+from typing import Any, Callable, Dict, List, Optional
+
 from langchain_core.tools import Tool
-import uuid
 
 
 class ToolLogger:
-    """Logs all tool invocations to PostgreSQL."""
-    
-    _connection_cache = None
-    
-    @classmethod
-    def get_db_connection(cls):
-        """Get or create a PostgreSQL connection."""
-        if cls._connection_cache is None:
-            cls._connection_cache = psycopg2.connect(
-                host=os.getenv("POSTGRES_HOST", "localhost"),
-                port=int(os.getenv("POSTGRES_PORT", 5432)),
-                database=os.getenv("POSTGRES_DB", "agent_first_erp_crm"),
-                user=os.getenv("POSTGRES_USER", "postgres"),
-                password=os.getenv("POSTGRES_PASSWORD", ""),
-            )
-        return cls._connection_cache
-    
+    """Accumulates the tool calls made inside one run, in process memory."""
+
+    _lock = threading.Lock()
+    _calls: Dict[str, List[Dict[str, Any]]] = {}
+
     @classmethod
     def log_tool_call(
         cls,
@@ -41,100 +49,106 @@ class ToolLogger:
         tool_input: Any,
         tool_output: Any,
         duration_ms: int,
-        error: str = None
-    ):
-        """Log a single tool invocation."""
-        conn = None
-        try:
-            conn = cls.get_db_connection()
-            cur = conn.cursor()
-            
-            # Ensure the table exists
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS agent_first_erp_crm.agent_tool_calls (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    conversation_id UUID NOT NULL,
-                    run_id TEXT NOT NULL,
-                    tool_name TEXT NOT NULL,
-                    tool_input JSONB,
-                    tool_output JSONB,
-                    duration_ms INTEGER,
-                    error_message TEXT,
-                    timestamp TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_tool_conv ON agent_first_erp_crm.agent_tool_calls(conversation_id)")
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_tool_run ON agent_first_erp_crm.agent_tool_calls(run_id)")
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_tool_name ON agent_first_erp_crm.agent_tool_calls(tool_name)")
-            
-            # Insert the tool call
-            cur.execute("""
-                INSERT INTO agent_first_erp_crm.agent_tool_calls
-                (conversation_id, run_id, tool_name, tool_input, tool_output, duration_ms, error_message)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """, (
-                conversation_id,
-                run_id,
-                tool_name,
-                json.dumps(tool_input) if not isinstance(tool_input, (str, int, float, bool, type(None))) else tool_input,
-                json.dumps(tool_output) if not isinstance(tool_output, (str, int, float, bool, type(None))) else tool_output,
-                duration_ms,
-                error
-            ))
-            
-            conn.commit()
-            cur.close()
-            
-        except Exception as e:
-            print(f"❌ Error logging tool call: {e}")
-        finally:
-            if conn:
-                try:
-                    conn.close()
-                    cls._connection_cache = None
-                except:
-                    pass
+        error: Optional[str] = None
+    ) -> None:
+        """Note one invocation against its run.
+
+        `conversation_id` is kept in the record rather than used to find one: the row this becomes is
+        keyed by run_id, and a call recorded under a run that is not the conversation's current row is
+        a mismatch worth seeing in the JSON instead of one worth silently discarding.
+
+        An empty `run_id` is the case to notice. The wrapper below takes it from the caller, and a
+        caller that lost it would otherwise append every orphan call to one bucket and the trajectory
+        would attribute an agent's whole uptime to a single run.
+        """
+        if not run_id:
+            run_id = "(unattributed)"
+        entry = {
+            "tool": tool_name,
+            "tool_input": _jsonable(tool_input),
+            "output": _jsonable(tool_output),
+            "type": "error" if error else type(tool_output).__name__,
+            "duration_ms": duration_ms,
+            "conversation_id": conversation_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        if error:
+            entry["error"] = error
+        with cls._lock:
+            cls._calls.setdefault(run_id, []).append(entry)
+
+    @classmethod
+    def pending(cls, run_id: str) -> int:
+        """How many calls are waiting to be written. A count, not a dump: the caller is usually a
+        health check or a test, and neither wants the payloads."""
+        with cls._lock:
+            return len(cls._calls.get(run_id, []))
+
+    @classmethod
+    def take(cls, run_id: str) -> List[Dict[str, Any]]:
+        """Remove and return a run's calls, in the order they ran.
+
+        Removal is part of the contract, not a convenience: a caller that logs the trajectory and then
+        crashes before the next turn would otherwise flush the same calls into a second row on retry,
+        and `vw_tool_performance` counts calls per row, so the tool would look twice as slow as it is.
+        """
+        with cls._lock:
+            return cls._calls.pop(run_id, [])
+
+
+def _jsonable(value: Any) -> Any:
+    """Anything a tool returned, as something jsonb can hold.
+
+    The old code passed a bare Python object to a jsonb column and let psycopg2 adapt it, which works
+    for dict and str and raises for anything with a __repr__ the driver cannot map - a DataFrame from a
+    hypothetical reporting tool, or a Decimal from a money column. Stringifying at the boundary makes
+    the loss visible in the record rather than in a traceback inside the logger.
+    """
+    if value is None or isinstance(value, (bool, int, float, str, dict, list)):
+        return value
+    try:
+        return json.loads(json.dumps(value, default=str))
+    except (TypeError, ValueError):
+        return str(value)
 
 
 def create_logged_tool(tool: Tool, conversation_id: str, run_id: str) -> Tool:
     """
     Wrap a tool to log all invocations.
-    
+
     Args:
         tool: The original LangChain Tool
         conversation_id: UUID for the conversation
         run_id: UUID for this specific run
-        
+
     Returns:
-        A new Tool that logs all calls to PostgreSQL
+        A new Tool that records all calls against `run_id`
+
+    The wrapper changes no behaviour of the tool it wraps: the same arguments, the same return value,
+    and an exception still propagates after being recorded. A wrapper that swallowed errors would
+    report a failed call as a successful observation, and the trail would say the agent saw something
+    it did not.
     """
     original_func = tool.func
-    
+
     def logged_func(*args, **kwargs):
         start_time = datetime.now()
         tool_input = args[0] if args else kwargs
-        
+
         try:
-            # Execute the original tool
             result = original_func(*args, **kwargs)
-            
-            # Calculate duration
             duration_ms = int((datetime.now() - start_time).total_seconds() * 1000)
-            
-            # Log the successful call
             ToolLogger.log_tool_call(
                 conversation_id=conversation_id,
                 run_id=run_id,
                 tool_name=tool.name,
                 tool_input=tool_input,
                 tool_output=result,
-                duration_ms=duration_ms
+                duration_ms=duration_ms,
             )
-            
             return result
-            
+
         except Exception as e:
-            # Log the error
             duration_ms = int((datetime.now() - start_time).total_seconds() * 1000)
             ToolLogger.log_tool_call(
                 conversation_id=conversation_id,
@@ -143,11 +157,10 @@ def create_logged_tool(tool: Tool, conversation_id: str, run_id: str) -> Tool:
                 tool_input=tool_input,
                 tool_output=None,
                 duration_ms=duration_ms,
-                error=str(e)
+                error=str(e),
             )
             raise
-    
-    # Create a new Tool with the logged function
+
     return Tool(
         name=tool.name,
         func=logged_func,
@@ -158,13 +171,18 @@ def create_logged_tool(tool: Tool, conversation_id: str, run_id: str) -> Tool:
 def create_logged_tools(tools: list, conversation_id: str, run_id: str) -> list:
     """
     Wrap all tools in a list to log their invocations.
-    
+
     Args:
         tools: List of LangChain Tools
         conversation_id: UUID for the conversation
         run_id: UUID for this specific run
-        
+
     Returns:
-        List of wrapped tools that log all calls
+        List of wrapped tools that record all calls
     """
     return [create_logged_tool(tool, conversation_id, run_id) for tool in tools]
+
+
+def logged_tools(tools: list, conversation_id: str, run_id: str) -> list:
+    """Compatibility alias for create_logged_tools."""
+    return create_logged_tools(tools, conversation_id, run_id)

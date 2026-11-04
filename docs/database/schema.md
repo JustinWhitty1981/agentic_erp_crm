@@ -1,5 +1,14 @@
 # Database Schema Design (Enterprise Edition v2.0)
 
+> **This is the design the review worked from, not the state of the database.** The tables it names
+> exist; the constraints, keys, tenancy and indexes did not when `docs/database/DATABASE_REVIEW.md`
+> read it, and 0002 through 0023 are what closed that gap. So read this page for *intent* - entity,
+> contact, relationship, communication - and `db/README.md` plus the generated
+> `tables.md`/`views.md`/`indexes.md` beside it for what `pg_catalog` actually holds. Where this page
+> promises something the catalog does not have, the catalog is right and this page is the finding. A
+> hand-maintained list of columns is how `vw_item_movement_summary` came to be documented with five
+> columns it never had (T4).
+
 This document outlines the PostgreSQL schema with PGVector support for the Agent First ERP CRM.
 **Design Philosophy:** Enterprise-grade, mirroring SAP/Oracle/Infor patterns.
 

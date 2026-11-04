@@ -2,7 +2,22 @@
 
 **Purpose:** These views simplify complex queries for both humans and agents.
 
-**Status:** SQL script created at `scripts/08_create_views.sql`. Ready to execute when database connection is restored.
+**Status:** superseded, and the sentence here used to say "ready to execute when the database
+connection is restored" - which was not a status but a wish, held for as long as nobody tried. The views
+are in the database already: created by `db/migrations/0001_baseline_canonical_port.sql`, made tenancy-
+aware by `0009`, with the interaction read path added by `0017` and `vw_currency_rates` by `0018`.
+`scripts/08_create_views.sql` is one of the superseded copies `db/README.md` lists, and running it now
+does not rewrite anything: its ten statements are qualified to `agent_first_erp_crm`, the schema review
+3.1 measured no migration creates, so the first one answers `3F000 schema "agent_first_erp_crm" does not
+exist` (measured). That is the reason this page's "ready to execute" never stopped being true and never
+stopped being a wish.
+
+The column lists on this page describe the same five-view shape `blueprint/docs/views.md` carried, and
+the same defect: `vw_item_movement_summary` listed with `sku`, `item_name`, `total_receipts`,
+`total_shipments` and `net_change`, of which the live view has none. `blueprint/docs/views.md` has been
+regenerated from `pg_attribute` and is checked against it by `code:agent_docs_match_surface`; this page
+is kept for its explanations, and its lists are not authoritative. Read `docs/database/views.md` for
+the catalog.
 
 ---
 
@@ -119,41 +134,41 @@ Or execute the SQL content directly in your database client.
 
 ### Get all communications for a specific customer
 ```sql
-SELECT * FROM agent_first_erp_crm.vw_customer_communications_summary 
+SELECT * FROM vw_customer_communications_summary 
 WHERE entity_id = 123 
 ORDER BY started_at DESC;
 ```
 
 ### Get pending follow-ups sorted by priority
 ```sql
-SELECT * FROM agent_first_erp_crm.vw_pending_followups 
+SELECT * FROM vw_pending_followups 
 WHERE priority IN ('high', 'critical');
 ```
 
 ### Get communication stats for all customers
 ```sql
 SELECT entity_name, total_communications, avg_sentiment 
-FROM agent_first_erp_crm.vw_entity_communication_stats 
+FROM vw_entity_communication_stats 
 WHERE entity_type = 'customer' 
 ORDER BY total_communications DESC;
 ```
 
 ### Get recent activity
 ```sql
-SELECT * FROM agent_first_erp_crm.vw_recent_communications 
+SELECT * FROM vw_recent_communications 
 ORDER BY started_at DESC 
 LIMIT 20;
 ```
 
 ### Get agent performance
 ```sql
-SELECT * FROM agent_first_erp_crm.vw_agent_activity_summary;
+SELECT * FROM vw_agent_activity_summary;
 ```
 
 ### Check item availability
 ```sql
 SELECT sku, item_name, warehouse_name, quantity_available, stock_status
-FROM agent_first_erp_crm.vw_item_availability
+FROM vw_item_availability
 WHERE sku = 'WIDGET-A';
 ```
 

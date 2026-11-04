@@ -3,7 +3,6 @@ Add Customer Tool - Add new customers (individuals or businesses) to the databas
 """
 
 import re
-from datetime import datetime
 from typing import Optional
 from langchain_core.tools import tool
 import psycopg2
@@ -133,7 +132,7 @@ def add_customer_tool(
         with conn.cursor() as cur:
             # Call the add_customer function with all new parameters
             query = """
-                SELECT * FROM agent_first_erp_crm.add_customer(
+                SELECT * FROM add_customer(
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
             """
@@ -145,19 +144,22 @@ def add_customer_tool(
             
             result = cur.fetchone()
             success, entity_id, contact_id, message = result
-            
-            if success:
-                # Log the creation to communications
-                cur.execute("""
-                    INSERT INTO agent_first_erp_crm.communications 
-                    (entity_id, contact_id, communication_type, direction, summary, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                """, (
-                    entity_id, contact_id, 'system', 'outbound',
-                    f'Customer record created: {first_name} {last_name}',
-                    datetime.now()
-                ))
-            
+
+            # Nothing is written to `communications` here, and an earlier revision of this file
+            # did exactly that - a "Customer record created" row typed 'system'. That type is not in
+            # the column's CHECK list, so the INSERT raised 23514 and the rollback took the new
+            # customer with it: the tool could not create a customer on this schema at all.
+            #
+            # The deeper reason to leave it out is that `communications` is the record of *contact
+            # with a customer*, and creating a row in a table is not contact. The change itself is
+            # already in the trail - 0013's audit_log keeps one row per row-change on `entities`,
+            # `contacts` and `addresses`, with the actor and the timestamp - so the INSERT was a
+            # second, weaker copy of a fact the schema records properly, and it would have shown up
+            # in `vw_customer_communications_summary` as a conversation that never happened.
+            #
+            # If a deployment wants creation events in the customer's timeline, the place to decide
+            # that is `add_customer` in SQL, so every caller gets it. Not here.
+
             conn.commit()
             return message if success else f"Failed to add customer: {message}"
     

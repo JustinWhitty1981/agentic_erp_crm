@@ -108,12 +108,20 @@ check "A7 auditor sees everything" "0002_access_grants" \
 # or force a meaningless column onto it. Checked as NOT NULL + FK + tenant-led index,
 # because a nullable tenant_id with no constraint satisfies the review's wording and
 # defeats its purpose.
+#
+# The list has grown twice since the review counted 18: 0011's idempotency_keys and 0013's
+# audit_log/audit_summary are tenancy tables the review had never seen, and 0023's
+# agent_memories is a table no finding asked for. They are here because they carry the column,
+# not because a document mentioned them - the same reason 0010's scope grew. A tenant-coded
+# table that is absent from this list is a table whose tenancy nobody checks, and B7/B26 would
+# still see it, so the honest reading of "not listed" is "not checked by B1" rather than
+# "not tenanted".
 check "B1 5.8  tenant_id everywhere" "0003_tenant_foundation" \
     "SELECT count(*) FROM (VALUES ('entities'),('contacts'),('addresses'),
         ('entity_relationships'),('communications'),('followups'),('warehouses'),
         ('locations'),('item_categories'),('inventory_items'),('inventory_movements'),
         ('inventory_on_hand'),('inventory_reservations'),('human_sessions'),('bot_actions'),
-        ('audit_summary'),('agent_interactions')) AS t(tbl)
+        ('audit_summary'),('agent_interactions'),('agent_memories')) AS t(tbl)
       WHERE NOT EXISTS (
         SELECT 1 FROM information_schema.columns c
          WHERE c.table_schema='public' AND c.table_name=t.tbl
@@ -498,6 +506,36 @@ check "B27 6.2  history is append-only by grant" "0013_audit_log" \
       WHERE x.privilege_type IN ('UPDATE', 'DELETE', 'TRUNCATE')
         AND r.rolname <> 'postgres'" \
     "roles other than the owner who could rewrite or erase audit_log"
+
+# The CRM's second write door, and the one thing about it that a probe inside 0021 cannot prove:
+# that it is still there and still closed. The behaviour is 4_7's; this is the shape. Closed to
+# PUBLIC because ALTER DEFAULT PRIVILEGES REVOKE does not fire for functions (dev/README), so the
+# only thing that keeps a NEW function from being callable by every role in the cluster is the
+# per-object REVOKE, and the only thing that keeps that REVOKE is this count.
+check "B28 4.5  the interaction door is installed and closed" "0021_communication_write" \
+    "SELECT (CASE WHEN EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'add_communication')
+                  THEN 0 ELSE 1 END)
+          + (CASE WHEN EXISTS (SELECT 1 FROM pg_proc p, aclexplode(p.proacl) x
+                                WHERE p.proname = 'add_communication'
+                                  AND x.grantee = 0 AND x.privilege_type = 'EXECUTE')
+                  THEN 1 ELSE 0 END)
+          + (CASE WHEN has_function_privilege('afpc_app',
+                       'add_communication(text,bigint,bigint,varchar,varchar,text,text,text,'
+                       || 'varchar,varchar,varchar,varchar,varchar,timestamptz,integer,boolean,'
+                       || 'date,text,bigint,uuid)', 'EXECUTE')
+                  THEN 0 ELSE 1 END)" \
+    "add_communication missing, callable by every role in the cluster, or unusable by the runtime role"
+
+# 0023's append-only claim is about a grant, and grants are exactly what a probe that runs as the
+# owner cannot see (a superuser holds everything). B27's shape, on the table 0013's census could
+# not have enrolled because it did not exist yet.
+check "B29 ADR-002 agent memory is append-only by grant" "0023_agent_memory" \
+    "SELECT count(*) FROM aclexplode((SELECT relacl FROM pg_class
+                                       WHERE oid = 'public.agent_memories'::regclass)) x
+       JOIN pg_roles r ON r.oid = x.grantee
+      WHERE x.privilege_type IN ('UPDATE', 'DELETE', 'TRUNCATE')
+        AND r.rolname <> 'postgres'" \
+    "roles other than the owner who could rewrite or erase the agent's memory"
 
 # ---------- C. live inventory ----------------------------------------------------
 # Domain objects only. Extension-owned functions/views would swamp the signal: 194

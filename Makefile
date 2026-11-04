@@ -99,14 +99,11 @@ docs:
 	@echo "  - docs/database/                    schema documentation and review"
 	@echo "  - ARCHITECTURE_DECISION_RECORDS/     architecture decisions"
 
-# Regenerated from the running catalog, so it cannot drift the way the hand-maintained
-# schema.md did. Wired into CI in Phase 2 of the remediation plan.
+# Regenerated from the running catalog, so it cannot drift the way the hand-maintained schema.md did.
+# The generator is scripts/docs/gen_schema_docs.sh rather than a recipe, and its header says why the
+# recipe it replaced wrote empty files. Wired into CI in Phase 2 of the remediation plan (T3).
 docs-schema:
-	@echo "Generating schema documentation from the live catalog..."
-	@$(DB) shell -c "\\dt+" > docs/database/tables.md
-	@$(DB) shell -c "\\dv+" > docs/database/views.md
-	@$(DB) shell -c "SELECT indexdef FROM pg_index i JOIN pg_class c ON c.oid=i.indrelid ORDER BY 1" > docs/database/indexes.md
-	@echo "wrote docs/database/{tables,views,indexes}.md"
+	@scripts/docs/gen_schema_docs.sh
 
 clean:
 	@echo "Cleaning temporary files..."

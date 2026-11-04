@@ -1,15 +1,31 @@
 -- Finding 4.5: tools and schema disagree about where objects live.
--- Every one of the 9 blueprint tools qualifies its SQL to a schema that this
--- migration set does not create. This case proves both halves of the fix: the
--- qualified form must fail, and the unqualified form must work.
+--
+-- All nine blueprint tools qualified their SQL to a schema this migration set does not create, which
+-- is 3.1's split seen from the caller's side: the statement fails, the tool returns a string, and the
+-- model reads it as "no customer by that name" rather than as a broken query. 0001 ported the function
+-- bodies; this session swept the 33 remaining `.py` references. Both halves are asserted here - and
+-- which half 5a asserts was on the wrong side until the sweep, when the marker that watches the
+-- callers went from silently-green to correctly-red and forced the question.
 
--- 5a. The statement as blueprint/tools/customer_lookup.py issues it.
+-- 5a. The qualified form, asked of the live database. The claim is that it does NOT resolve: that
+-- absence is what makes the unqualified form the only one that works, so the port and the sweep are
+-- safe because of it. A database where this statement *does* resolve is one that was seeded by the
+-- superseded scripts instead of migrated by db/migrations, and the split is present rather than
+-- historical - which is the failure this branch reports.
 DO $$
 BEGIN
     EXECUTE 'SELECT count(*) FROM agent_first_erp_crm.vw_customers LIMIT 1';
-    RAISE NOTICE 'VERDICT OK qualified view resolved';
-EXCEPTION WHEN OTHERS THEN
-    RAISE NOTICE 'VERDICT ERR % | qualified name cannot resolve, which is finding 3.1', SQLSTATE;
+    RAISE NOTICE 'VERDICT ERR 00000 | the twin schema resolved. 3.1''s split is live in this '
+                 'database: it was seeded by the superseded scripts, not migrated';
+EXCEPTION WHEN undefined_table THEN
+    RAISE NOTICE 'VERDICT OK the twin schema is absent, so an unqualified name is the only form that '
+                 'resolves - which is what the 0001 port relies on, and what code:tool_prefix watches '
+                 'the callers for';
+WHEN OTHERS THEN
+    -- Anything else is a different problem, and naming the code is the whole point: reporting it as
+    -- the expected absence would let a permission error or a broken view read as a clean pass.
+    RAISE NOTICE 'VERDICT ERR % | the qualified form failed for a reason other than the schema being '
+                 'absent, which this case cannot tell the difference about', SQLSTATE;
 END
 $$;
 

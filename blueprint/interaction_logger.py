@@ -68,7 +68,9 @@ def log_agent_trajectory(
     duration_ms: Optional[int] = None,
     intent_classification: Optional[str] = None,
     confidence_score: Optional[float] = None,
-    response_sources: Optional[List] = None
+    response_sources: Optional[List] = None,
+    run_id: Optional[str] = None,
+    tool_calls: Optional[List[Dict]] = None
 ) -> str:
     """
     Logs the full agent trajectory to the database.
@@ -97,6 +99,20 @@ def log_agent_trajectory(
         intent_classification: Auto-detected intent (e.g., "customer_lookup")
         confidence_score: Model's confidence in the intent (0.0-1.0)
         response_sources: List of record IDs that were used in the response
+        run_id: This run's identifier. vw_recent_interactions and vw_tool_calls join through it, and
+            idempotency_keys scopes a retry by it (ADR-005), so a NULL here makes the row invisible to
+            both and unretryable. The column is NOT NULL with no default - 0001's baseline - which is
+            why an absent value is filled here rather than passed through: this function used to omit
+            run_id from its INSERT entirely, so every trajectory write failed with a 23502 that
+            `except: logger.error` turned into one log line, and the deployed agent's rows appearing
+            beside the blueprint's made the table look fine. Leave it None and one is generated, so a
+            run has an identity whether or not the caller invented one.
+        tool_calls: The calls tools/tool_logger.py recorded for this run, oldest first. When present,
+            actions_taken and tool_observations are built from these instead of from
+            intermediate_steps - which is how a wrapped tool's trail reaches the database without a
+            second table. Both arrays are appended in the same iteration, one entry each: vw_tool_calls
+            pairs them by position, so an append that lands in only one of them attributes an output to
+            the wrong call.
         
     Returns:
         str: The UUID of the created interaction record, or None if failed
@@ -119,13 +135,16 @@ def log_agent_trajectory(
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        
+
+        # NOT NULL, no default, and this function used to leave it out: see the Args above.
+        run_id = run_id or str(uuid.uuid4())
+
         # Extract structured data from LangChain's intermediate_steps
         thoughts = []
         actions = []
         observations = []
         
-        for action, observation in intermediate_steps:
+        for action, observation in (intermediate_steps or []):
             # action is an AgentAction object with attributes: tool, tool_input, log
             thoughts.append(action.log)  # The full "Thought: ... Action: ..." block
             actions.append({
@@ -147,18 +166,36 @@ def log_agent_trajectory(
                 "timestamp": datetime.now().isoformat()
             })
 
+        if tool_calls:
+            # One loop, both arrays, same order: this is the position-alignment contract vw_tool_calls
+            # reads, and the reason a tool_call list cannot be appended to one column and not the other.
+            for call in tool_calls:
+                actions.append({
+                    "tool": call.get("tool"),
+                    "tool_input": call.get("tool_input"),
+                    "timestamp": call.get("timestamp"),
+                })
+                observations.append({
+                    "output": call.get("output"),
+                    "type": call.get("type"),
+                    "duration_ms": call.get("duration_ms"),
+                    "timestamp": call.get("timestamp"),
+                    **({"error": call["error"]} if call.get("error") else {}),
+                })
+
         # Insert into DB
         cur.execute("""
             INSERT INTO agent_interactions 
-            (conversation_id, telegram_chat_id, telegram_message_id, bot_id, user_id,
+            (conversation_id, run_id, telegram_chat_id, telegram_message_id, bot_id, user_id,
              human_input, intent_classification, confidence_score,
              agent_thoughts, actions_taken, tool_observations, 
              final_output, response_sources, model_used, token_usage, 
              error_message, duration_ms)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id;
         """, (
             conversation_id,
+            run_id,
             telegram_chat_id,
             telegram_message_id,
             bot_id,

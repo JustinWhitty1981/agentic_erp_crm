@@ -1,0 +1,107 @@
+# The customer service agent, on this server.
+#
+# Two things about this file are consequences of how the machine is configured rather than choices
+# made here, and both are in dev/README:
+#
+#   * AFPC_PG_HOST is an IP address, not `afpc-pg`. The database's leaf certificate carries IP
+#     subjectAltNames only, so sslmode=verify-full validates against 192.168.0.53 and fails against
+#     every DNS name that reaches the same server - including the container name and
+#     host.docker.internal. The container is on the LAN like everything else on this box, so it can
+#     route to that address directly.
+#   * The CA is bind-mounted read-only rather than baked into the image. It is a secret-adjacent file,
+#     and scripts/db/init.sh re-exports it from the container every time it provisions, so an image
+#     carrying its own copy would keep validating a CA that no longer exists.
+#
+# There is no memory_store volume, and that is the point: 0023 moved what the agent remembers into
+# agent_memories, so a bind mount would be a second, divergent copy of a thing that now has one home.
+
+version: '3.8'
+
+services:
+  customer-service-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: afpc-customer-service
+    ports:
+      # The reference drop published 4545; this deployment uses 4550 so both can run at once while
+      # the new one is being smoke-tested against the old one's traffic.
+      - "4550:8000"
+    env_file:
+      # The database credentials live in dev/.env and are not duplicated here. That file is
+      # gitignored, and it is the source of truth: scripts/db/roles.sql sets the role passwords from
+      # it, so a password written in two places can only be wrong in one of them.
+      - ../dev/.env
+    environment:
+      # --- which model to talk to ---------------------------------------------
+      - LLM_PROVIDER=${LLM_PROVIDER:-local}
+      - VLLM_BASE_URL=${VLLM_BASE_URL:-http://192.168.0.42:18300/v1}
+      - VLLM_MODEL=${VLLM_MODEL:-qwen3.8-flash-next}
+      - LLM_STREAM=${LLM_STREAM:-true}
+
+      # --- which tenant this process answers as ------------------------------
+      # Resolved once at startup and set on every pooled connection. It is not a request parameter
+      # because a per-request tenant with a single pooled identity is exactly the masquerading shape
+      # dev/README warns about: the connection would carry whoever claimed it last.
+      - AFPC_TENANT_ID=${AFPC_TENANT_ID:-00000000-0000-0000-0000-000000000001}
+      - AFPC_PG_HOST=${AFPC_PG_HOST:-192.168.0.53}
+      - AFPC_PG_PORT=${AFPC_PG_PORT:-5432}
+      - AFPC_PG_DB=${AFPC_PG_DB:-agent_first_erp_crm}
+      - AFPC_PG_USER=${AFPC_PG_USER:-afpc_app}
+      # AFPC_PG_PASSWORD comes from env_file, not from here: a value with a ${...} default in this
+      # map is a plaintext fallback waiting to be committed.
+      - AFPC_PG_SSLMODE=${AFPC_PG_SSLMODE:-verify-full}
+      - AFPC_PG_SSLROOTCERT=/etc/ssl/certs/afpc-ca.crt
+      - AFPC_PG_APPNAME=${AFPC_PG_APPNAME:-customer-service-agent}
+
+      # --- who this process is, in the trail ---------------------------------
+      # communications.agent_id and agent_interactions.bot_id both take this value, and neither takes
+      # it from a tool argument.
+      - AGENT_ROLE=${AGENT_ROLE:-customer_service}
+
+      # --- how loud and how careful ------------------------------------------
+      - LOG_LEVEL=${LOG_LEVEL:-debug}
+      - LOG_FORMAT=${LOG_FORMAT:-text}
+      - LOG_AGENT_INTERACTIONS=${LOG_AGENT_INTERACTIONS:-true}
+      - STRICT_TOOL_POLICIES=${STRICT_TOOL_POLICIES:-true}
+      - REQUIRE_WRITE_APPROVAL=${REQUIRE_WRITE_APPROVAL:-false}
+      - MAX_TOOL_ITERATIONS=${MAX_TOOL_ITERATIONS:-10}
+      - MAX_BODY_BYTES=${MAX_BODY_BYTES:-1048576}
+
+      # --- how the endpoint is guarded ---------------------------------------
+      # Empty means open, which the health endpoint reports as "DISABLED" and the startup line warns
+      # about. The reference token is named here so a reader finds it in the place the code looks.
+      - API_KEYS=${API_KEYS:-}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://192.168.0.53:4550}
+
+      # --- runtime plumbing -------------------------------------------------
+      - HOST=0.0.0.0
+      - PORT=8000
+      - TZ=${TZ:-America/Chicago}
+      # The memory store's driver is a deployment decision, not a code one. `db` is the only value
+      # that survives a rebuild; `file` is kept for a machine with no database.
+      - MEMORY_DRIVER=${MEMORY_DRIVER:-db}
+      - MEMORY_DIR=${MEMORY_DIR:-/tmp/memory_store}
+
+      # --- optional, and inert when unset -----------------------------------
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      - ALLOW_INTERNAL_SCRAPE=${ALLOW_INTERNAL_SCRAPE:-false}
+
+    volumes:
+      - ../dev/tls/afpc-ca.crt:/etc/ssl/certs/afpc-ca.crt:ro
+
+    extra_hosts:
+      # Not used for the database, for the certificate reason above. It is here because the model
+      # server is on another machine and a future setup with it on this one would otherwise need a
+      # compose change to reach it by name.
+      - "host.docker.internal:host-gateway"
+
+    restart: unless-stopped
+    healthcheck:
+      # /api/health answers 503 rather than 200 when the database is configured and not answering, so
+      # a monitor can page on the difference between "the container is up" and "the agent can work".
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

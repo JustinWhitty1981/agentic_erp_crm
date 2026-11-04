@@ -98,18 +98,26 @@ The core is a **PostgreSQL database with PGVector** extension.
 ### 4.1 Core Tables
 See **[docs/database/agent_schema_reference.md](docs/database/agent_schema_reference.md)** for the complete enterprise schema design.
 
-**Current Implementation (Customer Service):**
-- `agent_first_erp_crm.customers` - Entity/customer information
-- `agent_first_erp_crm.communications` - Interaction history
-- `agent_first_erp_crm.recent_communications` - View for recent interactions
-- `agent_first_erp_crm.entity_communication_stats` - Aggregated statistics
+**Current implementation (what the customer service agent reads and writes):**
+- `entities` - Organizations and the customers recorded against them
+- `contacts` - The individual people, linked to entities by `entity_relationships`
+- `communications` - Interaction history; every row arrives through `add_communication`
+- `vw_customers` - The customer-facing join of the two party tables
+- `vw_recent_communications` - The last seven days, for a "what just happened" question
+- `vw_entity_communication_stats` - Aggregated statistics per customer
+- `agent_interactions`, `audit_log`, `bot_actions`, `human_sessions` - The trail (see [docs/INTERACTION_LOGGING.md](docs/INTERACTION_LOGGING.md))
+- `agent_memories` - What the agent was told to remember (0023)
 
-**Planned Tables:**
-- `orders` - Order details and status
-- `products` - Product catalog with inventory
-- `tickets` - Support ticket tracking
-- `agents` - Agent registry and permissions
-- `audit_log` - Immutable action log for validation
+Everything lives in `public`. An earlier draft of this list qualified each name to a schema
+named `agent_first_erp_crm.`, which review 3.1 measured was never created by any migration; the
+qualified form resolves only on a machine that ran the old scripts by hand. `db/README.md` is the
+source of truth for the full table list.
+
+**Not in the schema:** `orders`, `products`, `tickets`, `agents`. The first two are still planned.
+`tickets` was in the vestigial schema and is referenced by nothing in the canonical one - follow-ups
+are `followups`, and 0017 removed the tables that competed with it. `agents` is not a table because
+the agent registry is a process's environment (`AGENT_ROLE`) and a column on every row it writes.
+`audit_log`, which this section used to list as planned, has existed since 0013.
 
 ### 4.2 Why PGVector?
 - **Semantic Search:** "Find customers who complained about shipping" (no exact keyword matching).
