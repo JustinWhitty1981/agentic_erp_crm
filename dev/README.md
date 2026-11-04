@@ -208,10 +208,17 @@ applied migration is checksum-frozen, so that number could not be reclaimed eith
 than re-edit, and write the reason in db/MIGRATIONS.md - which is where this rule lives now.
 
 **The agent starts degraded, and that is the failure mode to look for.** A database that is configured
-and not answering does not stop the process: the CRM tools are not registered and `/api/health` answers
-**503** with `degraded_reason`, so a monitor can page on the difference between "the container is up"
-and "the agent can work". `docker ps` will say `healthy` only after the healthcheck's own probe
-passes, so a 503 with no obvious error is the state to check first. Startup also probes for
+and not answering does not stop the process. It first waits out a fifteen-second window
+(`pingGrace` in `cmd/server/main.go`) because startup ordering across this box's compose projects is
+nobody's job: after a host reboot the agent's first dial to `afpc-pg` lands while postgres is still
+coming up - measured at both boots on 2026-11-04, refused by 450ms and 515ms - and one attempt at
+that was a coin flip the agent lost, then served all day with `crm_tools: 0` while `docker ps` said
+`healthy`. If the window ends without a connection, the CRM tools are not registered and
+`/api/health` answers **503** with `configured but never connected` - distinguishable from the
+no-database file mode, which says `not configured` at 200 because it was chosen rather than broken.
+`TestRetryPingHoldsThroughTheBootRace` and `TestHealthTellsNoDatabaseFromABlindProcess` in
+`cmd/server/main_test.go` pin both halves. The manual fix for an agent that came up blind anyway:
+`docker restart afpc-customer-service` once the database answers. Startup also probes for
 `add_communication`, `save_memory` and `get_followup_customers`, which is how a database migrated to
 before `0021` announces itself instead of failing on the first write.
 

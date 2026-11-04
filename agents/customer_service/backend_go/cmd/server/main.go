@@ -11,6 +11,11 @@
 // see registerTools - and the health endpoint says which mode it came up in. The alternative,
 // refusing to start, would take the UI and the memory tools down over a dependency that a reader can
 // see in one field, and it would make the container restart-loop on a maintenance window.
+//
+// "Unreachable" is measured, not claimed: connect() waits out a short grace window (see pingGrace)
+// before deciding, because on a host reboot the agent's first dial lands a few hundred milliseconds
+// before postgres logs that it is ready to accept connections, and one attempt at that is a coin flip
+// the agent used to lose.
 package main
 
 import (
@@ -99,7 +104,7 @@ func main() {
 		"trajectory", envOr(EnvTrace, "true"),
 		"auth", authMode())
 
-	d := connect()
+	d, dbConfigured := connect()
 
 	toolsList := registerTools(d)
 	agentMgr := agent.NewAgentManager(toolsList)
@@ -110,7 +115,7 @@ func main() {
 		rehydrator = d
 	}
 
-	r := buildRouter(agentMgr, d, rehydrator, toolsList)
+	r := buildRouter(agentMgr, d, rehydrator, toolsList, dbConfigured)
 
 	addr := fmt.Sprintf("%s:%s", envOr(EnvHost, "0.0.0.0"), envOr(EnvPort, "8000"))
 	srv := &http.Server{
@@ -153,32 +158,43 @@ func main() {
 	slog.Info("stopped", "uptime", time.Since(started).Round(time.Second).String())
 }
 
-// connect opens the database, or returns nil with the reason recorded.
-func connect() *db.DB {
+// connect opens the database, or returns nil with the reason recorded. The bool says whether one
+// was *configured* - AFPC_PG_HOST set - because that distinction is what healthHandler needs: a
+// machine with no database at all is the file-backed mode the deployment chose, while a configured
+// database that never answered is the same process gone blind, and only the second one deserves an
+// unhealthy verdict.
+func connect() (*db.DB, bool) {
 	if strings.TrimSpace(os.Getenv(db.EnvHost)) == "" {
 		slog.Warn("no database configured: the CRM tools are not registered and memory is file-backed",
 			"missing", db.EnvHost)
-		return nil
+		return nil, false
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	d, err := db.Open(ctx)
 	if err != nil {
 		slog.Error("database configuration failed; starting without the CRM tools",
 			"err", err, "config", configOf(err))
-		return nil
+		return nil, true
 	}
 
 	// Ping tells the difference between "the pool exists" and "the tenant works", and the second one
 	// is the failure mode that matters here: a connection that succeeds but has no tenant answers
 	// every query with zero rows, because row security is filtering on a GUC nobody set. That is
 	// indistinguishable from an empty database from the outside, so it is checked at startup.
-	if err := d.Ping(ctx); err != nil {
+	//
+	// The check gets a grace window rather than one attempt. This container and afpc-pg are separate
+	// compose projects, so nothing orders them: on a host reboot the dial can land while postgres is
+	// still starting and answers connection refused for under a second - measured at both boots on
+	// 2026-11-04, the agent dalling 450ms and 515ms before the log line that said it was ready. One
+	// refused socket used to mean the agent ran all day with zero CRM tools and a model guessing at
+	// their names.
+	if err := retryPing(ctx, pingGrace, time.Second, d.Ping); err != nil {
 		slog.Error("database is unreachable; starting without the CRM tools",
-			"err", err, "config", d.String())
-		return nil
+			"err", err, "config", d.String(), "waited", pingGrace.String())
+		return nil, true
 	}
 
 	var tenant string
@@ -193,7 +209,36 @@ func connect() *db.DB {
 
 	memory.Use(d)
 	slog.Info("database connected", "config", d.String(), "tenant_guc", tenant)
-	return d
+	return d, true
+}
+
+// pingGrace is how long connect() waits for a database that is refusing before it registers no CRM
+// tools and moves on. It is deliberately far longer than the measured boot race and far shorter than
+// a maintenance window a restart should not sit through, so the common case resolves on the second
+// attempt and the rare one gives up while the operator is still watching the logs.
+const pingGrace = 15 * time.Second
+
+// retryPing calls ping with exponential backoff until it succeeds, the window runs out, or ctx ends.
+// It returns the last error, because that is the one whose text the startup log should carry.
+func retryPing(ctx context.Context, grace, firstBackoff time.Duration, ping func(context.Context) error) error {
+	err := ping(ctx)
+	deadline := time.NewTimer(grace)
+	defer deadline.Stop()
+	backoff := firstBackoff
+	for err != nil {
+		select {
+		case <-ctx.Done():
+			return err
+		case <-deadline.C:
+			return err
+		case <-time.After(backoff):
+		}
+		err = ping(ctx)
+		if backoff *= 2; backoff > 5*time.Second {
+			backoff = 5 * time.Second
+		}
+	}
+	return nil
 }
 
 func configOf(err error) string {
@@ -227,12 +272,13 @@ func registerTools(d *db.DB) []tools.ToolDefinition {
 
 	if len(crmTools) == 0 {
 		slog.Warn("no CRM tools: this agent can search the web and remember things but cannot see a " +
-			"customer. Set AFPC_PG_HOST and AFPC_TENANT_ID.")
+			"customer. Either AFPC_PG_HOST and AFPC_TENANT_ID are unset, or the database they name " +
+			"refused startup's attempts to reach it - check the line above this one.")
 	}
 	return list
 }
 
-func buildRouter(am *agent.AgentManager, d *db.DB, q crm.Querier, list []tools.ToolDefinition) *chi.Mux {
+func buildRouter(am *agent.AgentManager, d *db.DB, q crm.Querier, list []tools.ToolDefinition, dbConfigured bool) *chi.Mux {
 	r := chi.NewRouter()
 
 	r.Use(chimw.RequestID)
@@ -260,7 +306,7 @@ func buildRouter(am *agent.AgentManager, d *db.DB, q crm.Querier, list []tools.T
 		}
 	}
 
-	r.Get("/api/health", healthHandler(am, d, list))
+	r.Get("/api/health", healthHandler(am, d, list, dbConfigured))
 
 	// Everything below answers as the tenant, so everything below is authenticated.
 	r.Group(func(pr chi.Router) {
@@ -750,7 +796,7 @@ func interactionsHandler(q crm.Querier) http.HandlerFunc {
 	}
 }
 
-func healthHandler(am *agent.AgentManager, d *db.DB, list []tools.ToolDefinition) http.HandlerFunc {
+func healthHandler(am *agent.AgentManager, d *db.DB, list []tools.ToolDefinition, dbConfigured bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
 		defer cancel()
@@ -772,14 +818,28 @@ func healthHandler(am *agent.AgentManager, d *db.DB, list []tools.ToolDefinition
 		}
 
 		if d == nil {
-			out["database"] = "not configured"
 			out["crm_tools"] = 0
-			// "healthy" with no database is the lie this field exists to stop: the process is up, but
-			// it cannot serve its actual purpose, so the degraded flag is the thing a monitor should
-			// page on.
 			out["status"] = "degraded"
-			out["degraded_reason"] = "no database: the agent cannot see any customer data"
-			writeJSON(w, http.StatusOK, out)
+			if !dbConfigured {
+				// A machine with no database in its environment at all: the file-backed memory
+				// mode the operator chose, not a failure. It reports degraded for the same
+				// reason as below - the agent cannot see a customer - but it holds 200, because
+				// a healthcheck on this box is supposed to flap only for something that used to
+				// work.
+				out["database"] = "not configured"
+				out["degraded_reason"] = "no database: the agent cannot see any customer data"
+				writeJSON(w, http.StatusOK, out)
+				return
+			}
+			// The environment configured a database and startup could not reach it, so this
+			// process is serving without the tools it exists to serve with. That is not healthy,
+			// and since 2026-11-04 it is not reported as healthy either: this was the mode a host
+			// reboot left the agent in - up for hours, container green, CRM tools zero - because
+			// the one ping that decided it lost the boot race by under a second.
+			out["database"] = "configured but never connected"
+			out["degraded_reason"] = "the database is configured but the agent could not connect at " +
+				"startup: the CRM tools are not registered"
+			writeJSON(w, http.StatusServiceUnavailable, out)
 			return
 		}
 

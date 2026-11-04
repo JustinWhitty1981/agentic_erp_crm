@@ -2,13 +2,19 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"jada-backend/pkg/agent"
 	"jada-backend/pkg/db"
 )
 
@@ -117,6 +123,89 @@ func TestTrajectoryViewsNameRealColumns(t *testing.T) {
 					"instead of shipping a second log",
 					name, relation, col, strings.Join(wantCols(have, col), ", "))
 			}
+		}
+	}
+}
+
+// TestRetryPingHoldsThroughTheBootRace is the host reboot as one function call.
+//
+// Both containers answering at once is how a rebooted machine starts, and postgres logs that it is
+// ready a few hundred milliseconds after the agent's first dial, so the first attempts fail for a
+// reason that is already fixing itself. The failure this asserts against was real and measured on
+// 2026-11-04: one attempt, refused at 450ms and at 515ms before readiness, and the process then ran
+// all day with zero CRM tools while its health endpoint said it was fine.
+func TestRetryPingHoldsThroughTheBootRace(t *testing.T) {
+	var calls atomic.Int32
+	ping := func(context.Context) error {
+		if calls.Add(1) <= 2 {
+			return errors.New("dial tcp: connect: connection refused")
+		}
+		return nil
+	}
+	if err := retryPing(context.Background(), 5*time.Second, 5*time.Millisecond, ping); err != nil {
+		t.Fatalf("a database that answers on the third attempt must not be given up on: %v", err)
+	}
+	if calls.Load() != 3 {
+		t.Errorf("%d dials to reach it; the success was on the third", calls.Load())
+	}
+}
+
+// TestRetryPingGivesUpInsideTheWindow keeps the other half of the promise: a database that stays down
+// for a maintenance window costs the process pingGrace and not the restart loop that refusing to boot
+// would have caused.
+func TestRetryPingGivesUpInsideTheWindow(t *testing.T) {
+	var calls atomic.Int32
+	ping := func(context.Context) error {
+		calls.Add(1)
+		return errors.New("dial tcp: connect: connection refused")
+	}
+	const grace = 60 * time.Millisecond
+	err := retryPing(context.Background(), grace, 5*time.Millisecond, ping)
+	if err == nil {
+		t.Fatal("a database that never answers has to come back as an error")
+	}
+	if calls.Load() < 2 {
+		t.Errorf("%d attempts in a %v window: it dialled once and called that unreachable, which is "+
+			"the bug this exists to fix", calls.Load(), grace)
+	}
+}
+
+// TestHealthTellsNoDatabaseFromABlindProcess is the verdict a monitor reads.
+//
+// A configured database that never answered used to report the same status as a machine that was
+// deliberately set up without one, at HTTP 200, so the container was green while the agent could not
+// see a single customer. The two now differ in the field a human reads and in the code, and this pins
+// both, because the difference is the only reason either of them is actionable.
+func TestHealthTellsNoDatabaseFromABlindProcess(t *testing.T) {
+	am := agent.NewAgentManager(nil)
+	for _, tc := range []struct {
+		name       string
+		configured bool
+		code       int
+		wantDB     string
+	}{
+		{"file-backed on purpose", false, http.StatusOK, "not configured"},
+		{"configured and blind", true, http.StatusServiceUnavailable, "configured but never connected"},
+	} {
+		h := healthHandler(am, nil, nil, tc.configured)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/health", nil))
+
+		if rec.Code != tc.code {
+			t.Errorf("%s: %d, want %d", tc.name, rec.Code, tc.code)
+		}
+		var body map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("%s: decoding the body: %v", tc.name, err)
+		}
+		if got := body["database"]; got != tc.wantDB {
+			t.Errorf("%s: database is %v, want %q", tc.name, got, tc.wantDB)
+		}
+		if body["status"] != "degraded" {
+			t.Errorf("%s: status %v; neither mode is healthy", tc.name, body["status"])
+		}
+		if n, _ := body["crm_tools"].(float64); n != 0 {
+			t.Errorf("%s: %v CRM tools with no connection", tc.name, body["crm_tools"])
 		}
 	}
 }

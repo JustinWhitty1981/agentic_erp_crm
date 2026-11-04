@@ -70,10 +70,14 @@ absent, which is worth knowing when a deployment "works differently" on another 
 | `AFPC_PG_SSLROOTCERT` | *(unset)* | The CA. Required by both `verify-*` modes. The container mounts `dev/tls/afpc-ca.crt` at `/etc/ssl/certs/afpc-ca.crt`. |
 | `AFPC_PG_APPNAME` | `customer-service-agent` | What appears in `pg_stat_activity`, and the name to grep when the question is "which process wrote this". It is a label and not a credential, so it is safe to see in the log line the pool prints. |
 
-The pool is lazy: a database that is down when the container starts does not stop the process. It
-leaves the CRM tools unregistered and `/api/health` reporting `degraded`, which is a visible state
-rather than a crash loop, and the reason is that a maintenance window should not take the UI down with
-it.
+The pool is lazy, but startup is not one shot: `connect()` pings and, on refusal, retries with
+backoff for up to fifteen seconds before deciding the database is not there. The window is for the
+host reboot — the agent and `afpc-pg` are separate compose projects, nothing orders them, and on
+2026-11-04 the first dial landed 450ms before postgres logged itself ready. A database that stays
+down does not stop the process; it leaves the CRM tools unregistered, and the difference between the
+two ways that happens is visible in `/api/health`: `not configured` (200 — the file-backed mode of a
+machine that has no database, chosen rather than broken) versus `configured but never connected`
+(503 — the same environment's database refusing, which is what a monitor should page on).
 
 ### Model
 
@@ -171,7 +175,7 @@ All of them answer for `AFPC_TENANT_ID`, so all of them are behind `API_KEYS` wh
 | `GET /api/history` | What the model is currently shown. |
 | `GET /api/tools` | The registered surface, with each tool's policy. |
 | `GET /api/interactions` | The trajectory: `?view=recent\|failed\|tool_calls\|performance&limit=&bot_id=`. `bot_id` filters three of the four - `performance` groups by tool across every agent, so asking it for one agent is refused rather than answered with everyone's rows. |
-| `GET /api/health` | Status, including whether the database answered and what `MEMORY_DRIVER` is in force. `degraded` comes back as 503. |
+| `GET /api/health` | Status, including whether the database answered and what `MEMORY_DRIVER` is in force. A configured-but-unreachable database comes back 503; a deliberate no-database box is `degraded` at 200, because that mode was chosen and flapping on it would teach the monitor to ignore the flag. |
 
 Every value in those responses is what `pkg/db`'s `normalise` decides a caller can read: timestamps in
 RFC 3339 with their offset (0022's finding was that a timestamp without a zone is a different fact),
