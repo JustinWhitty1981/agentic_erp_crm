@@ -60,7 +60,7 @@ absent, which is worth knowing when a deployment "works differently" on another 
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `AFPC_PG_HOST` | *(unset — CRM tools disabled)* | Host to connect to. **Use an IP from the certificate's SAN list** — `192.168.0.53` on the LAN, `100.70.251.57` on the tailnet, `127.0.0.1` locally. A hostname fails `verify-full`. |
+| `AFPC_PG_HOST` | *(required — compose refuses without it)* | Host to connect to, and the reason there is no default: **it must be an IP the leaf certificate lists in its `subjectAltNames`**, which is a fact about whichever machine provisioned it. `scripts/db/init.sh` writes it to `agents/customer_service/.env` (gitignored) for exactly this reason, and `docker exec afpc-pg openssl x509 -in /certs/server.crt -noout -ext subjectAltName` reads the whole list off the running server. A hostname fails `verify-full`. |
 | `AFPC_PG_PORT` | `5432` | |
 | `AFPC_PG_DB` | `agent_first_erp_crm` | |
 | `AFPC_PG_USER` | `afpc_app` | The runtime role. Read-only roles cannot write, and the tools would fail at the grant. |
@@ -146,7 +146,7 @@ Without Docker, from the backend directory — which needs a Go toolchain:
 
 ```bash
 cd agents/customer_service/backend_go
-export AFPC_PG_HOST=192.168.0.53 AFPC_PG_PASSWORD=... \
+export AFPC_PG_HOST=<the address in the certificate's SAN list> AFPC_PG_PASSWORD=... \
        AFPC_TENANT_ID=00000000-0000-0000-0000-000000000001 \
        AFPC_PG_SSLROOTCERT=../../dev/tls/afpc-ca.crt
 go run ./cmd/server

@@ -31,7 +31,7 @@ TS_IP=$(ip -4 -o addr show dev tailscale0 2>/dev/null | awk '{print $4}' | cut -
 LAN_IFACE=$(ip -4 route show default 2>/dev/null | awk '{print $5; exit}')
 LAN_CIDR=$(ip -4 -o addr show dev "${LAN_IFACE:-eno1}" 2>/dev/null | awk '{print $4}' | grep -m1 '/')
 # pg_hba compares client_ip & netmask to the literal address, so a rule written as
-# 192.168.0.53/24 can never match - the host bits must be zero. Normalise to network.
+# 10.0.1.23/24 can never match - the host bits must be zero. Normalise to network.
 LAN_SUBNET=$(python3 -c "import ipaddress,sys; print(ipaddress.ip_interface(sys.argv[1]).network)" \
              "$LAN_CIDR" 2>/dev/null || echo "$LAN_CIDR")
 DOCKER_SUBNET=$(docker network inspect afpc_net --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}' 2>/dev/null | tr -d '\r')
@@ -126,6 +126,36 @@ docker compose -f "$COMPOSE_FILE" exec -T -u root postgres \
 # Hand auditors the CA (public half only) so sslmode=verify-full is possible.
 umask 022; mkdir -p "$DBROOT/dev/tls"
 docker compose -f "$COMPOSE_FILE" exec -T postgres cat /certs/ca.crt > "$DBROOT/dev/tls/afpc-ca.crt"
+
+# Tell the agent stack which address to use, next door to its own compose file.
+#
+# agents/customer_service/docker-compose.yml requires AFPC_PG_HOST and deliberately has no default,
+# because the only value that can work is an address the leaf certificate names in its subjectAltNames -
+# a fact about whichever machine provisioned it, not of the repository. A committed fallback would be
+# wrong for every other clone and would point a stranger's connections at somebody's private LAN. This
+# is the one place that knows both halves: the SAN list is being built a few lines above, from the same
+# variables. Compose reads the project directory's .env for ${...} interpolation, so this file is what
+# makes the required variable resolvable after a provisioning run.
+#
+# An existing setting is left alone. Whoever typed it meant it, and silently rewriting it during a
+# re-provision - which init.sh otherwise is careful to permit - is how a working host edit disappears.
+AGENT_ENV="$DBROOT/agents/customer_service/.env"
+if [ -n "$LAN_IP" ]; then
+    if [ -f "$AGENT_ENV" ] && grep -q '^AFPC_PG_HOST=' "$AGENT_ENV"; then
+        echo "[3/5] agents/customer_service/.env already sets AFPC_PG_HOST - left as is"
+    else
+        mkdir -p "$(dirname "$AGENT_ENV")"
+        { printf '# Written by scripts/db/init.sh; gitignored, because it names a private address on a\n'
+          printf '# specific network rather than anything about this project.\n'
+          printf '#\n'
+          printf '# agents/customer_service/docker-compose.yml requires AFPC_PG_HOST and has no default:\n'
+          printf '# sslmode=verify-full only validates against an address the leaf certificate lists, and\n'
+          printf '# that list is %s. The tailnet address works from anywhere the node is reachable.%s\n' \
+              "${LAN_IP}${TS_IP:+, $TS_IP}" ""
+          printf 'AFPC_PG_HOST=%s\n' "$LAN_IP"; } > "$AGENT_ENV"
+        echo "[3/5] wrote agents/customer_service/.env (AFPC_PG_HOST=$LAN_IP)"
+    fi
+fi
 
 run_sql_multi "
 ALTER SYSTEM SET ssl = on;

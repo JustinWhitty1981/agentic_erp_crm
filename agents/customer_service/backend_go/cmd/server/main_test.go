@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -10,6 +11,28 @@ import (
 
 	"jada-backend/pkg/db"
 )
+
+// TestDefaultOriginsAreLoopbackOnly keeps the CORS fallback honest.
+//
+// It used to name this repository's own development host, which is two problems wearing one costume:
+// every other clone gets a default that is wrong for it, and a browser opened against someone else's
+// deployment is told by a public source file to make cross-origin requests to a private address. The
+// same reasoning made AFPC_PG_HOST a required variable with no default in docker-compose.yml, and this
+// test is why the two cannot drift back apart.
+func TestDefaultOriginsAreLoopbackOnly(t *testing.T) {
+	t.Setenv(EnvCORS, "")
+	for _, o := range allowedOrigins() {
+		u, err := url.Parse(o)
+		if err != nil {
+			t.Fatalf("%q does not parse: %v", o, err)
+		}
+		if !strings.HasPrefix(u.Hostname(), "127.") && u.Hostname() != "localhost" &&
+			u.Hostname() != "::1" {
+			t.Errorf("the default origins include %q - a committed address is a claim about whoever "+
+				"clones this, and a routable one on a private network is an instruction to talk to it", o)
+		}
+	}
+}
 
 // TestTrajectoryViewNamesAreComplete is the no-database half: every key the endpoint will accept has to
 // resolve to a relation. Without it a view added to the map and not to viewName would reach SQL as

@@ -4,7 +4,8 @@
 # made here, and both are in dev/README:
 #
 #   * AFPC_PG_HOST is an IP address, not `afpc-pg`. The database's leaf certificate carries IP
-#     subjectAltNames only, so sslmode=verify-full validates against 192.168.0.53 and fails against
+#     subjectAltNames only, so sslmode=verify-full validates against the IP addresses it lists and fails
+#     against
 #     every DNS name that reaches the same server - including the container name and
 #     host.docker.internal. The container is on the LAN like everything else on this box, so it can
 #     route to that address directly.
@@ -51,7 +52,18 @@ services:
       # because a per-request tenant with a single pooled identity is exactly the masquerading shape
       # dev/README warns about: the connection would carry whoever claimed it last.
       - AFPC_TENANT_ID=${AFPC_TENANT_ID:-00000000-0000-0000-0000-000000000001}
-      - AFPC_PG_HOST=${AFPC_PG_HOST:-192.168.0.53}
+      # Required, with no default on purpose. The value has to be an address the leaf certificate
+      # lists in its subjectAltNames, which is a fact about whichever machine provisioned it - so a
+      # fallback baked into a file that gets cloned would be an address that is wrong for everyone else
+      # and, worse, would send a stranger's client to somebody's LAN. scripts/db/init.sh writes this
+      # file's sibling, agents/customer_service/.env, with the address it just put in the certificate,
+      # which is the only place that can know it. Compose's :? form fails at parse time and prints the
+      # message, so an unconfigured clone stops rather than starting degraded for a reason nobody sees.
+      #
+      # The message names the leaf, not the CA, because that is where the SANs are: dev/tls/afpc-ca.crt
+      # carries no subjectAltName at all (measured), so pointing a stuck reader at it would send them to
+      # a file that does not contain the answer they came for.
+      - AFPC_PG_HOST=${AFPC_PG_HOST:?set it to an address in the leaf certificate's SAN list (docker exec afpc-pg openssl x509 -in /certs/server.crt -noout -ext subjectAltName), or run scripts/db/init.sh on this machine}
       - AFPC_PG_PORT=${AFPC_PG_PORT:-5432}
       - AFPC_PG_DB=${AFPC_PG_DB:-agent_first_erp_crm}
       - AFPC_PG_USER=${AFPC_PG_USER:-afpc_app}
@@ -88,7 +100,10 @@ services:
       # Empty means open, which the health endpoint reports as "DISABLED" and the startup line warns
       # about. The reference token is named here so a reader finds it in the place the code looks.
       - API_KEYS=${API_KEYS:-}
-      - CORS_ORIGINS=${CORS_ORIGINS:-http://192.168.0.53:4550}
+      # Loopback only as the default. The UI is served by this same process, so opening it from the
+      # machine it runs on needs no origin at all; the list matters only for a browser on another box,
+      # and that is a decision the operator makes rather than one a cloned file can guess.
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:4550,http://127.0.0.1:4550}
 
       # --- runtime plumbing -------------------------------------------------
       - HOST=0.0.0.0

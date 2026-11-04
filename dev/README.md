@@ -19,14 +19,25 @@ Credentials are in `dev/.env` (`AFPC_AUDITOR_PASSWORD`). Copy the CA once — it
 public half, and it is what lets you confirm you are talking to this database:
 
 ```bash
-scp justin@192.168.0.53:~/agent-workspace/projects/agent_first/dev/tls/afpc-ca.crt .
-psql "host=192.168.0.53 port=5432 dbname=agent_first_erp_crm user=afpc_auditor \
+# <IP> is this machine's own address, the one the certificate was issued for. It is deliberately not
+# written down in a page that gets cloned: an address is a fact about one network, and two copies of it
+# - here and in a source file's default - is two things that can each be out of date.
+scp justin@<IP>:~/agent-workspace/projects/agent_first/dev/tls/afpc-ca.crt .
+psql "host=<IP> port=5432 dbname=agent_first_erp_crm user=afpc_auditor \
       sslmode=verify-full sslrootcert=afpc-ca.crt"
 ```
 
-`192.168.0.53` is the LAN address; the same port answers on the tailnet address
-`100.70.251.57`. If you would rather not distribute the CA, `sslmode=require` works
-but does not verify the certificate.
+**Where to read `<IP>` off the machine itself.** `scripts/db/init.sh` puts it in
+`agents/customer_service/.env` as `AFPC_PG_HOST`, and the leaf certificate carries every address that
+will pass `verify-full`:
+
+```bash
+docker exec afpc-pg openssl x509 -in /certs/server.crt -noout -ext subjectAltName
+```
+
+The LAN address and the tailnet address are both in that list, so either works; the tailnet one reaches
+the same port from anywhere the node is reachable. If you would rather not distribute the CA,
+`sslmode=require` works but does not verify the certificate.
 
 **The CA is stable across rebuilds.** `scripts/db/db fresh` destroys only the data volume;
 the certificate volume survives, and `init.sh` regenerates the authority only if the
@@ -157,11 +168,15 @@ session's whole documentation sweep is about. Keep the pattern: when something s
 surprise goes in this section, and the check that would have caught it goes in `verify.sh` or a
 `code:*` marker. An entry with no check behind it is a rumour, and it is also the one nobody re-reads.
 
-**The leaf certificate has IP subjectAltNames and nothing else.** `sslmode=verify-full` therefore
-validates against `192.168.0.53` and `100.70.251.57` and fails against `afpc-pg`, `localhost`,
+**The leaf certificate has IP subjectAltNames and nothing else, and the CA has none at all** - so when a
+connection refuses a name, read the list off the leaf (`docker exec afpc-pg openssl x509 -in
+/certs/server.crt -noout -ext subjectAltName`) and not off `dev/tls/afpc-ca.crt`, which will show you
+nothing and look like evidence that the certificate has no SANs. `sslmode=verify-full` therefore
+validates against the addresses in `subjectAltName` - this machine's LAN and tailnet addresses - and
+fails against `afpc-pg`, `localhost`,
 `host.docker.internal` and any DNS name that reaches the same server - including from inside a
 container on this box, which can route to the LAN address and should use it. The error reads like a
-network fault (`x509: certificate is valid for 192.168.0.53, not afpc-pg` reads like neither), and the
+network fault (`x509: certificate is valid for <the SAN list>, not afpc-pg` reads like neither), and the
 wrong fix is `require`, which encrypts and checks nothing. `agents/customer_service/docker-compose.yml`
 sets the IP for this reason and says so at its top.
 

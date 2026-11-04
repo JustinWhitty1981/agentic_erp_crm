@@ -65,6 +65,7 @@ const (
 	EnvMaxIter   = "MAX_TOOL_ITERATIONS"
 	EnvTrace     = "LOG_AGENT_INTERACTIONS"
 	EnvBodyLimit = "MAX_BODY_BYTES"
+	EnvCORS      = "CORS_ORIGINS"
 )
 
 type ChatRequest struct {
@@ -430,7 +431,7 @@ func accessLog(next http.Handler) http.Handler {
 }
 
 func allowedOrigins() []string {
-	if v := strings.TrimSpace(os.Getenv("CORS_ORIGINS")); v != "" {
+	if v := strings.TrimSpace(os.Getenv(EnvCORS)); v != "" {
 		var out []string
 		for _, o := range strings.Split(v, ",") {
 			if o = strings.TrimSpace(o); o != "" {
@@ -439,10 +440,13 @@ func allowedOrigins() []string {
 		}
 		return out
 	}
-	// The dev server's own origin, from the dev README's note about the LAN address; the UI is served
-	// from this same process, so same-origin needs nothing and this list only matters when someone
-	// opens it from another box on the network.
-	return []string{"http://192.168.0.53:4550", "http://localhost:4550", "http://127.0.0.1:4550"}
+	// Loopback. The UI is served by this very process, so same-origin needs no entry and this list only
+	// matters for a browser on another machine - which is a decision the operator makes with
+	// CORS_ORIGINS rather than a default a source file can know. An earlier version named this
+	// repository's own development host here, which is both wrong for every other clone and an
+	// instruction to a stranger's browser to talk to somebody's LAN. cmd/server's
+	// TestDefaultOriginsAreLoopbackOnly is what keeps it out again.
+	return []string{"http://localhost:4550", "http://127.0.0.1:4550"}
 }
 
 // ---------------------------------------------------------------------------

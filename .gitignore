@@ -65,3 +65,9 @@ dumb_agent-jw_improvements*.zip
 # index is the machine-readable form of the decision that the reference stays what it was when it
 # arrived, unmodified and not this project's source. Read-only to the build user for the same reason.
 agents/jada/
+
+# Written by scripts/db/init.sh: the address the leaf certificate was just issued for, which is the only
+# value AFPC_PG_HOST can take on this machine and is therefore not a guess to be committed. It names a
+# private address on a specific network, and a cloned compose file that fell back to it would be pointing
+# a stranger's browser and agent at somebody's LAN.
+agents/customer_service/.env

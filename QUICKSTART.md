@@ -95,7 +95,7 @@ docker logs -f afpc-customer-service
 ## 4. Verify the database saw it
 
 ```bash
-psql "host=192.168.0.53 dbname=agent_first_erp_crm user=afpc_auditor sslmode=verify-full" -c \
+psql "host=<server-ip> dbname=agent_first_erp_crm user=afpc_auditor sslmode=verify-full" -c \
   "SELECT started_at, entity_name, communication_type, direction, summary
      FROM vw_recent_communications ORDER BY started_at DESC LIMIT 5;"
 ```
