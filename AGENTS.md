@@ -18,6 +18,7 @@ Welcome! This guide is designed specifically for AI agents working on the Agent 
 - **[blueprint/tools/README.md](blueprint/tools/README.md)** - Tool development guidelines
 - **[docs/agent_requirements/customer_service/customer_service.md](docs/agent_requirements/customer_service/customer_service.md)** - Customer service agent requirements
 - **[docs/agent_requirements/inventory/inventory.md](docs/agent_requirements/inventory/inventory.md)** - Inventory agent requirements
+- **[docs/agent_requirements/agent_test_plan.md](docs/agent_requirements/agent_test_plan.md)** - Acceptance plan for every tool of both deployed agents, and its executable form `scripts/agents/tool_testplan.sh`
 - **[docs/ATTACHMENT_SYSTEM.md](docs/ATTACHMENT_SYSTEM.md)** - Attachment system documentation
 
 ### 🏛️ Architecture Decision Records
@@ -164,7 +165,7 @@ Follow [QUICKSTART.md](QUICKSTART.md) for Docker-based deployment.
    time
 
 ### Testing
-Four things can be wrong independently, and each has its own harness:
+Five things can be wrong independently, and each has its own harness:
 1. `./scripts/db/verify.sh` - structural assertions over the catalog (the B-checks), no fixtures
 2. `./scripts/db/test-functions.sh` - one probe per finding, run against a copy of the database with
    the residue check around it; this is also where the `code:*` markers report, including
@@ -174,6 +175,12 @@ Four things can be wrong independently, and each has its own harness:
    package's README section
 4. `pytest blueprint/tests/ -v` - the reference implementation's tests, which need a test database
    (`createdb agent_first_erp_crm_test`) and describe the Python shape rather than the deployed one
+5. `./scripts/agents/tool_testplan.sh` - the only harness that tests what a human gets: it prompts
+   both deployed agents through `POST /api/chat` once per registered tool and verifies each turn
+   on three independent planes - the call happened (`vw_tool_calls`, keyed by the returned
+   `run_id`), the state is real (the views and trail the answer claims), the run recorded itself.
+   Plan and cases: `docs/agent_requirements/agent_test_plan.md`. Slow (every case is a real model
+   turn) and re-runnable (fixtures carry a timestamp, because `add_customer` refuses duplicates)
 
 And the one that checks the documentation: `scripts/docs/check_agent_docs.sh`, run on its own or
 through 2.

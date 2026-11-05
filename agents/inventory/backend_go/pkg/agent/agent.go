@@ -519,8 +519,13 @@ func (am *AgentManager) RunChatStream(ctx context.Context, threadID, userMessage
 	eventChan <- SSEEvent{Type: "done", RunID: run.ID()}
 }
 
-// RunChatSync drives one turn and returns the answer.
-func (am *AgentManager) RunChatSync(ctx context.Context, threadID, userMessage string) (string, error) {
+// RunChatSync drives one turn and returns the answer, the run id, and any error.
+//
+// The run id is returned because the caller cannot otherwise tie this turn to the trajectory row
+// it just wrote: the non-stream endpoint's client - a test, a retry, a support conversation reading
+// a specific run back - has the answer text and nothing identifying the record. The stream path
+// has always carried it (SSEEvent.RunID); this closes the asymmetry.
+func (am *AgentManager) RunChatSync(ctx context.Context, threadID, userMessage string) (string, string, error) {
 	eventChan := make(chan SSEEvent, 128)
 	go am.RunChatStream(ctx, threadID, userMessage, eventChan)
 
@@ -541,13 +546,13 @@ func (am *AgentManager) RunChatSync(ctx context.Context, threadID, userMessage s
 		}
 	}
 	if runErr != "" {
-		return "", fmt.Errorf("%s (run %s)", runErr, runSeen)
+		return "", runSeen, fmt.Errorf("%s (run %s)", runErr, runSeen)
 	}
 	out := strings.Join(tokens, "")
 	if out == "" {
 		out = "Task completed."
 	}
-	return out, nil
+	return out, runSeen, nil
 }
 
 // recordRun writes the trajectory, with a deadline of its own.

@@ -582,17 +582,18 @@ func chatHandler(am *agent.AgentManager, q inventory.Querier) http.HandlerFunc {
 		thread := threadOf(req)
 		am.Rehydrate(r.Context(), q, thread)
 
-		out, err := am.RunChatSync(r.Context(), thread, req.Message)
+		out, runID, err := am.RunChatSync(r.Context(), thread, req.Message)
 		if err != nil {
 			// 200 with an error field is what the reference did, and it is wrong in a specific way:
 			// the UI cannot tell a failed turn from a successful one without parsing prose, and a
 			// client that retries on 5xx would then be able to. The answer text still comes back,
-			// because for a refused tool call the sentence IS the useful part.
+			// because for a refused tool call the sentence IS the useful part - and so does the run
+			// id, because the failed run is precisely the row someone will want to read back.
 			writeJSON(w, http.StatusBadGateway, ChatResponse{
-				Response: fmt.Sprintf("I could not finish that: %v", err), ThreadID: thread})
+				Response: fmt.Sprintf("I could not finish that: %v", err), ThreadID: thread, RunID: runID})
 			return
 		}
-		writeJSON(w, http.StatusOK, ChatResponse{Response: out, ThreadID: thread})
+		writeJSON(w, http.StatusOK, ChatResponse{Response: out, ThreadID: thread, RunID: runID})
 	}
 }
 

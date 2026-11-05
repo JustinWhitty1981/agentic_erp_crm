@@ -169,7 +169,7 @@ All of them answer for `AFPC_TENANT_ID`, so all of them are behind `API_KEYS` wh
 
 | | |
 |---|---|
-| `POST /api/chat` | `{message, thread_id?}` → `{response, thread_id}`. |
+| `POST /api/chat` | `{message, thread_id?}` → `{response, thread_id, run_id}`. The `run_id` keys the `agent_interactions` row this turn wrote - without it the non-stream path had an answer that could not be tied to its own trajectory (the stream path always carried it via `SSEEvent.RunID`). |
 | `POST /api/chat/stream` | The same turn as SSE: `token`, `status`, `tool`, `tool_result`, `error`, `done`. |
 | `POST /api/reset` | Clears the in-process context for a thread. Not the history — see below. |
 | `GET /api/history` | What the model is currently shown. |

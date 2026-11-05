@@ -86,7 +86,7 @@ cached.
 
 | | |
 |---|---|
-| `POST /api/chat` | `{message, thread_id?}` → `{response, thread_id}`. |
+| `POST /api/chat` | `{message, thread_id?}` → `{response, thread_id, run_id}`. The `run_id` keys the trajectory row the turn wrote, which is how `scripts/agents/tool_testplan.sh` verifies a case's database effect instead of its prose. |
 | `POST /api/chat/stream` | The same turn as SSE. |
 | `POST /api/reset` | Clears in-process context for a thread. |
 | `GET /api/history` | What the model is currently shown. |
