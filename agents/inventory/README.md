@@ -17,6 +17,11 @@ docker compose up --build -d          # :4560
 curl -s localhost:4560/api/health | jq
 ```
 
+The UI is at `http://<this machine>:4560/` — the customer service agent's React app, copied rather
+than rewritten (same loop, same SSE contract, four identity strings different), building into
+`backend_go/static` which the binary then serves. `GET /` with no build present answers the
+service JSON — which is the whole of what a bare port-check sees, and is not an error.
+
 It talks to the same `afpc-pg` and the same tenant as the customer service agent. `AFPC_PG_HOST`
 is read from `agents/customer_service/.env` — the file `scripts/db/init.sh` writes with the
 address the leaf certificate lists — rather than copied, so a re-provision updates both agents by
@@ -104,8 +109,6 @@ Keys this container sets; the shared ones mean what they mean in
 
 ## What is not here
 
-- **No UI.** No React build, no `static/` — the chat endpoints are the interface, and `GET /`
-  answers with the service JSON.
 - **No Telegram, no CAO.** The requirements doc's push-alerting and validation halves describe
   components this deployment does not have; alerts are database-readable instead. Both live in
   that doc's "What is not here yet" with their real status.

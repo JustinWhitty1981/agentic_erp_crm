@@ -1,12 +1,16 @@
-# The inventory agent: Go backend and the schedule, one image, no UI.
+# The inventory agent: Go backend, React UI, one image. Same three stages as
+# agents/customer_service/Dockerfile - the UI was copied rather than rewritten because it is the
+# same loop behind the same SSE contract, and four identity strings are the whole difference.
 #
-# Two stages, and the shape of the Go one is copied from agents/customer_service/Dockerfile on
-# purpose - module cache warmed before sources, static binary, no toolchain in the runtime. The
-# third stage that file has (the React build) is absent because this agent is answered through
-# the same chat endpoints and has no page of its own; pickStatic finds no directory and the root
-# route degrades to the JSON service note, which is behaviour the backend already had.
+# Stage 1: the UI.
+FROM node:20-alpine AS frontend-builder
+WORKDIR /app/frontend
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm install
+COPY frontend/ ./
+RUN npm run build
 
-# Stage 1: the Go binary.
+# Stage 2: the Go binary.
 FROM golang:1.23-alpine AS backend-builder
 
 WORKDIR /app/backend_go
@@ -22,7 +26,7 @@ COPY backend_go/ ./
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" \
       -o /jada-server ./cmd/server/main.go
 
-# Stage 2: the runtime.
+# Stage 3: the runtime.
 FROM alpine:latest
 
 WORKDIR /app
@@ -30,6 +34,7 @@ WORKDIR /app
 RUN apk --no-cache add ca-certificates tzdata wget
 
 COPY --from=backend-builder /jada-server /app/jada-server
+COPY --from=frontend-builder /app/backend_go/static /app/static
 
 # The CA is bind-mounted by docker-compose.yml from dev/tls/, not baked in, for the customer
 # service agent's stated reason: init.sh re-exports it on every provision, and a stale copy in

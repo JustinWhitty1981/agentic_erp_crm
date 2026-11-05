@@ -399,7 +399,7 @@ func buildRouter(am *agent.AgentManager, d *db.DB, q inventory.Querier, list []t
 	} else {
 		r.Get("/", func(w http.ResponseWriter, _ *http.Request) {
 			writeJSON(w, http.StatusOK, map[string]string{
-				"service": "customer service agent", "version": version,
+				"service": "inventory agent", "version": version,
 				"docs": "/api/health",
 			})
 		})
