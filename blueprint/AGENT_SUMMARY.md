@@ -1,6 +1,13 @@
 # Agent Blueprint: Customer Service Bot
 
-**Purpose**: This document provides an agent-friendly summary of the Customer Service Bot blueprint. Use this to understand, recreate, or extend this agent pattern.
+> **Deprecated as a runtime — this is lineage.** The pattern's first statement, in ~215 Python
+> lines. Understand the loop here if you want it in one file; **build against
+> `../agents/customer_service/backend_go/`**, which is what actually ships. The Telegram handler,
+> the `InMemorySaver`, and the per-tool `psycopg2.connect` described below are the reference's
+> shape, not the running system's. Why the runtime switched to Go:
+> [ADR-006](../ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md).
+
+**Purpose**: This document provides an agent-friendly summary of the Customer Service Bot blueprint. Use this to understand the pattern — not to recreate or extend the runtime, which is Go (`../agents/`).
 
 ---
 

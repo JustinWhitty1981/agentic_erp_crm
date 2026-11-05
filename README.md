@@ -25,7 +25,10 @@ A **Database-First, Agent-Native** business operating system.
   trail chained per tenant and month (`audit_log`, `audit_chain_verify()`), and idempotency claims for
   retryable writes (`vw_idempotency_status` says which functions are guarded and which are not).
 - **A blueprint** for how specialized agents can run operations through conversation —
-  `blueprint/bot.py`, the same rules in one Python file with LangChain and Telegram.
+  `blueprint/bot.py`, the same rules in one Python file with LangChain and Telegram. It is lineage:
+  the runtimes are the two Go backends, and
+  [ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md) records the
+  measurements behind that switch.
 - **And a method**: every claim in `db/` and in these pages has a check that fails when the claim stops
   being true, including an acceptance harness that prompts each deployed agent once per registered tool
   and verifies the answer against the database rather than against the agent's own prose
@@ -70,8 +73,9 @@ day-one tool and whose ledger bug 0026 found and fixed).
    row.
 3. **Run the acceptance plan against both** — `./scripts/agents/tool_testplan.sh`. It is slow (every
    case is a real model turn) and it re-runs cleanly (fixtures carry a timestamp).
-4. **Study the blueprint** (`blueprint/bot.py`) to understand the pattern in 215 lines before reading
-   two forks of it.
+4. **Read the loop** — `agents/customer_service/backend_go/pkg/agent/agent.go` is the shape of a run
+   turn: dispatch, trajectory defer, rehydration. `blueprint/bot.py` is the same pattern in 215 Python
+   lines — background reading, not an on-ramp ([ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md)).
 5. **Contribute** to the tool library, the schema's doors, or the documentation — `AGENTS.md` is the
    route map and `PLAN.md` is the queue.
 
@@ -91,7 +95,7 @@ day-one tool and whose ledger bug 0026 found and fixed).
 
 If you're an AI agent working on this project, start here:
 - **[AGENTS.md](AGENTS.md)** - Complete guide for AI agents navigating this project
-- **[agents/customer_service/](agents/customer_service/)** and **[agents/inventory/](agents/inventory/)** - the two deployed agents; **[blueprint/bot.py](blueprint/bot.py)** - the reference implementation
+- **[agents/customer_service/](agents/customer_service/)** and **[agents/inventory/](agents/inventory/)** - the two deployed agents; **[blueprint/](blueprint/)** - the pattern's first statement, in one Python file: lineage, not a runtime ([ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md))
 - **[QUICKSTART.md](QUICKSTART.md)** - Setup and deployment instructions
 - **[docs/agent_requirements/agent_test_plan.md](docs/agent_requirements/agent_test_plan.md)** - how a turn is proven, tool by tool
 
@@ -135,7 +139,8 @@ Create a swarm of specialized AI agents to run a business where **the conversati
 | [db/MIGRATIONS.md](db/MIGRATIONS.md) | finding → migration, one row per thing the review found |
 | [dev/README.md](dev/README.md) | This development server: container, roles, TLS, gotchas |
 | [docs/agent_requirements/agent_test_plan.md](docs/agent_requirements/agent_test_plan.md) | The acceptance plan for every tool of both agents |
-| [blueprint/AGENT_SUMMARY.md](blueprint/AGENT_SUMMARY.md) | Blueprint pattern reference |
+| [blueprint/AGENT_SUMMARY.md](blueprint/AGENT_SUMMARY.md) | The pattern's first statement, in Python — lineage, not a runtime |
+| [ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md) | Why the runtime is Go and the blueprint is lineage |
 | [docs/database/](docs/database/) | Database schema and documentation |
 | [OpenClaw Blueprint (Precursor)](https://github.com/JustinWhitty1981/openclaw_blueprint/tree/main) | Reference implementation and performance benchmarks |
 

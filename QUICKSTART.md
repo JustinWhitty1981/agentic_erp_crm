@@ -9,7 +9,10 @@ Three things can be "started" in this repository, and they are different exercis
 | **The inventory agent** | The same loop with stock tools and an in-container check timer | `agents/inventory/` |
 
 `blueprint/` is the reference implementation the other two descend from — a single-file Python
-LangChain agent on Telegram. Read it to learn the pattern; deploy `agents/`.
+LangChain agent on Telegram. It is lineage: read it for the pattern, deploy from `agents/`. The two
+Go backends are the runtime, and
+[ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md) carries the
+measurements behind the switch.
 
 ---
 
@@ -207,7 +210,7 @@ container, so no gap means the process was down; check `docker ps` and
 
 ## Next steps
 
-1. **Read the pattern:** `blueprint/bot.py` — the same loop in one file.
+1. **Read the loop that ships:** `agents/customer_service/backend_go/pkg/agent/agent.go` — the dispatch, the trajectory `defer`, rehydration. `blueprint/bot.py` is the same pattern in one Python file (lineage — [ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md)).
 2. **Read the deployments:** `agents/customer_service/README.md` and `agents/inventory/README.md` —
    tools, environment, endpoints.
 3. **Read the design:** `architecture.md`, then `docs/database/agent_first_erp_crm_mental_model.md`.

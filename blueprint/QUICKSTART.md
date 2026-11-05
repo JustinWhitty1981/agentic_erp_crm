@@ -124,9 +124,13 @@ psql -h {your-postgres-host} -U agent_first_erp_crm -d agent_first_erp_crm -c "S
 
 ## Next Steps
 
-1. **Review the Blueprint:** Read [bot.py](bot.py) to understand the pattern
+> This guide stands up the reference bot, which is lineage rather than the runtime
+> ([ADR-006](../ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md)). For the
+> agents that actually deploy, the route is [../QUICKSTART.md](../QUICKSTART.md).
+
+1. **Read the loop that ships:** [../agents/customer_service/backend_go/pkg/agent/agent.go](../agents/customer_service/backend_go/pkg/agent/agent.go) — [bot.py](bot.py) is the same pattern in one Python file, for background, not as an on-ramp
 2. **Study the Architecture:** Read [architecture.md](../architecture.md) for system design
-3. **Understand the Blueprint Pattern:** Read [AGENT_SUMMARY.md](AGENT_SUMMARY.md)
+3. **Understand the Blueprint Pattern:** Read [AGENT_SUMMARY.md](AGENT_SUMMARY.md) — with its lineage banner
 4. **Plan New Agents:** Review [PLAN.md](../PLAN.md) for development roadmap
 5. **Database Documentation:** See [docs/database/](../docs/database/) for schema reference
 6. **Add CAO Validation:** Build the validation layer for agent actions

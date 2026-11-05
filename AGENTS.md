@@ -14,7 +14,7 @@ Welcome! This guide is designed specifically for AI agents working on the Agent 
 - **[agents/customer_service/README.md](agents/customer_service/README.md)** - **the deployed agent**: Go backend, tools, environment, endpoints
 - **[agents/inventory/README.md](agents/inventory/README.md)** - **the second deployed agent**: same loop, stock tools, and the in-container check timer
 - **[agents/customer_service/backend_go/](agents/customer_service/backend_go/)** - that backend's source
-- **[blueprint/AGENT_SUMMARY.md](blueprint/AGENT_SUMMARY.md)** - Blueprint pattern reference implementation
+- **[blueprint/AGENT_SUMMARY.md](blueprint/AGENT_SUMMARY.md)** - the pattern's first statement, in Python - lineage, not a runtime (ADR-006)
 - **[blueprint/tools/README.md](blueprint/tools/README.md)** - Tool development guidelines
 - **[docs/agent_requirements/customer_service/customer_service.md](docs/agent_requirements/customer_service/customer_service.md)** - Customer service agent requirements
 - **[docs/agent_requirements/inventory/inventory.md](docs/agent_requirements/inventory/inventory.md)** - Inventory agent requirements
@@ -27,6 +27,7 @@ Welcome! This guide is designed specifically for AI agents working on the Agent 
 - **[ARCHITECTURE_DECISION_RECORDS/ADR-003_view_based_tool_design.md](ARCHITECTURE_DECISION_RECORDS/ADR-003_view_based_tool_design.md)** - View-based tool design pattern
 - **[ARCHITECTURE_DECISION_RECORDS/ADR-004_agent_first_interface.md](ARCHITECTURE_DECISION_RECORDS/ADR-004_agent_first_interface.md)** - Agent-first interface design
 - **[ARCHITECTURE_DECISION_RECORDS/ADR-005_idempotent_agent_operations.md](ARCHITECTURE_DECISION_RECORDS/ADR-005_idempotent_agent_operations.md)** - Idempotent operations for safe retries
+- **[ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md)** - Why the runtime is Go and the Python blueprint is lineage
 
 ### 🗄️ Database Documentation
 - **[db/README.md](db/README.md)** - **single source of truth for schema**; which legacy SQL directories are superseded
@@ -72,7 +73,10 @@ Agent First ERP CRM is a database-first AI agent operating system that enables:
   replacing `pkg/crm` and an in-container timer added. It is the evidence for the claim that the loop is
   reusable: one domain package, four identity strings, one working second agent.
 - **Reference**: `blueprint/bot.py` (~215 lines) - the same loop in one Python file, with LangChain and
-  Telegram. Start here to understand the pattern, or to build a new agent quickly.
+  Telegram. The pattern's shortest statement, and **deprecated as a runtime**: it opens a plaintext
+  connection per tool call, checkpoints memory in process, and runs one polling worker. New agents
+  fork `agents/customer_service/`; [ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md)
+  is the measurement record of why.
 
 All three agree on the rules that matter: a read names a `vw_*` view or a function that returns one, a
 write calls a function, every run records itself, and the model never chooses an audit column's value.
@@ -118,10 +122,9 @@ Follow [QUICKSTART.md](QUICKSTART.md) for Docker-based deployment.
   ADR-003 boundary in practice — a parameterised answer has a door, and 0022 is what made that argument
   mean what it says
 - Both obey one rule the blueprint did not always: **a write calls a database function and never composes its own INSERT.** `code:cs_writes_through_doors` watches that, and its comment says what the grep had to grow to catch it
-- Review individual tool implementations in **[blueprint/tools/](blueprint/tools/)**
-- Read **[blueprint/tools/README.md](blueprint/tools/README.md)** for tool development guidelines
+- The same eight tools exist in Python in **[blueprint/tools/](blueprint/tools/)** — read them, and **[blueprint/tools/README.md](blueprint/tools/README.md)**, for the shape of a tool; wire a new one through the Go package above. The blueprint is lineage, not a starting point ([ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md))
 - Study **[docs/agent_requirements/customer_service/customer_service.md](docs/agent_requirements/customer_service/customer_service.md)** for domain requirements
-- Review example tools in `blueprint/tools/`:
+- Lineage examples, one part each, in `blueprint/tools/`:
   - `customer_lookup.py` - Customer information retrieval
   - `add_customer.py` - Add new customers
   - `update_customer.py` - Update customer information
@@ -156,8 +159,8 @@ Follow [QUICKSTART.md](QUICKSTART.md) for Docker-based deployment.
 6. Add a probe to `db/tests/` that fails the day the function stops meaning what the tool says
 
 ### Creating a New Agent
-1. Start from `agents/customer_service/` for a deployment, or [blueprint/bot.py](blueprint/bot.py) to see
-   the whole pattern in one file
+1. Fork `agents/customer_service/`. [blueprint/bot.py](blueprint/bot.py) shows the whole pattern in one
+   file as background — it is lineage, not an on-ramp, and ADR-006 records why
 2. Define agent-specific tools, in the order above: the function first, then the tool that calls it
 3. Keep the trajectory writer and the memory store. An agent that cannot be read back cannot be fixed,
    and an agent whose memory dies with its container has no memory - both are 0023's and 0011's subject
@@ -280,7 +283,7 @@ agent_first/
 │   ├── database/                   # the review's companions + generated listings; agent_first_erp_crm_schema.sql is superseded
 │   └── history/                    # MISALIGNMENT_FIXES.md, STABILITY_IMPROVEMENTS.md - dated records
 │
-└── blueprint/                      # THE REFERENCE IMPLEMENTATION: same rules, one Python file
+└── blueprint/                      # THE LINEAGE: the pattern in one Python file - not a runtime (ADR-006)
     ├── bot.py                      # ~215 lines: loop, tools, memory, PostgreSQL
     ├── tools/                      # the eight tools bot.py registers, in Python, plus the trajectory helpers
     ├── docs/                       # agent-friendly SQL docs; views.md's lists are checked against the catalog

@@ -1,5 +1,13 @@
 # Customer Service Agent
 
+> **Deprecated as a runtime — this is lineage.** `bot.py` is still the shortest statement of the
+> pattern this repository runs on, and it stays in the tree for that reason. But no deployed agent
+> runs this code path, and following the setup below gets you plaintext database connections, a
+> conversation memory that dies with the process, and no trajectory row — correct pattern, wrong
+> substrate. The runtimes are `agents/customer_service/backend_go` and
+> `agents/inventory/backend_go`; the four measurements behind the switch are in
+> [ADR-006](../ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md).
+
 A simple, single-file customer service bot built with LangChain v1, Ollama, and PostgreSQL.
 
 ## Features
@@ -135,7 +143,7 @@ docker exec -it cs-bot sh
 
 ```
 blueprint/
-├── bot.py                 # Main agent (source of truth)
+├── bot.py                 # The whole pattern in one file - lineage, not the runtime (see the banner above)
 ├── Dockerfile             # Container configuration
 ├── docker-compose.yml     # Docker orchestration
 ├── requirements.txt       # Python dependencies

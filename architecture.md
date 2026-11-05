@@ -6,7 +6,8 @@ For AI agents working on this project, see:
 - **[AGENTS.md](AGENTS.md)** - Complete navigation guide for AI agents
 - **[README.md](README.md)** - Project overview
 - **[agents/customer_service/README.md](agents/customer_service/README.md)** and **[agents/inventory/README.md](agents/inventory/README.md)** - the two deployed agents
-- **[blueprint/AGENT_SUMMARY.md](blueprint/AGENT_SUMMARY.md)** - Blueprint pattern details
+- **[blueprint/AGENT_SUMMARY.md](blueprint/AGENT_SUMMARY.md)** - the pattern's first statement (lineage; the runtime is Go — [ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md))
+- **[ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md)** - why the deployed half is Go
 - **[db/README.md](db/README.md)** - the schema, in the order it is applied
 
 ---
@@ -38,9 +39,13 @@ same loop in Go with a tool surface, a trajectory writer, and a second role reus
 
 The two agree on the rules that matter — which is the point of keeping both in the repository. Where
 they disagree, the deployments are right about this system: **a write calls a database function and
-never composes its own INSERT**, and the model never chooses an audit column's value.
+never composes its own INSERT**, and the model never chooses an audit column's value. Why the Python
+half is lineage rather than the runtime — a connection opened per tool call with no `sslmode`, a
+default thread pool running blocking I/O under a GIL, an `InMemorySaver` that dies with the process,
+one polling worker — is measured in
+[ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md).
 
-### 2.1 The reference implementation (Blueprint)
+### 2.1 The reference implementation (Blueprint) — lineage, not deployed
 - **Single File:** `bot.py` contains all logic (config, tools, agent, Telegram handler)
 - **LangChain v1:** automatic tool calling and conversation memory
 - **Direct SQL:** parameterized queries via psycopg2
@@ -229,7 +234,7 @@ thread history read back out of `agent_interactions`.
 ## 9. Development Workflow
 
 ### 9.1 Adding a New Agent
-1. **Read the pattern:** [blueprint/bot.py](blueprint/bot.py) and [blueprint/AGENT_SUMMARY.md](blueprint/AGENT_SUMMARY.md), then `agents/customer_service/` for what the pattern costs in production.
+1. **Read the loop that ships:** `agents/customer_service/backend_go/pkg/agent/agent.go` — dispatch, the trajectory `defer`, rehydration. [blueprint/bot.py](blueprint/bot.py) is the same pattern in 215 Python lines and is background reading, not an on-ramp ([ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md)).
 2. **Write the requirement first:** `docs/agent_requirements/<role>/<role>.md`, naming the views and functions that exist — a doc that names tables which the schema sweep removed is how an agent gets built against a fiction.
 3. **Fork the deployment, not the blueprint:** `cp -r agents/customer_service agents/<role>`, replace `pkg/crm` with your domain package, keep `pkg/agent`, `pkg/db`, `pkg/memory`, `pkg/logging`, `pkg/turn`.
 4. **Build the write half in SQL first** (`db/migrations/NNNN_*.sql`, next free number — see `db/MIGRATIONS.md` on why numbers cannot be reused), then the tool that calls it, with an idempotency key (ADR-005).
@@ -245,5 +250,5 @@ blueprint/tests/` (the reference, against a test database), and `scripts/agents/
 
 ---
 
-*This architecture emphasizes simplicity and maintainability. Each agent is a standalone, testable unit that follows the blueprint pattern.*
+*This architecture emphasizes simplicity and maintainability. Each agent is a standalone, testable unit following the pattern the blueprint first stated and the Go runtimes deploy.*
 *Complexity comes from orchestration and validation, not from individual agent complexity.*

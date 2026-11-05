@@ -18,7 +18,9 @@
   claim ladder exist in one place, so a caller that bypasses the door does not gain access it lacks, it
   loses the rules. That is what `code:cs_writes_through_doors` watches, and why the rule is checked in
   code rather than granted in SQL.
-- **Implementation:** Follows the blueprint pattern (`blueprint/bot.py`).
+- **Implementation:** `agents/customer_service/backend_go` — the blueprint pattern (`blueprint/bot.py`)
+  in a Go runtime. Why the runtime is not the Python reference:
+  [ADR-006](../../../ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md).
 
 ## Functional Requirements
 1.  **Retrieve Customer Info:**
@@ -77,9 +79,10 @@ Two implementations exist, and they share the requirements and the rules:
 
 - **Deployed**: `agents/customer_service/` - Go backend, HTTP and SSE, React UI. The reference for what
   this agent actually does.
-- **Reference**: `blueprint/` - the same surface in Python and LangChain, on Telegram. The other
-  deployed agent, `agents/inventory/`, is this loop with a different tool layer and a timer Read it for the
-  pattern; do not deploy it and expect this schema.
+- **Reference**: `blueprint/` - the same surface in Python and LangChain, on Telegram, and deprecated
+  as a runtime ([ADR-006](../../../ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md)).
+  The other deployed agent, `agents/inventory/`, is this loop with a different tool layer and a timer.
+  Read the blueprint for the pattern; do not deploy it and expect this schema.
 
 ### Tools
 
@@ -122,7 +125,7 @@ Two implementations exist, and they share the requirements and the rules:
 
 ### Deployment
 
-- **Run:** `docker compose up --build -d` in `agents/customer_service/` (publishes `:4550`); `python bot.py` in `blueprint/` for the reference implementation
+- **Run:** `docker compose up --build -d` in `agents/customer_service/` (publishes `:4550`); `python bot.py` in `blueprint/` runs the reference, which is not deployed on this server ([ADR-006](../../../ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md))
 - **Model:** `LLM_PROVIDER=local` against an OpenAI-compatible endpoint (`VLLM_BASE_URL`), or `azure_gcc_high`
 - **Database:** PostgreSQL at `AFPC_PG_HOST:AFPC_PG_PORT`, database `agent_first_erp_crm`, and every object in **`public`**. The environment table in `agents/customer_service/README.md` explains why the host has to be an IP address
 - **Tenant:** `AFPC_TENANT_ID`, required. It is resolved once at startup and set on every pooled connection, so a per-request tenant is not something this process can be asked to fake
@@ -137,4 +140,4 @@ Two implementations exist, and they share the requirements and the rules:
 
 ---
 
-*This agent follows the blueprint pattern. Future agents should replicate this structure.*
+*This agent follows the pattern the blueprint first stated. Future agents fork the Go deployment — `architecture.md` 9.1 — not the Python reference ([ADR-006](../../../ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md)).*

@@ -13,7 +13,9 @@ Before starting work, AI agents should review:
 
 ## Current Status
 
-✅ **Blueprint complete** - `blueprint/bot.py`, the pattern in one Python file
+✅ **Blueprint complete** - `blueprint/bot.py`, the pattern in one Python file — lineage since
+   [ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md) made the Go
+   backends the runtime
 ✅ **Two agents deployed** - `agents/customer_service/` (`:4550`, 14 tools) and `agents/inventory/` (`:4560`, 11 tools plus a 30-minute check timer)
 ✅ **Schema enforced, not documented-only** - 23 applied migrations; `./scripts/db/verify.sh` reports 37 structural checks green, `./scripts/db/test-functions.sh` runs one probe per review finding
 ✅ **A method that catches itself** - `scripts/agents/tool_testplan.sh` prompts every registered tool of both agents through the real endpoint and verifies the answer against the database (25 verdicts green, 2026-11-04); `scripts/docs/check_agent_docs.sh` fails when a README describes a tool or a view that is not there
