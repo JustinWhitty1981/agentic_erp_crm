@@ -16,7 +16,7 @@ This folder contains individual tool modules for the Agent First ERP CRM custome
 | `add_customer.py` | `add_customer_tool` | Add new customer (individual or business) |
 | `update_customer.py` | `update_customer_tool` | Update existing customer information |
 | `followup_customers.py` | `get_followup_customers_tool` | Get list of customers needing follow-up |
-| `communication_logger.py` | `log_communication`, `log_call`, `log_email`, `log_meeting` | Extended communication logging utilities |
+| `communication_logger.py` | `log_communication`, `log_call`, `log_email`, `log_meeting` | Plain helpers, **not registered tools** - `bot.py` imports nothing from here; the door is `add_communication.py` |
 
 ---
 
@@ -143,3 +143,13 @@ def process_request_tool(request: str) -> str:
 - `../AGENT_SUMMARY.md` - Blueprint pattern overview
 - `../../docs/database/agent_schema_reference.md` - Database schema reference
 - `../../docs/INTERACTION_LOGGING.md` - Interaction logging documentation
+
+### Two modules that are not registered tools
+
+| File | What it is |
+|---|---|
+| `tool_logger.py` | Per-call accumulation for the trajectory - it holds no database code, and its header explains why it used to (it once created `agent_tool_calls` at runtime, a second implementation of ADR-001's rule that never ran) |
+| `communication_logger.py` | `log_call` / `log_email` / `log_meeting` / `log_communication` as **plain helper functions**. `bot.py` imports none of them; the registered door is `add_communication.py`'s `add_communication`, which calls the database function of the same name |
+
+`TOOLS` in `bot.py` is the authority on what is registered - eight entries, and a module nothing imports
+is a tool the model cannot call.

@@ -2,7 +2,7 @@
 
 > **This is the design the review worked from, not the state of the database.** The tables it names
 > exist; the constraints, keys, tenancy and indexes did not when `docs/database/DATABASE_REVIEW.md`
-> read it, and 0002 through 0023 are what closed that gap. So read this page for *intent* - entity,
+> read it, and 0002 through 0026 are what closed that gap. So read this page for *intent* - entity,
 > contact, relationship, communication - and `db/README.md` plus the generated
 > `tables.md`/`views.md`/`indexes.md` beside it for what `pg_catalog` actually holds. Where this page
 > promises something the catalog does not have, the catalog is right and this page is the finding. A
@@ -22,7 +22,12 @@ This document outlines the PostgreSQL schema with PGVector support for the Agent
 ## Core Tables
 
 ### 1. `_schema_graph` (Knowledge Graph)
-Knowledge graph of the entire schema for AI agent understanding.
+**Declared by the baseline and empty: 0 rows, measured, and no migration or seed writes it.** The
+idea this section describes - a queryable graph of the schema for an agent to navigate by - was never
+wired up, and nothing breaks because of it: the same navigation is available from the catalog
+(`pg_class`, `pg_constraint`, `pg_indexes`) and from the register views `vw_domain_vocabulary`,
+`vw_rls_status`, `vw_audit_coverage` and `vw_idempotency_status`. If a future change fills this table,
+that is a migration with a reason attached, not a script a human runs.
 
 ```sql
 CREATE TABLE _schema_graph (

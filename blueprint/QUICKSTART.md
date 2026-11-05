@@ -2,7 +2,7 @@
 
 ## 📚 Before You Start
 
-For AI agents working on this project, see **[AGENTS.md](AGENTS.md)** for complete navigation guidance.
+For AI agents working on this project, see **[AGENTS.md](../AGENTS.md)** for complete navigation guidance.
 
 ## Prerequisites
 - Docker installed and running
@@ -12,14 +12,16 @@ For AI agents working on this project, see **[AGENTS.md](AGENTS.md)** for comple
 
 ## Step 1: Verify Database Schema
 
-Check if the `agent_first_erp_crm` schema exists:
+Check that the database is migrated — `agent_first_erp_crm` is a **database** name, never a schema: review 3.1 measured that no migration creates a schema by that name, so a `pg_namespace` query for it is the wrong test. The right one::
 ```bash
 psql -h {your-postgres-host} -U agent_first_erp_crm -d agent_first_erp_crm -c "SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'agent_first_erp_crm';"
 ```
 
-If it doesn't exist, create it and run the sample data:
+If the tables are missing, **do not** run `setup_sample_data.sql` — its first statement is
+`CREATE SCHEMA agent_first_erp_crm` and its tables land inside that schema, which no migration creates and
+no `vw_*` view reads through. Build the database the supported way:
 ```bash
-psql -h {your-postgres-host} -U agent_first_erp_crm -d agent_first_erp_crm -f blueprint/setup_sample_data.sql
+../scripts/db/db up && ../scripts/db/db seed
 ```
 
 ## Step 2: Configure Environment
@@ -53,8 +55,9 @@ docker-compose logs -f
 
 You should see:
 ```
-Starting Customer Service Bot with model: ornith:35b at http://{your-ollama-host}:11434
-Listening for messages...
+Starting customer service bot...
+Using Ollama model: <OLLAMA_MODEL>
+Bot is running! Waiting for messages...
 ```
 
 ## Step 5: Test the Bot
@@ -98,7 +101,7 @@ psql -h {your-postgres-host} -U agent_first_erp_crm -d agent_first_erp_crm -c "S
 ### Database Connection Error
 - Verify PostgreSQL is running: `docker ps | grep postgres`
 - Check credentials in `.env` match your PostgreSQL setup
-- Ensure `agent_first_erp_crm` schema exists
+- Ensure the database is migrated (`../scripts/db/verify.sh` answers 37 checks)
 
 ### Ollama Connection Error
 - Verify Ollama is running: `curl http://{your-ollama-host}:11434/api/tags`
@@ -110,13 +113,22 @@ psql -h {your-postgres-host} -U agent_first_erp_crm -d agent_first_erp_crm -c "S
 - Check bot logs: `docker-compose logs -f`
 - Ensure bot has been started in Telegram (send `/start`)
 
+> **The model line, for honesty.** This reference implementation talks to **Ollama**
+> (`ChatOllama`; the env keys are `OLLAMA_MODEL`, default `ornith:35b`, and `OLLAMA_BASE_URL`, whose
+> in-code default is the literal placeholder `http://{your-ollama-url}:11434` - unset it and the
+> blueprint cannot reach a model, which is worth knowing before assuming a connection bug). The deployed Go
+> agents do not: they call an OpenAI-compatible **vLLM** endpoint (`LLM_PROVIDER=local`,
+> `VLLM_BASE_URL`, `VLLM_MODEL`) - `../architecture.md` 6.1 has the current values and `curl
+> localhost:4550/api/health | jq` prints what a running process actually believes. The loop is the same;
+> only the endpoint behind it differs.
+
 ## Next Steps
 
-1. **Review the Blueprint:** Read [blueprint/bot.py](blueprint/bot.py) to understand the pattern
-2. **Study the Architecture:** Read [architecture.md](architecture.md) for system design
-3. **Understand the Blueprint Pattern:** Read [blueprint/AGENT_SUMMARY.md](blueprint/AGENT_SUMMARY.md)
-4. **Plan New Agents:** Review [PLAN.md](PLAN.md) for development roadmap
-5. **Database Documentation:** See [docs/database/](docs/database/) for schema reference
+1. **Review the Blueprint:** Read [bot.py](bot.py) to understand the pattern
+2. **Study the Architecture:** Read [architecture.md](../architecture.md) for system design
+3. **Understand the Blueprint Pattern:** Read [AGENT_SUMMARY.md](AGENT_SUMMARY.md)
+4. **Plan New Agents:** Review [PLAN.md](../PLAN.md) for development roadmap
+5. **Database Documentation:** See [docs/database/](../docs/database/) for schema reference
 6. **Add CAO Validation:** Build the validation layer for agent actions
 
 ---

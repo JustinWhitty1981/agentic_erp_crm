@@ -7,8 +7,9 @@ rebuilt for this schema — same loop, same streaming, different surface.
 Two things distinguish it from the reference drop, and both are the point of the directory:
 
 - **The CRM is a tool surface, not a prompt.** Eleven of the fourteen registered tools touch Postgres:
-  the eight CRM tools - four reading the `vw_*` views the schema publishes for agents (ADR-003), four
-  calling stored functions - and the three memory tools over `agent_memories`. The other three (a clock,
+  the eight CRM tools - three reading the `vw_*` views the schema publishes for agents (ADR-003), five
+  calling stored functions, of which `get_followup_customers` is a *read* with a parameter and so has a
+  door rather than a view - and the three memory tools over `agent_memories`. The other three (a clock,
   Tavily, and a guarded HTTP fetch) answer locally. No tool composes SQL against `entities` or
   `communications`, which is the rule 0021 put a scoreboard marker on.
 - **Memory, history, and the trail live in the database.** What the agent was told to remember is
@@ -60,7 +61,7 @@ absent, which is worth knowing when a deployment "works differently" on another 
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `AFPC_PG_HOST` | *(required — compose refuses without it)* | Host to connect to, and the reason there is no default: **it must be an IP the leaf certificate lists in its `subjectAltNames`**, which is a fact about whichever machine provisioned it. `scripts/db/init.sh` writes it to `agents/customer_service/.env` (gitignored) for exactly this reason, and `docker exec afpc-pg openssl x509 -in /certs/server.crt -noout -ext subjectAltName` reads the whole list off the running server. A hostname fails `verify-full`. |
+| `AFPC_PG_HOST` | *(required — compose refuses without it)* | Host to connect to, and the reason there is no default: **it must be an IP the leaf certificate lists in its `subjectAltNames`**, which is a fact about whichever machine provisioned it. `scripts/db/init.sh` writes it to `agents/customer_service/.env` (gitignored) — and to a file beside **every** `agents/*/docker-compose.yml`, because Compose interpolates `${...}` only from the project's own `.env`, so one shared file would re-provision half the agents. `docker exec afpc-pg openssl x509 -in /certs/server.crt -noout -ext subjectAltName` reads the whole list off the running server. A hostname fails `verify-full`. |
 | `AFPC_PG_PORT` | `5432` | |
 | `AFPC_PG_DB` | `agent_first_erp_crm` | |
 | `AFPC_PG_USER` | `afpc_app` | The runtime role. Read-only roles cannot write, and the tools would fail at the grant. |
@@ -228,7 +229,8 @@ agents/customer_service/
 │       ├── memory/             agent_memories, with the file store as an explicit fallback
 │       ├── tools/              the registry, and the non-CRM tools
 │       └── turn/               what turn a call is running in — the leaf everything reads
-└── frontend/                   the React UI, pointed at :4550
+└── frontend/                   the React UI: built into backend_go/static, served by this binary,
+                                and talking to window.location.origin - so the same dist runs on any port
 ```
 
 The import graph is a DAG with `ids` and `turn` as leaves. It is worth naming because the alternative

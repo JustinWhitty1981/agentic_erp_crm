@@ -49,29 +49,43 @@ Thank you for your interest in contributing to Agent First ERP CRM! This documen
    pip install -r blueprint/requirements.txt
    ```
 
-4. **Configure environment variables**
+4. **Bring up the database** - one command, and it is the only route that produces the schema the
+   agents and the harnesses expect:
    ```bash
-   cp blueprint/.env.example blueprint/.env
-   # Edit blueprint/.env with your database credentials
+   ./scripts/db/db up        # container, TLS, roles, then every file in db/migrations/ in order
+   ./scripts/db/db verify    # 37 structural assertions over the catalog you just built
+   ./scripts/db/db seed      # db/seeds/*.sql - demo data, idempotent, no DDL
+   ./scripts/db/db status    # what has been applied, and which container is running
    ```
+   `db up` generates `dev/.env` with random local credentials (mode 600, gitignored) and writes an
+   `AFPC_PG_HOST` line into each `agents/*/.env`, because the address the server certificate lists is a
+   fact about your machine and not about this repository.
 
-5. **Set up PostgreSQL database**
-   ```bash
-   # Create the database
-   createdb agent_first_erp_crm
-   
-   # Apply schema
-   psql -d agent_first_erp_crm -f scripts/database/agent_first_erp_crm_schema.sql
-   psql -d agent_first_erp_crm -f scripts/database/08_create_views.sql
-   psql -d agent_first_erp_crm -f scripts/database/09_customer_functions.sql
-   psql -d agent_first_erp_crm -f scripts/database/10_audit_log.sql
-   psql -d agent_first_erp_crm -f scripts/database/11_interaction_logging.sql
-   ```
+   **Do not apply `scripts/database/*.sql`, `blueprint/*.sql`, or
+   `docs/database/agent_first_erp_crm_schema.sql`.** They are the pre-`0001` copies the schema was
+   ported *from* - `db/README.md` lists each one against the migration that superseded it - and several
+   of their statements are qualified to `agent_first_erp_crm`, the schema
+   `docs/database/DATABASE_REVIEW.md` 3.1 measured that no migration creates. Run them and you get a
+   database where `SELECT * FROM vw_customers` answers and the rows a script wrote are invisible to
+   every view, which is the symptom to recognise, not a bug to fix in the caller.
 
-6. **Run tests**
+5. **Configure the agents** - the keys each process reads are in its own README:
+   [`agents/customer_service/README.md`](agents/customer_service/README.md) and
+   [`agents/inventory/README.md`](agents/inventory/README.md). There is no `blueprint/.env.example` to
+   copy: `blueprint/` is the reference implementation, and it reads the variables its README names.
+
+6. **Run the checks** - five things can be wrong independently, and each has its own harness:
    ```bash
-   pytest blueprint/tests/ -v
+   ./scripts/db/verify.sh                 # catalog structure, no fixtures
+   ./scripts/db/test-functions.sh         # one probe per review finding, against a copy, residue-checked
+   ./scripts/docs/check_agent_docs.sh     # that the documentation still describes the code
+   cd agents/customer_service/backend_go && go test ./...
+   ./scripts/agents/tool_testplan.sh      # one prompt per registered tool, verified against rows
    ```
+   Do **not** run `pytest blueprint/tests/` to check your work: two of its files commit DDL at import,
+   against whichever database `POSTGRES_DB` names - which defaults to the live one. The warning is in
+   [`blueprint/tests/README.md`](blueprint/tests/README.md), and the reason is in `AGENTS.md`'s Testing
+   section.
 
 ---
 
@@ -106,10 +120,12 @@ Thank you for your interest in contributing to Agent First ERP CRM! This documen
 
 **Example:**
 ```
-feat(customer): add search by email function
+feat(customer): make the email lookup a door, not a LIKE
 
-Added search_customers_by_email function to enable
-lookup of customers by their email address.
+Adds lookup by email to the customer read path. One selector per call, because two
+ILIKE clauses over one row set answer for whichever column matched first - the rule
+0016's add_customer refuses on and 4_7 probes. The Python reference stays as it is:
+substring, LIMIT 5, both matches returned.
 
 Closes #123
 ```
@@ -196,37 +212,63 @@ Closes #123
 
 ```python
 import unittest
-from blueprint.tools.customer_tools import get_customer_by_id
+from blueprint.tools.customer_lookup import get_customer_info   # the module and tool that exist
 
 class TestCustomerLookup(unittest.TestCase):
-    
-    def test_get_customer_by_id_returns_customer(self):
-        """Test that get_customer_by_id returns a customer."""
-        result = get_customer_by_id(1)
-        self.assertIsNotNone(result)
-        self.assertIn('name', result)
-    
-    def test_get_customer_by_id_not_found(self):
-        """Test that get_customer_by_id handles missing customers."""
-        result = get_customer_by_id(99999)
-        self.assertIsNone(result)
+    # The blueprint's tools are LangChain @tool objects, so a unit test calls the function
+    # behind the decorator with .func - and it needs a live database, because the tool opens
+    # its own psycopg2 connection per call (DB_CONFIG defaults to POSTGRES_DB=agent_first_erp_crm,
+    # i.e. the real one). That dependency is why this repository checks this surface in SQL
+    # (db/tests/4_7) and through a prompt (scripts/agents/tool_testplan.sh) rather than here.
+
+    def test_lookup_by_name_returns_text(self):
+        result = get_customer_info.func("Alice Nguyen")
+        self.assertIsInstance(result, str)
+        self.assertIn("Alice", result)
+
+    def test_a_missing_customer_is_a_string_and_not_a_crash(self):
+        # `WHERE name ILIKE %s ... LIMIT 5` -> "No customers found matching '...'", and an
+        # exception is caught and returned as text too. The contract is a string either way,
+        # so a lookup failure cannot become an unhandled error the model retries forever
+        self.assertIsInstance(get_customer_info.func("Nobody Here"), str)
 ```
+
+> **One behavioural difference to know before copying a blueprint tool into an agent.** The Python
+> lookup is a substring `ILIKE` with `LIMIT 5`: a name that matches two customers returns *both*, and
+> the model picks. The deployed `get_customer_info` takes one selector at a time and the write doors
+> refuse an ambiguous selection with the candidates listed - that is 0016's and 0021's rule, and probe
+> `4_4` asserts it. The blueprint reads; the deployment refuses to guess.
 
 ### Running Tests
 
+The harnesses, and what each one is for:
+
 ```bash
-# Run all tests
-pytest blueprint/tests/ -v
+# Structure: constraints, grants, policies, indexes - no fixtures, no data assumptions
+./scripts/db/verify.sh
 
-# Run specific test file
-pytest blueprint/tests/test_functions.py -v
+# Behaviour: one probe per review finding (db/tests/N_N_*.sql), run against a COPY of the
+# database with a row-count residue check around it, and a CASE table that says which
+# migration each verdict is supposed to close. This is also where the code:* markers report.
+./scripts/db/test-functions.sh
 
-# Run with coverage
-pytest blueprint/tests/ --cov=blueprint --cov-report=html
+# The agent loop, the tool wiring, the derivations - against fakes, no database
+cd agents/customer_service/backend_go && go test ./...
+cd agents/inventory/backend_go        && go test ./...
 
-# Run with verbose output
-pytest blueprint/tests/ -v -s
+# Documentation vs surface: a tool in code and not in a README fails, and so does a view
+# a page promises that pg_class has never heard of
+./scripts/docs/check_agent_docs.sh
+
+# Acceptance: what a human gets. One prompt per registered tool through POST /api/chat,
+# each verified on three planes - the call happened, the state is real, the run recorded
+./scripts/agents/tool_testplan.sh
 ```
+
+`blueprint/tests/` is not on this list on purpose. Its five files are import-time scripts, `grep -c
+'def test_'` answers 0 for all of them, and two commit `CREATE FUNCTION` stubs over the customer doors.
+The reference implementation's behaviour is asserted instead by `db/tests/` probes against the SQL those
+tools call, and by `go test` against the loop that replaced them.
 
 ---
 
@@ -234,11 +276,16 @@ pytest blueprint/tests/ -v -s
 
 ### Documentation Structure
 
-- **README.md** - Project overview and quick start guide
-- **ARCHITECTURE.md** - System architecture and design decisions
+- **README.md** - Project overview and what is deployed
+- **architecture.md** - System architecture and agent roles (lower-case; on a case-sensitive filesystem
+  `ARCHITECTURE.md` is a broken link, which is what this page said until someone tried to click it)
+- **AGENTS.md** - the route map for an agent working in this repository, including the five harnesses
 - **blueprint/docs/** - Agent-friendly SQL documentation
 - **docs/database/** - Database schema and reference documentation
-- **docs/agent_requirements/** - Domain-specific agent requirements
+- **docs/agent_requirements/** - what each role is specified to do, plus `agent_test_plan.md`, the
+  acceptance plan every registered tool is proven by
+- **agents/customer_service/** and **agents/inventory/** - the two **deployed** agents (Go backend,
+  React UI, `:4550` and `:4560`). `blueprint/` is the pattern they descend from, in one Python file
 
 ### Documentation Guidelines
 

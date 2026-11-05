@@ -1,6 +1,6 @@
 # ADR-004: Agent-First Interface Design
 
-**Status:** Accepted  
+**Status:** Accepted - see *Consequence accounting* below for which promises the code kept
 **Date:** July 2026  
 **Authors:** Agent First ERP CRM Team
 
@@ -37,6 +37,26 @@ Agent: "Sales are up 15% compared to last month."
 ```
 
 ---
+
+## Consequence accounting (measured, 2026-11-05)
+
+- **Chat-first held; "no frontend needed" did not, and that is the honest amendment.** Both deployed
+  agents ship a React UI - `agents/*/frontend/`, built into the binary's `static/`, calling
+  `window.location.origin`, so the same bundle runs on any port and there is nothing to reconfigure per
+  environment. It is ~1 file of chat surface over the SSE endpoint: no dashboard, no forms, no grid.
+  So "No Dashboard Required" is true in exactly the sense intended, and "simpler code - no frontend
+  framework needed" is false: the framework is `react`+`vite` and it is about 300 lines.
+- **The transports differ from the plan.** Telegram is in the blueprint and in the upstream reference
+  drop; the deployed agents speak HTTP (`POST /api/chat`) and SSE (`POST /api/chat/stream`), and the
+  loop does not care which is attached - the transport is a `main.go` change, which is the sentence this
+  ADR should have led with.
+- **"queries communications and orders" is stale in a way that mattered:** there is no `orders` table.
+  The agent reads `communications` and the inventory views; `orders` is a planned table, and
+  `inventory_reservations.order_id` is a uuid with an `order_type` and no referent, which is the shape of
+  "planned" in the schema rather than in prose.
+- The consequence this ADR under-sold: an agent-first interface makes the **trajectory the API**, since
+  nothing else records what happened. That is why `run_id` is now returned by `POST /api/chat` and why
+  `GET /api/interactions` exists on both agents.
 
 ## Consequences
 

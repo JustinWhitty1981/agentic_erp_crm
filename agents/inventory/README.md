@@ -22,10 +22,12 @@ than rewritten (same loop, same SSE contract, four identity strings different), 
 `backend_go/static` which the binary then serves. `GET /` with no build present answers the
 service JSON — which is the whole of what a bare port-check sees, and is not an error.
 
-It talks to the same `afpc-pg` and the same tenant as the customer service agent. `AFPC_PG_HOST`
-is read from `agents/customer_service/.env` — the file `scripts/db/init.sh` writes with the
-address the leaf certificate lists — rather than copied, so a re-provision updates both agents by
-updating one file.
+It talks to the same `afpc-pg` and the same tenant as the customer service agent. `AFPC_PG_HOST` comes
+from **this directory's** `.env`, which `scripts/db/init.sh` writes with the address the leaf
+certificate lists — one file per agent directory, deliberately, because Compose interpolates `${...}`
+only from the project's own `.env` and the shell, never from an `env_file` entry. Reading it across
+directories from `agents/customer_service/` would update one agent on a re-provision and leave the other
+pointing at an address the new certificate no longer lists, silently.
 
 The demo data this agent reads is `db/seeds/02_demo_inventory.sql`: ten items across two
 warehouses with thirty days of movement history, arranged so the alert view has a CRITICAL line,
@@ -128,3 +130,11 @@ Keys this container sets; the shared ones mean what they mean in
    itself dying.
 3. `SELECT * FROM vw_audit_coverage` says the trail exists; `audit_chain_verify()` says it is
    intact; `agent_memories` keyed `inventory.alert.state` says what the timer last believed.
+
+## Related
+
+- `docs/agent_requirements/inventory/inventory.md` — what this agent is specified to do
+- `docs/agent_requirements/agent_test_plan.md` — the acceptance plan; cases 16–21 are this surface, and case 21 is the timer
+- `agents/customer_service/` — the sibling this one is forked from; shared keys mean what they mean there
+- `db/migrations/0014_*.sql`, `0015_*.sql`, `0026_*.sql` — the movement contract, the reservation door, and the ledger-order fix that door needed
+- `scripts/agents/tool_testplan.sh` — the plan's executable form

@@ -10,7 +10,7 @@ development server, so **the data volume is durable and is never recreated impli
 | Secrets | `dev/.env`, mode 600, gitignored. Not in the repo, not in the image |
 | TLS | volume `afpc_tls` at `/certs`; CA copy in `dev/tls/afpc-ca.crt` |
 | Migrations | `db/migrations/`, applied in order by `scripts/db/migrate.sh` |
-| The agent | container `afpc-customer-service` from `agents/customer_service/`, publishing `:4550`; `agents/jada` is the reference drop it was derived from and `:4545` is the container that predates it |
+| The agents | `afpc-customer-service` from `agents/customer_service/` on `:4550`, and `afpc-inventory-agent` from `agents/inventory/` on `:4560` - two compose projects, one database, separated in every row by `AGENT_ROLE`. `agents/jada` is the reference drop the first was derived from, and `:4545` is the container that predates both |
 | Not here | the LiteLLM database (`litellm-db-1`) publishes no host port and is on its own network; nothing in this setup reads or routes to it |
 
 ## Auditing from any server on the network
@@ -28,8 +28,9 @@ psql "host=<IP> port=5432 dbname=agent_first_erp_crm user=afpc_auditor \
 ```
 
 **Where to read `<IP>` off the machine itself.** `scripts/db/init.sh` puts it in
-`agents/customer_service/.env` as `AFPC_PG_HOST`, and the leaf certificate carries every address that
-will pass `verify-full`:
+a `.env` beside **every** `agents/*/docker-compose.yml` as `AFPC_PG_HOST` - one owned copy per
+agent, because Compose interpolates from the project's own file only - and the leaf certificate
+carries every address that will pass `verify-full`:
 
 ```bash
 docker exec afpc-pg openssl x509 -in /certs/server.crt -noout -ext subjectAltName
@@ -218,9 +219,12 @@ that was a coin flip the agent lost, then served all day with `crm_tools: 0` whi
 no-database file mode, which says `not configured` at 200 because it was chosen rather than broken.
 `TestRetryPingHoldsThroughTheBootRace` and `TestHealthTellsNoDatabaseFromABlindProcess` in
 `cmd/server/main_test.go` pin both halves. The manual fix for an agent that came up blind anyway:
-`docker restart afpc-customer-service` once the database answers. Startup also probes for
-`add_communication`, `save_memory` and `get_followup_customers`, which is how a database migrated to
-before `0021` announces itself instead of failing on the first write.
+`docker restart afpc-customer-service` once the database answers. The health handler also probes,
+on every request, for `add_communication`, `save_memory` and `get_followup_customers` - one door per
+migration this deployment needed, 0021/0023/0022 - which is how a database migrated to before `0021`
+announces itself instead of failing on the first write. `agents/inventory/` probes its own pair
+(`reserve_inventory_for_order`, `save_memory`): the list is a claim about which doors a process opens,
+and a forked probe list reports `healthy` about a database that agent cannot write to.
 
 **A streaming turn hangs for the whole timeout behind a buffering proxy.** SSE needs to reach the
 client incrementally; anything that buffers the response turns a working agent into one that appears
@@ -440,8 +444,9 @@ for "integer columns named id" without `c.relkind IN ('r','p')` will try
 `indkey` zero-subscripting trap below: the catalog is wider than the schema you are
 thinking about.
 
-**`public` is not all yours.** pgvector installs 198 functions and 4 aggregates (`array_agg`,
-`avg`, `sum`) into it. `pg_get_functiondef()` *raises* on an aggregate, so a loop over
+**`public` is not all yours.** The five extensions own 198 of its procedures between them - 194
+functions and 4 aggregates, and pgvector's share of that is 118 plus the `avg`/`sum` over
+`vector` and `halfvec`. `pg_get_functiondef()` *raises* on an aggregate, so a loop over
 `pg_proc` filtered only by namespace dies on a row that has nothing to do with you. Exclude
 extension-owned objects via `pg_depend.deptype = 'e'`.
 
@@ -507,8 +512,9 @@ that **none of the 14 domain views reads any `version` column** - `vw_inventory_
 and is one of the 14, but its columns come from `inventory_on_hand.quantity`/`unit_cost`, not from
 the optimistic-lock counter. That settles 0010's "propagate `version` through the views" note:
 there is no view to propagate it through, so 010 either drops that item or says which view it
-meant. (`pg_views` shows 16 rows in `public`; the extra two are `pg_stat_statements*`, extension
--owned, which is why the catalog line counts 14.)
+meant. (`pg_views` counts more rows than the schema has views: the two `pg_stat_statements*` views are
+extension-owned, so a `vw_` census and a catalog census are different numbers - count with
+`WHERE viewname LIKE 'vw_%'`, which is 23 today, and never from a page.)
 
 **`split_part` takes three arguments**, `cardinality()` ignores array subscripts while `array_length`
 does not, and `unnest()` of a zero-based vector is still iterated in order - three small ways an
@@ -616,7 +622,8 @@ the function behaves perfectly. Give the fixture only the defect under test, and
 verdict depends on *which* guard fired, assert the message as well as the outcome.
 
 **A migration cannot open a second connection, so some assertions belong in CI instead.**
-pgvector and pg_trgm are the only extensions 0000 installs: no `dblink`, no `postgres_fdw`, and
+The extensions 0000 installs are `vector`, `pg_trgm`, `uuid-ossp`, `pgcrypto` and
+`pg_stat_statements` — no `dblink`, no `postgres_fdw`, and
 a `SET LOCAL ROLE` probe still runs in the same backend. Anything whose claim is about two
 transactions at once - a claim that serialises, a lease that expires mid-write - can be measured
 from this host but not shipped as a check, and the honest place for it is T3's replay job, not a

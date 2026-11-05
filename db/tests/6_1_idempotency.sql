@@ -270,6 +270,15 @@ BEGIN
                      'garbage-collection clause';
         RETURN;
     END IF;
+    -- Baseline first, and this is not cosmetics. The sweep collects EVERY expired claim, and a
+    -- database with agents actually running on it has expired claims of its own: nothing in either
+    -- backend calls idempotency_sweep (0011's retention clock "runs for nobody unless someone
+    -- schedules it", db/MIGRATIONS.md), so they pile up until a probe like this one counts them.
+    -- That is how this case went from CLOSED to a false alarm the day the acceptance harness left
+    -- seven expired add_customer claims behind it: the assertion was "the sweep deleted 1", and the
+    -- honest answer was 8. Emptying the field first makes v_gone mean the rows inserted below, and
+    -- costs nothing, because the DELETE is inside the transaction this block rolls back.
+    PERFORM idempotency_sweep();
     INSERT INTO idempotency_keys (idempotency_key, tenant_id, operation, request_hash, status,
                                   lease_expires_at, expires_at)
     VALUES (gen_random_uuid(), afpc_current_tenant(), '6_1:old', 'h', 'completed',

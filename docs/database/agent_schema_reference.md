@@ -1,6 +1,15 @@
 # Agent First ERP CRM Database Schema Reference
 
-**Purpose:** Simplified schema reference for AI agents to understand and query the database.
+> **As-found design, not the current database.** This is the page the 2026-07 schema review was
+> written *against*: its tables are the shape `0001_baseline_canonical_port.sql` ported, several of its
+> notes were findings rather than facts, and it has no `tenant_id` in any column list because ten
+> migrations added that column afterwards. For the schema as it is, read
+> [../../db/README.md](../../db/README.md) (the source of truth), the generated
+> [tables.md](tables.md)/[views.md](views.md)/[indexes.md](indexes.md), or the catalog itself:
+> `\d <table>`. This page is kept because `docs/database/schema.md` and the review cite it, and a
+> record of what the review found is part of why the fixes have checks.
+
+**Purpose:** Simplified schema reference, describing the pre-remediation design.
 
 ---
 
@@ -150,11 +159,22 @@ LIMIT 50;
 
 ## Important Notes
 
-1. **Vector Embeddings**: `entities`, `contacts`, `communications` have 1536-dimension embeddings for semantic search
-2. **Row Level Security**: `inventory_movements` and `inventory_reservations` have RLS policies
-3. **Audit Trail**: All bot actions are logged via `human_sessions` → `bot_actions`
-4. **Threading**: Communications use `parent_id` and `thread_root_id` for conversation threads
-5. **Status Fields**: Most tables have `is_active` or `status` fields for soft deletes
+1. **Vector Embeddings**: `entities`, `contacts` and `communications` declare `vector(1536)` columns,
+   and 0012 built their hnsw indexes. **Nothing writes them** - no embedder in this deployment
+   produces 1536 dimensions (measured: the local models answer 1024 and 4096), so semantic search is
+   not available and no query here should depend on it
+2. **Row Level Security**: this line used to single out two tables, which was the pre-0009 state. Since
+   0009 RLS is `FORCED` on **every** tenant-coded table - 21 today, with 42 policies, and the five
+   global tables and one build ledger declared exempt rather than forgotten. `vw_rls_status` publishes
+   each predicate verbatim with a verdict
+3. **Audit Trail**: `human_sessions` and `bot_actions` are the design's answer and both have **zero
+   rows** - nothing writes them. The live trail is `agent_interactions` (one row per run) plus
+   `audit_log` (one row per row-change, chained, since 0013). See [audit_schema.md](audit_schema.md)
+4. **Threading**: `communications.parent_id` and `thread_root_id` - true, and `thread_root_id` got its
+   first writer in 0021, so a reply to a reply lands on the thread the first message started
+5. **Status Fields**: `status` and `is_active` are ordinary columns here, **not** soft deletes: soft
+   delete and bitemporal control are the still-unapplied `0025`. What 0007 did add is the CHECK'd
+   vocabulary each accepts, published by `vw_domain_vocabulary`
 
 ---
 

@@ -2,7 +2,21 @@
 
 **Purpose:** Comprehensive audit trail for all human-bot interactions.
 
-**Location:** `scripts/database/10_audit_log.sql`
+> **Superseded page for a live table.** The DDL below is what `blueprint/10_audit_log.sql` and
+> `scripts/database/10_audit_log.sql` contain, and both create `agent_first_erp_crm.audit_log` -
+> the twin schema no migration makes. The table the database actually has is **`public.audit_log`**,
+> built by `db/migrations/0013_audit_log.sql`: `row_pk` is **jsonb** (`{"id": 15}`, because one
+> trigger serves eighteen tables with different key shapes), updates carry only the changed columns,
+> the runtime role holds INSERT and SELECT only, and each row chains to the previous one by sha256
+> segmented per tenant and month - `audit_chain_verify()` recomputes the chain and reports which
+> segment broke. `vw_audit_coverage` is the scoreboard of which tables are trailed and which are
+> exempted with a published reason. Read those four objects rather than trusting anything below.
+> Two concrete differences worth knowing before you copy from this page: `audit_summary`'s
+> uniqueness is `(tenant_id, date, user_id, bot_id)` - not the three-column key shown further
+> down - and `idx_bot_actions_session_id` leads with `tenant_id`. Neither table has a writer in
+> either deployed agent, so both hold zero rows.
+
+**Location (as written):** `scripts/database/10_audit_log.sql` - superseded by `db/migrations/0013_audit_log.sql`
 
 ---
 

@@ -16,7 +16,11 @@ For every interaction, we capture:
 
 ### 1. **Correlation Context**
 - `conversation_id`: Links all messages in a single conversation thread
-- `telegram_chat_id`: The Telegram chat/group ID
+- `telegram_chat_id`: **in the deployed agents this column carries the HTTP/SSE thread id**, not a
+  Telegram id - `pkg/logging/interactions.go` writes `row["thread_id"]` into it, which is why live
+  values read `default`, `web:date-check`, `tp_4_195257` and the scheduled check's `schedule`. The
+  column name is the pre-0001 design's; the value is this deployment's. `telegram_message_id` and
+  `user_id` are in the table and are written by nothing (0 of 99 rows)
 - `telegram_message_id`: The specific message that triggered the interaction
 - `bot_id`: Which bot instance handled the request
 - `user_id`: The user's Telegram ID
@@ -24,7 +28,11 @@ For every interaction, we capture:
 ### 2. **Request Details**
 - `human_input`: The raw user prompt
 - `intent_classification`: Auto-detected intent (e.g., "customer_lookup")
-- `confidence_score`: Model's confidence in the intent
+- `confidence_score`, `intent_classification`, `feedback_score`: **columns with no writer in this
+  deployment.** The Go recorder's column list (`interactions.go:323-326`) does not include them, so
+  they are NULL on every row either agent has filed - 0 of 99. They are not a gap in logging, they
+  are a design idea the loop never adopted, and any query that filters on one answers zero rows
+  and looks like an empty system
 
 ### 3. **Agent Trajectory** (Most Valuable!)
 - `agent_thoughts`: The LLM's internal reasoning ("Thought: I should search for...")
@@ -87,7 +95,12 @@ log_id = log_agent_trajectory(
 
 ### In the Telegram Bot
 
-The blueprint's `bot.py` logs every turn it serves. (`bot_with_logging.py` is the name this page used
+**The blueprint's `bot.py` does not log any turn it serves.** `grep -c log_agent_trajectory
+bot.py` answers 0: the writer (`blueprint/interaction_logger.py`) exists, is correct, and is not
+imported by the loop, so a reference-implementation run files no `agent_interactions` row. The
+deployed Go agents are the opposite case - the record is written in the loop's `defer`, so a run
+that panics or is cancelled still lands its row, and `scripts/agents/tool_testplan.sh` reads that
+row back as one of its three verification planes. (`bot_with_logging.py` is the name this page used
 for it; that file is not in the repository, which is the kind of thing `T4`'s check looks for in the
 docs rather than in the code.)
 
@@ -145,41 +158,65 @@ ORDER BY timestamp DESC;
 ### Analyze Tool Performance
 
 ```sql
-SELECT 
-    (actions_taken->>'tool') as tool_name,
-    COUNT(*) as call_count,
-    AVG(duration_ms) as avg_duration_ms,
-    SUM(CASE WHEN error_message IS NOT NULL THEN 1 ELSE 0 END) as error_count
-FROM agent_interactions,
-     jsonb_array_elements(actions_taken) as actions_taken
-GROUP BY tool_name
-ORDER BY call_count DESC;
+-- Do not aggregate actions_taken by hand. This is the form this page carried, and it is not an
+-- error - it is worse than an error:
+--
+--   SELECT (actions_taken->>'tool') as tool_name, COUNT(*) as call_count
+--     FROM agent_interactions, jsonb_array_elements(actions_taken) as actions_taken
+--    GROUP BY tool_name;
+--
+-- The alias shadows the column it was expanded from, so `->>'tool'` resolves against the
+-- wrong thing and the query answers ONE row - tool_name NULL, call_count 265 on this server
+-- this minute. A green result that means nothing.
+--
+-- vw_tool_calls derives the per-call grain positionally instead - step n of actions_taken
+-- with step n of tool_observations, because the loop appends one of each per iteration - and
+-- vw_tool_performance counts at that grain while timing and erroring at the run grain:
+SELECT tool_name, call_count, run_count, mean_run_duration_ms, errored_run_pct
+  FROM vw_tool_performance
+ ORDER BY call_count DESC;
 ```
+
+One truth the view cannot express, stated in 0017's own words: **per-call errors are not
+derivable.** The base table has one `error_message` per *run*, and `tool_observations[].type`
+is a Python class name that reads `str` for a result and for an error alike, so `run_errored`
+on a per-call row is a run-level fact wearing a call's clothes. `vw_tool_performance`'s error
+percentage is therefore "runs that used this tool and errored", which is a different number
+from "calls that failed" and is named that way on purpose.
 
 ### Find Low-Confidence Intent Classifications
 
+**This query cannot work on this server, and the reason is a fact about the schema.** Neither
+deployed agent writes `intent_classification` or `confidence_score` - they are not in the Go
+recorder's column list (`pkg/logging/interactions.go`), and 0 of 101 rows have either. The
+design assumed the model would report its own confidence; what shipped is the model's reasoning
+text in `agent_thoughts`, which a reader can judge. Kept so a future embedder of intent scoring
+knows the columns are waiting:
+
 ```sql
-SELECT 
-    human_input,
-    intent_classification,
-    confidence_score,
-    final_output
-FROM agent_interactions 
-WHERE confidence_score < 0.7
-ORDER BY confidence_score ASC;
+SELECT human_input, intent_classification, confidence_score, final_output
+  FROM agent_interactions
+ WHERE confidence_score < 0.7           -- answers 0 rows here, always
+ ORDER BY confidence_score ASC;
+
+-- What answers the same *question* today: runs that took more than one tool call and still
+-- errored, which is the closest observable to "the agent was unsure":
+SELECT run_id, left(human_input, 60) AS asked, step_count, error_message
+  FROM vw_recent_interactions
+ WHERE error_message IS NOT NULL
+ ORDER BY "timestamp" DESC LIMIT 20;
 ```
 
 ### Get Full Trajectory for a Specific Interaction
 
 ```sql
-SELECT 
-    human_input,
-    agent_thoughts,
-    actions_taken,
-    tool_observations,
-    final_output
-FROM agent_interactions 
-WHERE id = 'interaction-uuid-here';
+-- id is the row's uuid primary key; run_id is the one a caller is given (POST /api/chat returns
+-- it). Use whichever you have - and put a real uuid in, because a placeholder word fails 22P02:
+-- that is the column being strict about its type, not the query being wrong.
+SELECT human_input, agent_thoughts, actions_taken, tool_observations, final_output,
+       response_sources, error_message, duration_ms
+  FROM agent_interactions
+ WHERE id = 'interaction-uuid-here';        -- or: WHERE run_id = 'the-run-uuid'
 ```
 
 ## Views for Quick Analysis
@@ -218,8 +255,14 @@ is the run.
 One row per tool invocation, derived by position
 
 ```sql
+-- The correlation key is run_id, the value POST /api/chat returns and SSE carries in its done
+-- event. interaction_id is the row's own uuid and no caller is ever handed it, so filtering by
+-- it works only after you have found the row some other way. Replace the placeholder with a
+-- real uuid: a bare word fails 22P02, which is the column being strict, not the query being wrong.
 SELECT step_number, tool_name, tool_input, observation #>> '{}' AS output
-  FROM vw_tool_calls WHERE interaction_id = 'the-run-uuid' ORDER BY step_number;
+  FROM vw_tool_calls
+ WHERE run_id = '4f9b1c2e-7a5d-4e8b-9c3f-1d2e3f4a5b6c'
+ ORDER BY step_number;
 ```
 
 Step *n* of `actions_taken` paired with step *n* of `tool_observations`. This is the grain a table
@@ -316,7 +359,10 @@ agent_executor = AgentExecutor(
 
 ### Performance Impact
 
-Logging is asynchronous and shouldn't impact response times. If you notice slowdowns:
+Recording is **synchronous**, inside a `defer`, with a context detached from the request's and a
+deadline of its own (10s). That is a deliberate trade: an async writer would lose exactly the runs
+where a client gave up on a slow tool, which are the most useful rows in the table - and the cost
+is the tail of the turn's latency. If you notice slowdowns: If you notice slowdowns:
 1. Check database performance
 2. Consider batching logs
 3. Use connection pooling
@@ -331,6 +377,22 @@ Logging is asynchronous and shouldn't impact response times. If you notice slowd
 
 ## Related Documentation
 
-- [Database Scripts README](../scripts/database/README.md)
+- [db/README.md](../db/README.md) - the schema's source of truth. (`scripts/database/` is the superseded pre-0001 copies; its README opens with why nothing in it should be run.)
 - [Blueprint Documentation](../blueprint/README.md)
 - [Agent Requirements](../docs/agent_requirements/)
+
+## In the deployed agents
+
+Both Go agents write this table from one place, `pkg/logging`: the loop accumulates a run's tool calls
+and observations, and a `defer` files the row with `run_id`, `conversation_id` (a UUIDv5 of the thread,
+`pkg/ids`), `bot_id` from `AGENT_ROLE`, `duration_ms`, and `response_sources` naming the rows it touched.
+Two consequences worth knowing before debugging with this page:
+
+- **Read it through the endpoint as well as the table.** `GET /api/interactions?view=recent|failed|tool_calls|performance`
+  is the agent reading its own trajectory, and `&bot_id=inventory` filters to one agent's rows.
+  (`performance` groups by tool across every agent, so asking it for one agent is refused rather than
+  answered with everyone's.)
+- **`vw_tool_calls` is derived, not stored.** Step *n* of `actions_taken` pairs with step *n* of
+  `tool_observations`, and `observations_aligned` states whether that agreement held. A run whose
+  observations did not align is a recorder bug or a panic mid-loop, and it is visible as a column
+  rather than something you notice by reading prose.

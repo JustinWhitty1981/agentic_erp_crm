@@ -54,7 +54,7 @@ SELECT * FROM agent_first_erp_crm.get_followup_customers(7);
 
 ## Next Steps
 1. ✅ Functions created and verified in database
-2. ⏳ Test the customer service bot through Telegram to confirm the tools work end-to-end
+2. ⏳ Test the customer service bot through Telegram - *then-open step, since closed differently:* neither deployed agent has a Telegram transport. The equivalent today is `./scripts/agents/tool_testplan.sh`, which drives both agents over HTTP and verifies each turn against the database to confirm the tools work end-to-end
 3. ⏳ Deploy the updated functions to production (if different from test)
 
 ## Git Commit

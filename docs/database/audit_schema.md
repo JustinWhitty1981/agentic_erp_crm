@@ -1,6 +1,23 @@
 # Audit Logging System
 
-## Overview
+> **This page is the audit design as it was specified, and three of its four statements about what is
+> live are now wrong for the deployed system.** Read it for `human_sessions`, `bot_actions` and
+> `audit_summary` - all three exist - and then read what the runtime actually does:
+>
+> | This page says | The database does |
+> |---|---|
+> | "When a human logs in, create a `human_sessions` record" | There is no login screen. `human_sessions` has **zero rows**, written by neither agent |
+> | "Every bot action: log to `bot_actions`" | `bot_actions` has **zero rows**. The action record is `agent_interactions`, one row per run with `actions_taken`, `tool_observations` and `response_sources`, written by the loop's own defer |
+> | "Run a cron job to populate `audit_summary`" | Nothing on this server schedules it, so `audit_summary` also has zero rows. The door exists - `audit_summary_refresh()`, 0013 - and has no keeper, the same gap `idempotency_sweep` has |
+> | "All audit tables are append-only" | True of `audit_log` and `agent_memories`, which revoke UPDATE/DELETE by grant. False of `audit_summary` (upserted, with a touch trigger) and `idempotency_keys` (state machine) - measured as `afpc_app`'s grants |
+>
+> **The row-level trail this page does not describe is `audit_log`, and it has existed since 0013:** one
+> row per row-change on every tenant-coded table except itself and `idempotency_keys`, written by
+> triggers rather than by callers, with `row_pk` as **jsonb** so one trigger serves eighteen tables, and
+> tamper-evidence from a sha256 chain segmented per tenant and month (`audit_chain_verify()`).
+> `vw_audit_coverage` is the scoreboard: which tables are trailed, which are exempted, and why.
+
+## Overview (as specified)
 
 The Agent First ERP CRM maintains a comprehensive audit trail of all human-bot interactions. This ensures:
 - **Accountability:** Know which human commanded which bot
@@ -285,14 +302,20 @@ ORDER BY ba.timestamp DESC;
 
 ## Integration Points
 
-1. **Bot Initialization:** When a human logs in, create a `human_sessions` record
-2. **Every Bot Action:** Log to `bot_actions` table before/after execution
-3. **Session End:** Update `human_sessions` with logout time and status
-4. **Daily Aggregation:** Run a cron job to populate `audit_summary` table
+*As specified, and see the table above for what runs today.*
+
+1. **Bot Initialization:** When a human logs in, create a `human_sessions` record - **no writer**; the
+   deployed agents have no login, so the table is empty
+2. **Every Bot Action:** Log to `bot_actions` before/after execution - **no writer**; the live
+   equivalent is the one `agent_interactions` row per run that the loop's `defer` files, plus the
+   `audit_log` row-change trail the triggers write on the agent's behalf
+3. **Session End:** Update `human_sessions` with logout time and status - as (1)
+4. **Daily Aggregation:** Run a cron job to populate `audit_summary` - the function is
+   `audit_summary_refresh()`; the cron never arrived, so schedule it or accept an empty rollup
 
 ## Security Considerations
 
-- All audit tables are append-only (no UPDATE/DELETE except for corrections)
+- Append-only is a **grant**, and it is selective: `audit_log` and `agent_memories` give the runtime role INSERT and SELECT only, which is what makes the trail tamper-evident rather than merely polite; `audit_summary` is upserted by design and `idempotency_keys` is a state machine, so both carry UPDATE. Asserted by B-checks in `scripts/db/verify.sh` rather than by this sentence
 - Sensitive data in `input_parameters` and `output_result` should be masked if needed
 - Audit logs should be backed up separately for compliance
 - Consider encryption at rest for audit tables containing PII

@@ -2,7 +2,7 @@
 
 **Purpose:** Complete agent trajectory logging for debugging and analysis.
 
-**Location:** `scripts/database/11_interaction_logging.sql`
+**Location:** `db/migrations/0001_baseline_canonical_port.sql` (the table) and `0017_interaction_readpath.sql` (the views); `scripts/database/11_interaction_logging.sql` is the superseded copy that named the full-text index the port never carried
 
 ---
 
@@ -94,7 +94,7 @@ CREATE INDEX idx_user ON agent_interactions (user_id);
 ### Basic Usage
 
 ```python
-from tools.interaction_logger import log_agent_trajectory
+from interaction_logger import log_agent_trajectory   # blueprint/interaction_logger.py - a module bot.py does not import
 
 log_id = log_agent_trajectory(
     conversation_id="uuid-here",
@@ -112,7 +112,13 @@ log_id = log_agent_trajectory(
 
 ### In the Telegram Bot
 
-The bot automatically logs all interactions:
+**Not in the reference implementation, and this is the page's most important correction:**
+`bot.py` never imports `interaction_logger` and never calls `log_agent_trajectory`, so a blueprint
+run files **no** `agent_interactions` row - `grep -c log_agent_trajectory blueprint/bot.py` answers 0.
+The writer exists and is correct; it is simply not wired. The deployed Go agents do wire it, in the
+loop's `defer` (`../agents/customer_service/backend_go/pkg/agent/agent.go` -> `pkg/logging`), which is
+where the trajectory rows `scripts/agents/tool_testplan.sh` asserts against come from. Wiring, from
+the module that does work, looks like this:
 
 ```python
 # AgentExecutor is created with return_intermediate_steps=True
@@ -183,56 +189,67 @@ ORDER BY call_count DESC;
 
 ### Find Low-Confidence Intent Classifications
 
+**This one answers zero rows here, always, and the reason is a schema fact:** neither backend's
+recorder includes `intent_classification` or `confidence_score` in its column list, and 0 of the
+`agent_interactions` rows on this server have either. What the deployment records instead is the
+model's reasoning text, in `agent_thoughts`, which a reader judges rather than a threshold filtering
+it. The columns are waiting for an implementation that never came.
+
 ```sql
-SELECT 
-    human_input,
-    intent_classification,
-    confidence_score,
-    final_output
-FROM agent_interactions 
-WHERE confidence_score < 0.7
-ORDER BY confidence_score ASC;
+SELECT human_input, intent_classification, confidence_score, final_output
+  FROM agent_interactions
+ WHERE confidence_score < 0.7            -- 0 rows, on every version of this database
+ ORDER BY confidence_score ASC;
+
+-- The question it was reaching for, answerable today: multi-step runs that still errored.
+SELECT run_id, left(human_input, 60) AS asked, step_count, error_message
+  FROM vw_recent_interactions
+ WHERE error_message IS NOT NULL
+ ORDER BY "timestamp" DESC LIMIT 20;
 ```
 
 ### Get Full Trajectory for a Specific Interaction
 
 ```sql
-SELECT 
-    human_input,
-    agent_thoughts,
-    actions_taken,
-    tool_observations,
-    final_output
-FROM agent_interactions 
-WHERE id = 'interaction-uuid-here';
+-- id is the row's uuid primary key; run_id is the identifier a caller actually holds
+-- (POST /api/chat returns it). A placeholder word instead of a uuid fails 22P02 - that is
+-- the type being strict, not the query being wrong.
+SELECT human_input, agent_thoughts, actions_taken, tool_observations, final_output,
+       response_sources, error_message, duration_ms
+  FROM agent_interactions
+ WHERE id = 'interaction-uuid-here';        -- or: WHERE run_id = 'the-run-uuid'
 ```
 
 ---
 
 ## Views for Quick Analysis
 
-### v_recent_interactions
+> **Names.** The three read views are `vw_*`, like every other view in this schema. The
+> `v_*` spellings this page used carry no prefix the catalog has ever used, so every query
+> written from them raised `42P01`. Corrected in place below.
+
+### vw_recent_interactions
 
 Last 100 interactions with full context:
 
 ```sql
-SELECT * FROM v_recent_interactions LIMIT 10;
+SELECT * FROM vw_recent_interactions LIMIT 10;
 ```
 
-### v_failed_interactions
+### vw_failed_interactions
 
 All interactions that resulted in errors:
 
 ```sql
-SELECT * FROM v_failed_interactions LIMIT 20;
+SELECT * FROM vw_failed_interactions LIMIT 20;
 ```
 
-### v_tool_performance
+### vw_tool_performance
 
 Tool usage statistics and error rates:
 
 ```sql
-SELECT * FROM v_tool_performance;
+SELECT * FROM vw_tool_performance;
 ```
 
 ---
@@ -269,10 +286,10 @@ Every interaction should be logged, including failures. This is critical for deb
 Always include `conversation_id`, `telegram_chat_id`, `user_id`, and `message_id` for traceability.
 
 ### 3. Monitor Performance
-Query `v_tool_performance` regularly to identify slow or error-prone tools.
+Query `vw_tool_performance` regularly to identify slow or error-prone tools.
 
 ### 4. Review Failures
-Check `v_failed_interactions` daily to catch and fix issues quickly.
+Check `vw_failed_interactions` daily to catch and fix issues quickly.
 
 ### 5. Use for Training
 Export successful interactions to train fine-tuned models on real-world examples.

@@ -52,11 +52,16 @@ because the drift between this page and `db/migrations/` is exactly how an agent
        `vw_failed_interactions`, which is the requirement "must run successfully every 30
        minutes" made checkable;
      - a check that finds critical stock **upserts a memory**
-       (`agent_memories`, driver `db`, key like `inventory.alert.<sku>`) so the next chat turn can
+       (`agent_memories`, driver `db`, key **`inventory.alert.state`** - one signature row for the whole
+       check rather than one row per SKU, and written only when the signature changed, so the memory
+       says what is true rather than how often the timer woke) so the next chat turn can
        answer "what did you find overnight?" without a re-scan;
      - the chat surface can be asked directly at any time: `get_low_stock_items` returns the
-       shortage list with its suggested reorder quantity (`reorder_point - quantity_available`,
-       rounded up to the item's `order_multiple`).
+       shortage list with `suggested_shortfall` - `reorder_point - quantity_available`, and `null`
+       when there is no shortfall. It does **not** round up to `order_multiple`: the column exists
+       (`0001`) and nothing in `pkg/inventory` reads it, so a reorder quantity is a human's arithmetic
+       from the item's own number, not the tool's. Naming that gap here rather than in code is the
+       difference between a deferral and a bug.
 
 3. **Reporting**
    - Low-stock list, per-warehouse availability, 30-day movement summaries, valuation by

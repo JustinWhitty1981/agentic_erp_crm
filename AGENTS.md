@@ -50,12 +50,14 @@ Welcome! This guide is designed specifically for AI agents working on the Agent 
 
 Agent First ERP CRM is a database-first AI agent operating system that enables:
 - **Autonomous customer service agents** with full CRM capabilities - deployed, in `agents/customer_service/`
+- **An inventory control agent** on the same loop - deployed, in `agents/inventory/`, with a scheduled
+  check whose every tick files a trajectory row
 - **Tool-based architecture** where agents compose functions dynamically
 - **Verbose agent logging**, with every run's trajectory queryable from the database it wrote
 - **Semantic search** using PGVector - *the indexes exist (`0012`) and nothing fills them*: no embedder
   in the current deployment produces the 1536 dimensions the columns declare. Read
   `agents/customer_service/README.md`'s "What is not here" before planning around this one
-- **Telegram integration** - *not in the deployed agent*, which serves HTTP and SSE. The reference
+- **Telegram integration** - *not in either deployed agent*, which serve HTTP and SSE. The reference
   implementation in `blueprint/` and the upstream checkout at `/home/justin/agents/dumb_agent` both
   have working adapters; the transport is a `main.go` change and the loop does not care which is attached
 
@@ -63,14 +65,17 @@ Agent First ERP CRM is a database-first AI agent operating system that enables:
 
 ## Key Concepts
 
-### Two implementations of one pattern
-- **Deployed**: `agents/customer_service/` - a Go backend, React UI, HTTP and SSE, and the trajectory
-  writer. Start here to change what this agent does.
+### Three processes, one pattern
+- **Deployed, the CRM half**: `agents/customer_service/` - a Go backend, React UI, HTTP and SSE, and the
+  trajectory writer. Start here to change what this agent does.
+- **Deployed, the stock half**: `agents/inventory/` - the same loop as a sibling fork, with `pkg/inventory`
+  replacing `pkg/crm` and an in-container timer added. It is the evidence for the claim that the loop is
+  reusable: one domain package, four identity strings, one working second agent.
 - **Reference**: `blueprint/bot.py` (~215 lines) - the same loop in one Python file, with LangChain and
   Telegram. Start here to understand the pattern, or to build a new agent quickly.
 
-The two agree on the rules that matter: a read names a `vw_*` view, a write calls a function, every run
-records itself, and the model never chooses an audit column's value.
+All three agree on the rules that matter: a read names a `vw_*` view or a function that returns one, a
+write calls a function, every run records itself, and the model never chooses an audit column's value.
 
 ### Database-First Design
 All agent state and knowledge lives in PostgreSQL:
@@ -105,7 +110,13 @@ Start by reading:
 Follow [QUICKSTART.md](QUICKSTART.md) for Docker-based deployment.
 
 ### 3. Understanding Agent Tools
-- The deployed surface is `agents/customer_service/backend_go/pkg/crm/tools.go`: eight CRM tools, four reading `vw_*` views and four calling stored functions (ADR-003)
+- The deployed surface is `agents/customer_service/backend_go/pkg/crm/tools.go`: eight CRM tools — three
+  reading `vw_*` views (`vw_customers`, `vw_customer_communications_summary`,
+  `vw_entity_communication_stats`) and five calling stored functions, of which four write
+  (`add_customer`, `update_customer`, `add_communication`, `mark_customer_followup`) and one reads:
+  `get_followup_customers` is a function and not a view because it takes `p_days_threshold`, which is the
+  ADR-003 boundary in practice — a parameterised answer has a door, and 0022 is what made that argument
+  mean what it says
 - Both obey one rule the blueprint did not always: **a write calls a database function and never composes its own INSERT.** `code:cs_writes_through_doors` watches that, and its comment says what the grep had to grow to catch it
 - Review individual tool implementations in **[blueprint/tools/](blueprint/tools/)**
 - Read **[blueprint/tools/README.md](blueprint/tools/README.md)** for tool development guidelines
@@ -132,7 +143,10 @@ Follow [QUICKSTART.md](QUICKSTART.md) for Docker-based deployment.
 1. Decide which half owns the rule. If the tool changes persistent state, the decision belongs in a
    `db/migrations/NNNN_*.sql` function, so start there and not in the Go file (ADR-002)
 2. Give the migration the next free number. `migrate.sh` rejects a file numbered at or below the highest
-   applied, which is why the two planned ones became 0024 and 0025 - see db/MIGRATIONS.md
+   applied, which is why the two planned ones became 0024 and 0025 - see db/MIGRATIONS.md. The highest
+   applied today is **0026** (the reservation ledger-order fix, which took 0026 rather than the 0024 that
+   was free because a bug fix and a planned feature are not the same queue), so a new file here is
+   `0027_*` unless one of the planned two has landed first
 3. Wire the tool in `agents/customer_service/backend_go/pkg/crm/tools.go`: read a `vw_*` view or call the
    function, send an idempotency key if it writes (ADR-005), and record what it touched with `turn.Source`
 4. Write the description for a reader that cannot see the schema: what it answers, what it refuses, and
@@ -154,7 +168,10 @@ Follow [QUICKSTART.md](QUICKSTART.md) for Docker-based deployment.
 1. Check PostgreSQL logs for SQL errors
 2. `GET /api/interactions?view=recent` is the agent reading its own trajectory; `docker logs -f
    afpc-customer-service` is the same run while it happens, at `LOG_LEVEL=debug`
-3. `audit_log` is who changed what, `human_sessions` and `bot_actions` are the login and the action;
+3. `audit_log` is who changed what — and it is the only row-level trail either agent writes.
+   `human_sessions` and `bot_actions` exist and are read by the coverage machinery, and hold **zero
+   rows**: no login console and no action logger write them, so looking for an agent's action in
+   `bot_actions` is a dead end, and `agent_interactions` plus `audit_log` is the pair that answers.
    `vw_audit_coverage` says which tables have a trail and which are exempted, with the reason. One
    row's history is `WHERE table_name = 'communications' AND row_pk->>'id' = '15'` - `row_pk` is
    **jsonb** (`{"id": 15}`), not a bigint, because one trigger serves eighteen tables with different
@@ -173,8 +190,22 @@ Five things can be wrong independently, and each has its own harness:
 3. `go test ./...` in `agents/customer_service/backend_go` - the loop, the tool wiring and the
    derivations, against fakes and with no database. See the note on the one failing test in that
    package's README section
-4. `pytest blueprint/tests/ -v` - the reference implementation's tests, which need a test database
-   (`createdb agent_first_erp_crm_test`) and describe the Python shape rather than the deployed one
+4. `pytest blueprint/tests/ -v` - **read this before running it.** These are the reference
+   implementation's scripts, and they describe the Python shape rather than the deployed one; the reason
+   to be careful is narrower and measurable. Two of the five (`test_create_functions.py`,
+   `test_update_function.py`) connect at import - `POSTGRES_DB` defaults to **`agent_first_erp_crm`, the
+   live database** - and run, then `commit()`, a `DROP FUNCTION IF EXISTS` naming a signature that does
+   not exist (10 args for `add_customer`, 12 for `update_customer`, where the doors have 15 and 13), so
+   the DROP removes nothing and prints "does not exist, skipping" - and then their `CREATE FUNCTION`
+   **succeeds**, because a different arity is a different function. The result is the exact condition
+   0016 was written to remove: a **second head** on each door, whose body is a stub returning
+   `TRUE, 1, 1, 'Test'`. Measured in a scratch database with both heads installed, a call with ten or
+   fewer positional arguments then fails `could not choose a best candidate function` - so the probes and
+   hand-run SQL that pass fewer arguments break, while the Go tools (which send all 15) keep working,
+   which is the worst shape a corruption can have: most of the surface looks fine. pytest imports every
+   module it collects, so all of this happens before any assertion runs. Run them only against a scratch
+   database (`createdb afpc_scratch && POSTGRES_DB=afpc_scratch python3 blueprint/tests/test_functions.py`),
+   and see `PLAN.md`'s item on guarding or deleting them
 5. `./scripts/agents/tool_testplan.sh` - the only harness that tests what a human gets: it prompts
    both deployed agents through `POST /api/chat` once per registered tool and verifies each turn
    on three independent planes - the call happened (`vw_tool_calls`, keyed by the returned
@@ -195,19 +226,20 @@ superseded files at the same depth as current ones is how a reader ends up editi
 
 ```
 agent_first/
-├── README.md, QUICKSTART.md, architecture.md, PLAN.md, AGENTS.md
+├── README.md, QUICKSTART.md, architecture.md, PLAN.md, AGENTS.md, CONTRIBUTING.md
 ├── Makefile                        # dev-up, db-verify, db-test, docs-schema
 ├── ARCHITECTURE_DECISION_RECORDS/  # ADR-001..005, cited by the code that obeys them
 │
 ├── agents/
 │   ├── inventory/                  # THE SECOND DEPLOYED AGENT: same loop, inventory tools, a timer
 │   │   ├── README.md               # tools, schedule, endpoints, what is not here
-│   │   ├── Dockerfile, docker-compose.yml   # :4560; AFPC_PG_HOST read from customer_service/.env
+│   │   ├── Dockerfile, docker-compose.yml   # :4560; its own .env, written by scripts/db/init.sh
+│   │   ├── frontend/               # the sibling's React UI, copied rather than rewritten
 │   │   └── backend_go/             # sibling fork: pkg/inventory (4 reads, 1 door, RunCheck) replaces pkg/crm
 │   ├── customer_service/           # THE DEPLOYED AGENT
 │   │   ├── README.md               # tools, environment, endpoints, what is not here
 │   │   ├── Dockerfile, docker-compose.yml
-│   │   ├── frontend/               # React UI, pointed at :4550
+│   │   ├── frontend/               # React UI, built into backend_go/static and served by the binary; same-origin API_BASE
 │   │   └── backend_go/
 │   │       ├── cmd/server/main.go  # wiring, auth, endpoints, startup order
 │   │       └── pkg/
@@ -227,97 +259,141 @@ agent_first/
 ├── db/                             # THE SCHEMA, and the harness that asserts it
 │   ├── README.md                   # single source of truth: which SQL files are superseded
 │   ├── MIGRATIONS.md               # finding to migration, the marker table, and the tracked tasks
-│   ├── migrations/                 # 0000..0023 applied in filename order; 0024 and 0025 are planned
+│   ├── migrations/                 # 0000-0018, 0021-0023, 0026 applied in filename order; 0024/0025 planned
 │   ├── tests/                      # N_N_<finding>.sql, one probe per block, VERDICT lines
-│   └── seeds/                      # 01_demo_customers.sql - data, idempotent, never DDL
+│   └── seeds/                      # 01_demo_customers.sql, 02_demo_inventory.sql - data, idempotent, never DDL
 │
 ├── dev/                            # THIS SERVER: container, roles, TLS, and what will bite you
 │   ├── README.md                   # read before a connection fails for a reason that is not the network
 │   ├── docker-compose.yml, tls/    # the volume and the exported CA (dev/tls/afpc-ca.crt)
 │
 ├── scripts/
-│   ├── db/                         # db, init.sh, migrate.sh, roles.sql, verify.sh, test-functions.sh, _common.sh
-│   ├── docs/                       # check_agent_docs.sh (the doc watchdog), regen_view_columns.py
-│   ├── tests/                      # python test helpers
+│   ├── agents/tool_testplan.sh     # the acceptance harness: one prompt per tool, three planes per answer
+│   ├── db/                         # db, init.sh, migrate.sh, seed.sh, roles.sql, verify.sh, test-functions.sh, _common.sh
+│   ├── docs/                       # check_agent_docs.sh (the doc watchdog), gen_schema_docs.sh, regen_view_columns.py
+│   ├── tests/                      # superseded ad-hoc python scripts, not a suite - see their README
 │   └── database/, 08_create_views.sql  # superseded pre-0001 SQL; db/README lists each file
 │
 ├── docs/
-│   ├── INTERACTION_LOGGING.md, ATTACHMENT_SYSTEM.md
-│   ├── agent_requirements/         # customer_service/, inventory/ - what each agent is specified to do
-│   ├── database/                   # the review's companions; agent_first_erp_crm_schema.sql is superseded
-│   └── history/                    # MISALIGNMENT_FIXES.md, STABILITY_IMPROVEMENTS.md
+│   ├── INTERACTION_LOGGING.md, ATTACHMENT_SYSTEM.md   # the second is a design record, not a feature
+│   ├── agent_requirements/         # customer_service/, inventory/, and agent_test_plan.md
+│   ├── database/                   # the review's companions + generated listings; agent_first_erp_crm_schema.sql is superseded
+│   └── history/                    # MISALIGNMENT_FIXES.md, STABILITY_IMPROVEMENTS.md - dated records
 │
 └── blueprint/                      # THE REFERENCE IMPLEMENTATION: same rules, one Python file
     ├── bot.py                      # ~215 lines: loop, tools, memory, PostgreSQL
     ├── tools/                      # the eight tools bot.py registers, in Python, plus the trajectory helpers
     ├── docs/                       # agent-friendly SQL docs; views.md's lists are checked against the catalog
-    ├── tests/                      # pytest; needs a test database
+    ├── tests/                      # import-time scripts, NOT collected tests - two of them write DDL; read the README before running
     └── *.sql                       # superseded copies, kept so the fork is legible - see db/README.md
 ```
 
-The tree was regenerated by hand in this session's documentation sweep; `T4`'s checker covers the
+The tree was last walked by hand in the 2026-11-05 documentation sweep. `T4`'s checker covers the
 *content* claims (tools, environment keys, views, columns, migrations) rather than the shape of this
-list, so a new top-level directory is still something a human adds here.
+list, so a new top-level directory is still something a human adds here — and a claim inside this list
+that the code contradicts is exactly what the sweep is for. When you change a port, a path, or which
+`.env` a container reads, fix the tree in the same commit.
 ---
 
 ## Best Practices
 
-1. **Database First**: Always consider how changes affect the database schema
-2. **Tool Composition**: Design tools to be composable and reusable
-3. **Semantic Search**: Leverage PGVector for natural language capabilities
-4. **Audit Everything**: Use the audit log system for all agent actions
-5. **Documentation**: Update relevant docs when making changes
-6. **Security**: Never hardcode credentials; use environment variables
-7. **Testing**: Write tests for all new tools and functions
-8. **Naming Conventions**: Follow established patterns (snake_case for SQL, camelCase for Python)
+1. **Database First**: If a rule about persistent state is not in a migration, it is not enforced (ADR-002)
+2. **Tool Composition**: Design tools to be composable and reusable - the six shared tools are the same
+   code in both deployed agents
+3. **Semantic Search**: *Not available.* The columns and hnsw indexes exist and nothing writes them, so
+   design a read against the views and the CHECK'd vocabularies (`vw_domain_vocabulary`) instead
+4. **Audit Everything**: The row trail is the triggers' job and it happens without asking; the agent's
+   job is to write through a door so there is a row-change to audit, and to let the loop record the run
+5. **Documentation**: Update the relevant page in the same commit - `check_agent_docs.sh` fails a tool
+   that appears in code and not in a README, which is what makes this step not a suggestion
+6. **Security**: Never hardcode credentials; see the environment tables in each agent's README
+7. **Testing**: Every new tool earns a `db/tests/` probe and a case in the acceptance plan
+8. **Naming Conventions**: Follow the patterns below - snake_case SQL, `vw_` views, verb-first functions
 
 ---
 
 ## Security Guidelines
 
 ### Environment Variables
-All sensitive data must be stored in environment variables:
-- Database credentials
-- API keys
-- Telegram bot tokens
-- LLM API keys
-
-See `.env.example` for required variables.
+Secrets live in the environment, never in a committed file:
+- Database credentials: `dev/.env`, generated with random local credentials by `scripts/db/db up`
+  (mode 600, gitignored). `dev/.env.example` documents that file's shape and its values are deliberately
+  empty - an unset password makes the tooling refuse to start rather than quietly use a committed guess
+- The agent runtime role: `AFPC_PG_USER` / `AFPC_PG_PASSWORD` (or `AFPC_APP_PASSWORD`, the name
+  `scripts/db/roles.sql` uses), read by both agents' compose files through `env_file`
+- Endpoint auth: `API_KEYS` (comma-separated bearer tokens). Unset means open, and `/api/health` says
+  `DISABLED` instead of implying otherwise
+- Third-party keys: `TAVILY_API_KEY`, `HIGHBYTE_MCP_BEARER_TOKEN`, the `AZURE_*` group - all three are
+  inert on this server, and each is listed in the agent README so an off knob is not mistaken for a
+  broken one
+- **There is no root `.env.example`.** The template is `dev/.env.example` for the database, and each
+  agent's README table is the list of what its own process reads. A `Telegram bot token` is not among
+  them because neither deployed agent speaks Telegram
+- `AFPC_PG_HOST` is in `agents/*/.env` and is gitignored for a different reason: it names a private
+  address on a specific network, not a credential
 
 ### Data Protection
-- Never log sensitive customer data (PII)
-- Mask sensitive fields in logs
-- Use encrypted connections to PostgreSQL
-- Implement row-level security where appropriate
+- Never log sensitive customer data (PII). What reaches the *log* goes through `pkg/logging`'s `Mask` and
+  `MaskArgs`: an email keeps its local part's first letter and everything in its domain after the first
+  dot (`jane@afpc.example.invalid` → `j***@example.invalid`), a phone match keeps its last four digits,
+  and the rest becomes `***`. Two tests keep the honesty of that:
+  `TestMaskLeavesTheShape` (a masked sentence must still read like the sentence) and
+  `TestMaskArgsIsStable` (two identical calls must print identically, so debug logs are diffable)
+- **The mask is for logs, not for the trajectory**, deliberately: `agent_interactions.tool_observations`
+  carries what the tool actually returned, because that table is what an auditor cross-checks the row
+  trail against (0013's reason for auditing telemetry rows). A masked `tool_input` there would make the
+  row useless for the question it exists to answer. So: the log line is redacted, the record is not, and
+  the record is protected by grants and RLS rather than by redaction
+- Encrypted connections are the default and the checked kind: `sslmode=verify-full` against
+  `dev/tls/afpc-ca.crt`. `require` encrypts and authenticates nothing
+- Row-level security is **not** "where appropriate": it is `FORCED` on every tenant-coded table, none of
+  the three `afpc_*` roles has `BYPASSRLS`, and `vw_rls_status` publishes each policy with a verdict. The
+  database owner is *not* one of the roles an agent connects as, because an owner bypasses RLS and would
+  make every isolation assertion in the harness a false pass
 
 ### Audit Trail
-- Log all agent actions via `bot_actions` table
-- Track human sessions in `human_sessions` table
-- Capture full agent trajectory in `agent_interactions` table
+- Row changes: `audit_log`, written by triggers with a sha256 chain segmented per tenant and month -
+  `audit_chain_verify()` is the check, and it is part of the acceptance harness's tail
+- Agent runs: `agent_interactions`, one row per run, written by the loop's `defer` so a panicking run
+  still records itself; `vw_tool_calls` gives it one row per call
+- **Not** `bot_actions` or `human_sessions`: those two tables are in the schema and are read by the
+  coverage machinery, and nothing in either implementation writes them, so both are empty. A doc that
+  told you to log there was describing the pre-0001 design; the live answer is the pair above
 
 ---
 
 ## Database Architecture
 
 ### Core Domains
-1. **Party Management** - Entities, contacts, relationships, addresses
-2. **Communications** - All interactions with threading and sentiment
-3. **Audit Logging** - Human sessions, bot actions, interaction tracking
-4. **Inventory** - Products, warehouses, stock levels, movements
+1. **Party Management** - `entities`, `contacts`, `entity_relationships`, `addresses`
+2. **Communications** - `communications`, with threading (`thread_root_id`) and sentiment
+3. **Audit Logging** - `audit_log` (the row trail) and `agent_interactions` (the run trail).
+   `human_sessions` and `bot_actions` are in this domain's name and in the schema, and have **no
+   writer**: they came with the pre-0001 design and are kept because the coverage machinery reads them
+4. **Inventory** - `inventory_items`, `warehouses`, `inventory_on_hand`, `inventory_movements`,
+   `inventory_reservations`, plus the master data (`item_categories`, `units_of_measure`,
+   `costing_methods`). **There is no `products` table** - items are `inventory_items`, which is the
+   difference between reading `db/migrations/` and reading the July documentation
 5. **Support** - Follow-ups (`followups`). Tickets were part of the vestigial schema and are
-   referenced by nothing in the canonical one - see `db/migrations/0017_interaction_readpath.sql`
+   referenced by nothing in the canonical one - see `db/migrations/0017_interaction_readpath.sql`.
+   `followups` has no writer either, so `vw_pending_followups` is empty by construction and the live
+   follow-up answer comes from `get_followup_customers(days)`
 
 ### Key Tables
 | Table | Purpose |
 |-------|---------|
-| `entities` | Business organizations and customers |
+| `entities` | Business organizations and the customers recorded against them |
 | `contacts` | Individual humans |
-| `entity_relationships` | Links contacts to entities |
-| `communications` | All interactions |
-| `human_sessions` | Human agent login sessions |
-| `bot_actions` | AI agent actions |
-| `agent_interactions` | Complete trajectory logging |
-| `audit_summary` | Daily aggregation |
+| `entity_relationships` | Links contacts to entities; `is_primary` is what a read path resolves through |
+| `addresses` | Where an entity is, and `is_primary` is what `update_customer` rewrites |
+| `communications` | All interactions. Every row arrives through `add_communication` |
+| `human_sessions` | Vestigial: a human-agent login trail with no login screen behind it. Zero rows |
+| `bot_actions` | Vestigial: an action log the loop does not write. Zero rows |
+| `agent_interactions` | Complete trajectory logging, one row per run, written by the loop |
+| `audit_summary` | Daily aggregation, maintained by `audit_summary_refresh()` - which nothing on this server schedules, so it has zero rows. Same class of gap as `idempotency_sweep`: a policy with no keeper |
+| `followups` | Support tasks - exists, read by `vw_pending_followups`, and has no writer |
+| `tenants`, `locations`, `schema_migrations` | The tenant root (1 row), bin-level storage inside a warehouse (declared, unused: 0 rows, and the stock views work at warehouse grain), and the apply ledger |
+| `agent_memories` | What an agent was told to remember (0023), append-only by grant |
 | `units_of_measure` | Master data: units an item can be counted, weighed or measured in |
 | `costing_methods` | Master data: how an item's cost is derived |
 | `currencies` | Master data: ISO 4217 codes behind the three currency columns, and how many minor units each has; global, so declared in B19 rather than given tenant policies |
@@ -357,67 +433,103 @@ See `.env.example` for required variables.
 See [blueprint/docs/views.md](blueprint/docs/views.md) for complete view reference.
 
 ### Database Naming Conventions
-- **SQL Tables**: snake_case (e.g., `customers`, `communications`)
-- **SQL Views**: MUST use `vw_` prefix (e.g., `vw_customers`, `vw_customer_communications_summary`)
+- **SQL Tables**: snake_case (e.g., `entities`, `communications`) — note `entities`, not `customers`:
+  the party model is one table for organizations and one for people, and `vw_customers` is the join an
+  agent reads
+- **SQL Views**: MUST use `vw_` prefix (e.g., `vw_customers`, `vw_customer_communications_summary`).
+  `v_*` is not a spelling any migration used, so `v_recent_interactions` in an old page is a 42P01
 - **SQL Columns**: snake_case (e.g., `created_at`, `entity_id`)
-- **SQL Functions**: snake_case with verb prefix (e.g., `add_customer`, `get_inventory`)
+- **SQL Functions**: snake_case with a verb prefix (e.g., `add_customer`, `reserve_inventory_for_order`).
+  `get_inventory` does not exist and never did; the stock reads are views
 - **Python Variables**: snake_case (e.g., `customer_id`)
 - **Python Classes**: PascalCase (e.g., `CustomerServiceAgent`)
 
 ---
 
-## pgschema Tool
+## Schema documentation, generated and otherwise
 
-The project uses pgschema for database schema visualization and documentation:
+Three of the pages in `docs/database/` are **generated from the running catalog**, not written:
 
 ```bash
-# Install pgschema
-pip install pgschema
-
-# Generate schema documentation
-pgschema dump -h localhost -U postgres -d agent_first_erp_crm -o docs/schema/
-
-# Generate schema graph
-pgschema graph -h localhost -U postgres -d agent_first_erp_crm > schema_graph.dot
+make docs-schema            # = scripts/docs/gen_schema_docs.sh
+# regenerates docs/database/{tables,views,indexes}.md from pg_attribute/pg_indexes
 ```
 
-The `_schema_graph` table contains a knowledge graph of the entire schema for AI agent understanding.
+Their "Do not edit" header carries the generation date, and a stale generated file is a real failure mode:
+nothing checks them. The list-vs-catalog check (`code:agent_docs_match_surface`, step 3b of
+`scripts/docs/check_agent_docs.sh`) watches the **column lists in `blueprint/docs/views.md`**, not these
+three pages — so a migration that renames a column fails there, and silently leaves `tables.md` behind
+until someone runs the target. Re-run it with the migration, not after it.
+Everything else in `docs/database/` is prose the review wrote, and
+[db/README.md](db/README.md) remains the single source of truth for what the schema *is*.
+
+**`pgschema` is not installed here and `docs/schema/` does not exist.** The `pip install pgschema` /
+`pgschema dump` recipe this section used to carry was inherited from the pre-0001 layout, and the
+`blueprint/docs/schema_reference.md` header naming "pgschema 1.12.0" and PostgreSQL 16.14 is a stamp from
+that generator's run, not a claim about this server — which runs PostgreSQL 17. Use the harness and the
+catalog:
+
+```bash
+docker exec -it afpc-pg psql -U postgres -d agent_first_erp_crm -c '\d+ entities'
+docker exec -i afpc-pg psql -U postgres -d agent_first_erp_crm -tAF'|' \
+  -c "SELECT viewname FROM pg_views WHERE schemaname='public' AND viewname LIKE 'vw_%' ORDER BY 1"
+```
+
+**`_schema_graph` exists and is empty** — zero rows, measured. The old claim that it "contains a
+knowledge graph of the entire schema for AI agent understanding" was inherited from the superseded
+loader that would have filled it, and nothing in `db/migrations/` writes it. The graph an agent can
+actually query is the set of `vw_*` views plus `vw_domain_vocabulary`, `vw_rls_status`,
+`vw_audit_coverage` and `vw_idempotency_status`, which describe the catalog in the same register.
 
 ---
 
 ## Agent Validation
 
-### Validation Layer (CAO)
-The Chief Agent Officer (CAO) provides:
+### Validation Layer (CAO) — designed, not built
+The Chief Agent Officer was specified to provide:
 - Input validation before agent execution
 - Output validation after agent execution
 - Safety checks for destructive operations
 - Rate limiting and quota enforcement
 
-### Validation Rules
-1. **Input Validation**
-   - Check required parameters
-   - Validate data types
-   - Sanitize user input
-   - Check for injection attacks
+**None of it runs on this server.** There is no CAO process, and the customer service agent has only the
+detection half of an escalation (sentiment, outcomes, `get_entity_stats`) with no second agent to route
+one to. What actually performs each of those four jobs today:
 
-2. **Output Validation**
-   - Verify response format
-   - Check for sensitive data leakage
-   - Validate action results
-   - Log validation status
+| The CAO's job | Who does it now |
+|---|---|
+| Input validation | the tools' argument coercion (`pkg/crm`, `pkg/inventory`) and the functions' own `22023` refusals — 0015's rule: a wrong argument is refused before any work |
+| Output validation | `scripts/agents/tool_testplan.sh`, per release rather than per turn: the answer is checked against the rows it claims |
+| Safety on destructive operations | the doors that do not exist (`execute_inventory_movement` is not a tool), `REQUIRE_WRITE_APPROVAL`/`STRICT_TOOL_POLICIES` for the caller-side gate, and 0008's delete rules |
+| Rate limiting | nothing. `API_KEYS` authenticates; no quota is enforced anywhere in either backend |
+
+### Validation Rules, as they exist in code
+1. **Input**
+   - Required parameters: the tool schemas, and `required` lists that refuse an empty selector
+   - Data types: Go coercion in the domain packages' `args.go` (`days`) and `tools.go` (`object`, `text`,
+     `integer`, and `uuidArg` in the inventory fork), with the SQL-level type errors deliberately left to
+     the door
+   - Injection: no path composes SQL from a value — reads are parameterized against views, writes are
+     `SELECT * FROM function($1, …)`
+2. **Output**
+   - Format: `pkg/db`'s `normalise` decides what a caller can read (RFC 3339 timestamps with their
+     offset, bytea decoded, uuids in 8-4-4-4-12) — `pkg/db/normalise_test.go` pins it
+   - Sensitive data: the process log masks; the trajectory stores what the tool returned
+   - Results: `observations_aligned` in `vw_tool_calls` is the machine-readable "the record of this run
+     agrees with itself"; `audit_chain_verify()` is the same claim about the trail
+   - "Validation status" is *not* a column anywhere: the trail exists so a claim can be checked after
+     the fact, by a harness today and by a CAO eventually
 
 ---
 
 ## Development Guidelines
 
 ### Naming Conventions
-- **SQL Tables**: snake_case (e.g., `customer_communications`)
-- **SQL Views**: MUST use `vw_` prefix (e.g., `vw_customers`, `vw_pending_followups`)
-- **SQL Columns**: snake_case (e.g., `created_at`)
-- **Python Variables**: snake_case (e.g., `customer_id`)
-- **Python Classes**: PascalCase (e.g., `CustomerServiceAgent`)
-- **Functions**: snake_case (e.g., `get_customer_by_id`)
+See **Database Naming Conventions** above; the two lists exist so that a reader who arrives from either
+heading gets the same rules, and the examples there are the ones that match the catalog. The historical
+`customer_communications` table and the `get_customer_by_id` function this section once named as examples
+exist in neither the schema nor the code - the first is `vw_customer_communications_summary`, the second
+is `get_customer_info` reading `vw_customers`.
 
 ### Code Style
 - Follow PEP 8 for Python code

@@ -21,19 +21,19 @@ This is a **simple single-agent** customer service bot that:
 
 ```
 blueprint/
-├── bot.py                 # Main agent (source of truth - 180 lines)
-├── customer_tools.py      # Customer management tools (180 lines)
+├── bot.py                 # Main agent (source of truth - 215 lines)
+├── tools/                 # The eight registered tools, one module each (there is no customer_tools.py)
 ├── Dockerfile             # Container configuration
 ├── docker-compose.yml     # Docker orchestration
-├── requirements.txt       # Python dependencies (12 packages)
+├── requirements.txt       # Python dependencies (7 packages)
 ├── .env                   # Environment variables
-├── setup_sample_data.sql  # Sample data for testing
+├── setup_sample_data.sql  # SUPERSEDED: the twin schema; seeds are ../db/seeds/
 ├── README.md              # User documentation
 └── tools/                 # Example tools ("soup kitchen")
     ├── README.md
     ├── customer_lookup.py
     ├── communication_logger.py
-    └── customer_management.py
+    └── followup_customers.py
 ```
 
 ---
@@ -46,7 +46,7 @@ blueprint/
 
 **Key Sections**:
 1. **Configuration** (lines 1-35): Loads env vars for Telegram, Ollama, PostgreSQL
-2. **System Prompt** (lines 38-56): Defines agent capabilities and behavior
+2. **System Prompt** (lines 75-100; `DB_CONFIG` is 66-73, the tool imports 21-28, the builder 116-128, the handlers 130-212): Defines agent capabilities and behavior
 3. **Tools** (lines 59-170): 8 tools for customer operations
 4. **Agent Builder** (lines 173-185): Creates LangChain agent with memory
 5. **Telegram Handlers** (lines 191-240): Handles incoming messages
@@ -63,7 +63,8 @@ agent = create_agent(
 )
 ```
 
-### 2. Customer Tools (customer_tools.py)
+### 2. Customer tools (`tools/customer_lookup.py`, `tools/add_customer.py`,
+`tools/update_customer.py`, `tools/followup_customers.py`)
 
 Three specialized tools for customer management:
 - `add_customer_tool()` - Add new customers with validation
@@ -89,7 +90,9 @@ Three specialized tools for customer management:
 
 ## Database Schema
 
-The agent uses the `agent_first_erp_crm` schema in PostgreSQL:
+The agent uses the `agent_first_erp_crm` **database** in PostgreSQL, and every object resolves in its
+`public` schema. `agent_first_erp_crm.` as a *schema* qualifier belongs to the pre-0001 scripts review
+3.1 disproved, and `code:tool_prefix` keeps `blueprint/**/*.py` at zero references to it:
 
 **Core Tables**:
 - `entities` - Customer entities (companies, individuals)
@@ -104,7 +107,7 @@ The agent uses the `agent_first_erp_crm` schema in PostgreSQL:
 - `vw_recent_communications` - Last 7 days of communications
 - `vw_entity_communication_stats` - Aggregated metrics
 
-**Custom Functions** (in `docs/database/09_customer_functions.sql`):
+**Custom Functions** (in `db/migrations/0001` + `0016` + `0021`; signatures in [docs/customer_functions.md](docs/customer_functions.md)):
 - `add_customer()` - Add customer with validation
 - `update_customer()` - Update customer information
 - `get_followup_customers()` - Get customers needing follow-up
@@ -172,7 +175,7 @@ To create a similar agent:
 
 2. **Create `.env`** with your configuration
 
-3. **Create `customer_tools.py`** with your domain-specific tools
+3. **Create `tools/<your_domain>.py`** with your domain-specific tools, and register each one in `bot.py`'s `TOOLS` list - a module nothing imports is a tool the model cannot call
 
 4. **Create `bot.py`** with:
    - Configuration loading
@@ -211,8 +214,8 @@ To create a similar agent:
 ## Related Files
 
 - `docs/database/agent_first_erp_crm_schema.sql` - Full database schema
-- `docs/database/09_customer_functions.sql` - Customer functions
-- `docs/database/10_audit_log.sql` - Audit log schema
+- [docs/customer_functions.md](docs/customer_functions.md) - the customer doors
+- `db/migrations/0013_audit_log.sql` - the trail this pattern does *not* write: see the banner above
 - `docs/database/agent_schema_reference.md` - Schema reference
 
 ---

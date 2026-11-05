@@ -9,7 +9,7 @@ hold copies of the same DDL are superseded:
 | `scripts/database/agent_swarm_schema.sql` | same file, second copy | same as above |
 | `docs/database/agent_first_erp_crm_schema.sql` | canonical 1947-line dump, referenced by a Makefile target that pointed at a path where it does not exist | `0001_baseline_canonical_port.sql` |
 | `*/08_create_views.sql` (3 copies) | prefixed views; `vw_customers` filtered differently from the canonical one | views live in `0001` (see also 0009 for the `vw_customers` filter decision) |
-| `*/09_*customer_functions.sql` (2 copies) | `add_customer` / `update_customer`, plus a `GRANT` to a role nothing created | `0001` carries the functions; grants in `0002`. The interaction door those files never had is `0021`'s |
+| `*/09_*customer_functions.sql` (3 copies) | `add_customer` / `update_customer`, plus a `GRANT` to a role nothing created | `0001` carries the functions; grants in `0002`. The interaction door those files never had is `0021`'s |
 | `*/10_audit_log.sql` (2 copies) | created `agent_first_erp_crm.audit_log` — the twin schema | `0013` (row-level audit in `public`) |
 | `*/11_interaction_logging.sql` | unqualified, the only file that ever succeeded | `0001` |
 | `*/setup_sample_data.sql` (3 copies) | **created a second copy of 8 tables** — the root of the schema split | `db/seeds/` (data only, never DDL) |

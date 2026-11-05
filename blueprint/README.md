@@ -14,22 +14,22 @@ A simple, single-file customer service bot built with LangChain v1, Ollama, and 
 - Docker installed on your VM
 - PostgreSQL database `agent_first_erp_crm` running at `{your-postgres-host}:5432`
 - Ollama running with `ornith:35b` at `{your-ollama-host}:11434`
-- Telegram bot token (already configured in `.env`)
+- Telegram bot token — there is no `.env` here and no `.env.example` either; create one, or export `TELEGRAM_BOT_TOKEN` - the name `bot.py:61` reads and `docker-compose.yml:12` passes through
 
 ## Quick Start
 
 ### 1. Configure Environment
 
-Copy the `.env.example` to `.env` and fill in your values:
+There is no `.env.example` in this directory, so create the file and fill it in:
 
 ```bash
-cp .env.example .env
+printf 'TELEGRAM_BOT_TOKEN=\nPOSTGRES_HOST=\nPOSTGRES_DB=agent_first_erp_crm\n' > .env
 ```
 
 ### 2. Run with Docker
 
 ```bash
-cd /home/justin/agentic_erp_crm/blueprint
+cd "$(git rev-parse --show-toplevel)/blueprint"
 docker-compose up --build
 ```
 
@@ -72,7 +72,7 @@ the sentence was a description of the failure rather than of the system.
 
 ### Database Functions
 
-The bot uses these custom functions (defined in `docs/database/09_customer_functions.sql`):
+The bot uses these custom functions (the doors listed in [docs/customer_functions.md](docs/customer_functions.md) - `db/migrations/0001`, `0016`, `0021`; that `docs/database/` path was a superseded copy):
 
 | Function | Purpose |
 |----------|---------|
@@ -80,7 +80,7 @@ The bot uses these custom functions (defined in `docs/database/09_customer_funct
 | `update_customer()` | Update customer information |
 | `get_followup_customers()` | Get customers requiring follow-up |
 
-The audit log functionality is defined in `docs/database/10_audit_log.sql`.
+The audit log functionality is `db/migrations/0013_audit_log.sql`: triggers writing `audit_log` in `public`, chained per tenant and month, and `audit_chain_verify()` reading the chain back. `blueprint/10_audit_log.sql` is the superseded copy, and it created `agent_first_erp_crm.audit_log` - a schema no migration makes, which is finding 3.1.
 
 ## Architecture
 
@@ -136,26 +136,24 @@ docker exec -it cs-bot sh
 ```
 blueprint/
 ├── bot.py                 # Main agent (source of truth)
-├── customer_tools.py      # Customer management tools
 ├── Dockerfile             # Container configuration
 ├── docker-compose.yml     # Docker orchestration
 ├── requirements.txt       # Python dependencies
 ├── .env                   # Environment variables
-├── setup_sample_data.sql  # Sample data for testing
+├── setup_sample_data.sql  # SUPERSEDED: creates the twin schema; the seeds are ../db/seeds/
 ├── README.md              # This file
 └── tools/                 # Example tools ("soup kitchen")
     ├── README.md
     ├── customer_lookup.py
     ├── communication_logger.py
-    └── customer_management.py
 ```
 
 ## Related Documentation
 
 - `docs/database/agent_first_erp_crm_schema.sql` - Full database schema
 - `docs/database/agent_schema_reference.md` - Schema reference for agents
-- `docs/database/09_customer_functions.sql` - Customer management functions
-- `docs/database/10_audit_log.sql` - Audit log schema
+- [docs/customer_functions.md](docs/customer_functions.md) - the customer doors, with the signatures that exist
+- `db/migrations/0013_audit_log.sql` - the trail, and `docs/INTERACTION_LOGGING.md` for the run record
 
 ---
 

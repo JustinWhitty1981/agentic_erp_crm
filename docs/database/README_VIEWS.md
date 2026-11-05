@@ -21,23 +21,23 @@ the catalog.
 
 ---
 
-## 📋 Views to Create
+## Views are already created - there is nothing to run
 
-Run the following command to create all views:
+The block this section carried told a reader to `psql ... -f scripts/database/08_create_views.sql`. Do
+not: that file is one of the superseded copies `db/README.md` lists file by file, and every statement in
+it is qualified to `agent_first_erp_crm`, the schema that no migration creates - so it answers `3F000`
+on the first one. Verified against this server's database, where the views already live:
 
-```bash
-# Set environment variables first
-export POSTGRES_HOST=localhost
-export POSTGRES_PORT=5432
-export POSTGRES_DB=agent_first_erp_crm
-export POSTGRES_USER=postgres
-export POSTGRES_PASSWORD=your_password
-
-# Create views
-psql -h "${POSTGRES_HOST}" -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -f scripts/database/08_create_views.sql
+```sql
+-- which views exist, and in which schema
+SELECT viewname FROM pg_views WHERE schemaname = 'public' AND viewname LIKE 'vw_%' ORDER BY 1;
+-- 23 rows. Any other schema name in the answer means the twin-schema fork happened on this box;
+-- see docs/database/DATABASE_REVIEW.md 3.1 before you fix it by hand.
 ```
 
-Or execute the SQL content directly in your database client.
+If a *new* view is needed, it is a numbered migration in `db/migrations/` with a `GRANT` to both read
+roles and `security_invoker = true` set after the create (0009's ordering), not a script a human runs.
+`scripts/db/db verify` then asserts it is there.
 
 ---
 
@@ -166,38 +166,48 @@ SELECT * FROM vw_agent_activity_summary;
 ```
 
 ### Check item availability
+
+The live columns, read off `pg_attribute`: `sku`, `name`, `warehouse_name`, `quantity_on_hand`,
+`quantity_reserved`, `quantity_available`, `reorder_point`. There is no `item_name` and no
+`stock_status` column - the pair this page's example carried, which is why it is shown fixed rather
+than quoted:
+
 ```sql
-SELECT sku, item_name, warehouse_name, quantity_available, stock_status
+SELECT sku, name, warehouse_name, quantity_available, reorder_point
 FROM vw_item_availability
-WHERE sku = 'WIDGET-A';
+WHERE sku = 'IN-1000';        -- the ten seeded skus are IN-1000..IN-1007, FG-2000 and CON-3000
 ```
 
 ---
 
 ## ✅ Verification
 
-After executing the script, verify with:
+Not "after executing the script" - nothing needed executing. The views are already in `public`, and the
+query that answers that has to say `public`, because `'agent_first_erp_crm'` is the schema review 3.1
+measured no migration creates and it returns **zero rows** on a correctly built database, which reads
+exactly like "the views are missing":
 
 ```sql
-SELECT viewname FROM pg_views 
-WHERE schemaname = 'agent_first_erp_crm' 
-ORDER BY viewname;
+SELECT viewname FROM pg_views WHERE schemaname = 'public' AND viewname LIKE 'vw_%' ORDER BY 1;
 ```
 
-Expected views:
-- vw_customers
-- vw_customer_communications_summary
-- vw_recent_communications
-- vw_pending_followups
-- vw_entity_communication_stats
-- vw_primary_contact_communications
-- vw_communication_thread
-- vw_agent_activity_summary
-- vw_entity_contact_details
-- vw_communication_timeline
-- vw_recent_interactions
-- vw_failed_interactions
-- vw_tool_performance
+That answers **23 rows** today, and the authoritative list with a sentence per view is
+[views.md](views.md) - regenerated from the catalog by `make docs-schema`, so it cannot drift the way
+the hand-kept list below did. Two names this page promised are **not** in that answer and never were in
+the canonical schema: `vw_entity_contact_details` and `vw_communication_timeline`, both defined only in
+the superseded `blueprint/08_create_views.sql`. Everything else the list names is real, and **twelve**
+views the remediation added are absent from it: `vw_tool_calls` and `vw_tool_performance`'s companions
+from 0017 (`vw_recent_interactions` and `vw_failed_interactions` are the two the page does carry), then
+`vw_inventory_valuation`, `vw_item_availability`, `vw_item_movement_summary`, `vw_low_stock_alerts` and
+`vw_currency_rates` from 0018, and the five register views - `vw_domain_vocabulary`, `vw_rls_status`,
+`vw_timestamp_status`, `vw_idempotency_status`, `vw_audit_coverage` - plus `vw_index_redundancy`.
+
+Expected views, as the page listed them in July 2026 (kept so the diff against the catalog is auditable):
+- vw_customers · vw_customer_communications_summary · vw_recent_communications · vw_pending_followups
+- vw_entity_communication_stats · vw_primary_contact_communications · vw_communication_thread
+- vw_agent_activity_summary · ~~vw_entity_contact_details~~ *(never created)* ·
+  ~~vw_communication_timeline~~ *(never created)* · vw_recent_interactions · vw_failed_interactions ·
+  vw_tool_performance
 - vw_inventory_valuation
 - vw_item_availability
 - vw_item_movement_summary
@@ -215,6 +225,6 @@ Expected views:
 
 ---
 
-**File:** `scripts/08_create_views.sql`  
-**Created:** July 11, 2026  
-**Status:** Ready for execution
+**File:** `scripts/08_create_views.sql` - superseded; the live definitions are in `db/migrations/`
+**Created:** July 11, 2026
+**Status:** Superseded. The views exist; the script here does not create them and cannot.

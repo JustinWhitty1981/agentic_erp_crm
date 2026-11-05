@@ -5,40 +5,83 @@
 A **Database-First, Agent-Native** business operating system.
 **Minimalist UI Agents + PostgreSQL + PGVector.**
 
-**Planning and architecture by Justin. Implementation primarily by Jarvis (self-hosted open-source models via Ollama/vLLM on bare metal). No commercial LLM API spend.**
+**Planning and architecture by Justin. Implementation primarily by Jarvis (self-hosted open-source models on bare metal, served through an OpenAI-compatible endpoint). No commercial LLM API spend.**
 
 ## 🚧 Project Status: Early-Stage Experimental Prototype
 
-> **Warning:** This project is in **active development** and should be considered an **experimental prototype**.
+> **Warning:** This project is in **active development** and should be considered an **experimental
+> prototype**. What is here works against one tenant on one server, and every claim below names the
+> check that proves it.
 
 ### What This Is
-- A **deployed customer service agent** - Go backend, React UI, HTTP and SSE, in `agents/customer_service/`, writing through the database's own functions
-- A **schema that enforces what the documentation claims**: 22 applied migrations, row-level security on every tenant-coded table, a tamper-evident row trail, and idempotency claims for retryable writes
-- A **blueprint** for how specialized agents can run operations through conversation - `blueprint/bot.py`, the same rules in one Python file
-- And a method: every claim in `db/` and in these pages has a check that fails when the claim stops being true
+- **Two deployed agents**, not one: a customer service agent (`agents/customer_service/`, `:4550`) and
+  an inventory control agent (`agents/inventory/`, `:4560`). Both are Go backends with a React UI, HTTP
+  and SSE transports, and the same agent loop — the second is a sibling fork of the first with the tool
+  layer replaced and a check timer added.
+- **A schema that enforces what the documentation claims**: 23 applied migrations (`0000`-`0018`,
+  `0021`-`0023`, `0026`), row-level security `FORCED` on all 21 tenant-coded tables while the six
+  exceptions are declared with their reasons rather than forgotten (five global by decision, one build
+  ledger — `vw_rls_status` publishes every predicate verbatim and gives a verdict), a tamper-evident row
+  trail chained per tenant and month (`audit_log`, `audit_chain_verify()`), and idempotency claims for
+  retryable writes (`vw_idempotency_status` says which functions are guarded and which are not).
+- **A blueprint** for how specialized agents can run operations through conversation —
+  `blueprint/bot.py`, the same rules in one Python file with LangChain and Telegram.
+- **And a method**: every claim in `db/` and in these pages has a check that fails when the claim stops
+  being true, including an acceptance harness that prompts each deployed agent once per registered tool
+  and verifies the answer against the database rather than against the agent's own prose
+  (`docs/agent_requirements/agent_test_plan.md`, `scripts/agents/tool_testplan.sh` — 21 cases, 25
+  verdicts, all green as of 2026-11-04).
 
 ### What's Under Construction
-- **Semantic search:** the hnsw indexes exist (`0012`) and nothing writes the vectors, because no embedder in this deployment produces the dimensions the columns declare. "Find customers who complained about shipping last week" is not implemented
-- **Agent registry:** no versioning, dependency resolution, or discovery. An agent is a process with an `AGENT_ROLE` and a set of grants
-- **More agents:** the customer service agent is the only one deployed. The inventory schema side is ready; the agent is not
-- **Escalation:** requirement 7's detection half exists (sentiment, outcomes, per-customer stats); there is no second agent to escalate *to*
-- **Observability beyond the table:** the trajectory is queryable (`vw_recent_interactions`, `vw_tool_calls`, `vw_tool_performance`) but nothing aggregates it into an alert
+- **Semantic search:** the hnsw indexes exist (`0012`) and nothing writes the vectors, because no
+  embedder in this deployment produces the dimensions the columns declare — measured, the local models
+  answer 1024 and 4096. "Find customers who complained about shipping last week" is not implemented.
+- **Agent registry:** no versioning, dependency resolution, or discovery. An agent is a process with an
+  `AGENT_ROLE` and a set of grants, not a row in a table — `agents` is not a table and nothing pretends
+  otherwise.
+- **A third agent, and the swarm the vision assumes:** two roles are deployed (customer service,
+  inventory). Accounting, sales, HR and the communication agent are documentation and table space.
+- **Escalation:** requirement 7's detection half exists (sentiment, outcomes, per-customer stats); there
+  is no CAO agent to escalate *to*, so the escalation path ends in a status value on a row.
+- **Observability beyond the table:** the trajectory is queryable (`vw_recent_interactions`,
+  `vw_tool_calls`, `vw_tool_performance`) and the inventory agent's scheduled checks land a row per tick
+  so "did it run" is a query, but nothing aggregates any of it into an alert.
+- **Two audit tables nothing writes:** `human_sessions` and `bot_actions` exist, are read by the audit
+  coverage machinery, and have zero rows from either implementation. The trail that *is* written is
+  `audit_log` (triggers) and `agent_interactions` (the loop). Say so before pointing a monitor at them.
 
-What is *not* under construction, and was listed here as though it were: row-level security (enforced, `FORCE ROW LEVEL SECURITY`, with `vw_rls_status` publishing what each policy actually does), the tool library (fourteen tools in the deployed agent, nine of them in the blueprint), and logging (one row per run, every tool call, plus the PII-masked process log).
+What is *not* under construction, and was listed here as though it were: row-level security (enforced,
+`FORCE ROW LEVEL SECURITY`, with `vw_rls_status` publishing what each policy actually does), the tool
+library (fourteen tools in the customer service agent, eleven in the inventory agent, eight of them
+the same CRM surface the blueprint registers), logging (one row per run with every tool call in it, a
+process log that masks what it can, and a trajectory that deliberately does not - `agents/customer_service/README.md`'s
+"what reaches the log" explains why the record has to keep the values to be a record), and inventory
+writes (reservations go through `reserve_inventory_for_order`, which is a
+day-one tool and whose ledger bug 0026 found and fixed).
 
 ### What You Can Do Now
-1. **Run the deployed agent** - `cd agents/customer_service && docker compose up --build -d`, then `curl -s localhost:4550/api/health | jq`. Eleven tools: customer lookup, communications history, entity statistics, follow-up lists, add/update customer, log an interaction, mark a follow-up, remember a fact, the clock, and two web tools
-2. **Study the blueprint** to understand the agent pattern and tool library architecture
-3. **Build your own agent** using the reference implementation as a guide
-4. **Contribute** to the tool library, registry, or documentation
-5. **Provide feedback** on the architecture and design choices
+1. **Run the customer service agent** — `cd agents/customer_service && docker compose up --build -d`,
+   then `curl -s localhost:4550/api/health | jq`. Fourteen tools: eight CRM (three reading `vw_*` views,
+   five calling stored functions), three memory tools over `agent_memories`, the clock, and two web
+   tools.
+2. **Run the inventory agent** — `cd agents/inventory && docker compose up --build -d`, then
+   `curl -s localhost:4560/api/health | jq`. Eleven tools: four stock reads, one reservation door, and
+   the same six shared tools — plus a 30-minute deterministic check whose every tick files a trajectory
+   row.
+3. **Run the acceptance plan against both** — `./scripts/agents/tool_testplan.sh`. It is slow (every
+   case is a real model turn) and it re-runs cleanly (fixtures carry a timestamp).
+4. **Study the blueprint** (`blueprint/bot.py`) to understand the pattern in 215 lines before reading
+   two forks of it.
+5. **Contribute** to the tool library, the schema's doors, or the documentation — `AGENTS.md` is the
+   route map and `PLAN.md` is the queue.
 
 ### Roadmap
 | Phase | Goal | Status |
 |-------|------|--------|
 | **Alpha** | Core blueprint + 1 working agent | 🟢 Done: the blueprint, and a deployed agent behind it |
-| **Beta** | Tool library + 3 agents + basic registry | ⚪ Planned |
-| **1.0** | Production-ready with monitoring, security, docs | ⚪ Future |
+| **Alpha+** | A second agent on the same loop, and an acceptance plan that verifies it | 🟢 Done 2026-11-04: `agents/inventory/`, `scripts/agents/tool_testplan.sh` |
+| **Beta** | Tool library + 3 agents + basic registry | 🔵 2 of 3 agents deployed; the registry and the third role are open |
+| **1.0** | Production-ready with monitoring, security, docs | ⚪ Future — the monitoring half needs an alerting path that does not exist yet |
 
 ---
 
@@ -48,8 +91,9 @@ What is *not* under construction, and was listed here as though it were: row-lev
 
 If you're an AI agent working on this project, start here:
 - **[AGENTS.md](AGENTS.md)** - Complete guide for AI agents navigating this project
-- **[agents/customer_service/](agents/customer_service/)** - The deployed agent; **[blueprint/bot.py](blueprint/bot.py)** - the reference implementation
+- **[agents/customer_service/](agents/customer_service/)** and **[agents/inventory/](agents/inventory/)** - the two deployed agents; **[blueprint/bot.py](blueprint/bot.py)** - the reference implementation
 - **[QUICKSTART.md](QUICKSTART.md)** - Setup and deployment instructions
+- **[docs/agent_requirements/agent_test_plan.md](docs/agent_requirements/agent_test_plan.md)** - how a turn is proven, tool by tool
 
 ## Vision
 
@@ -57,18 +101,25 @@ Create a swarm of specialized AI agents to run a business where **the conversati
 
 - **No Dashboards:** Natural language UI, simply ask, "How are sales?" and get an instant answer.
 - **No Forms:** Say, "Add a note to John's file," and it's done.
-- **Shared Memory:** PostgreSQL with PGVector serves as the collective memory for all agents.
+- **Shared Memory:** PostgreSQL holds the collective memory of all agents in tables both agents read;
+  PGVector is where semantic recall will live, and its columns are empty until an embedder is deployed
+  that matches them.
 
 ## Architecture Overview
 
-- **CAO (Chief Agent Officer):** Jarvis – the gatekeeper, orchestrator, and validator. (currently in test, not ready for peer review)
+- **CAO (Chief Agent Officer):** the gatekeeper, orchestrator, and validator. **Not built.** What exists
+  instead is the schema's own enforcement plus the trajectory: a run that claims something can be read
+  back and checked, and a write that has no door cannot happen.
    - Heremes/OpenClaw, or BYO (build your own)
-- **Specialized Agents:** Independent bots (Customer Service, Inventory, Accounting, etc.) that read/write directly to the database.
-- **Shared Memory:** PostgreSQL with **PGVector** for semantic search, context-aware memory, and hybrid queries.
-  - [Reference (JARVIS Blueprint)](https://github.com/JustinWhitty1981/openclaw_blueprint/blob/main/JARVIS_BLUEPRINT_OODA.md) - Built and in use, not yet ready for peer review
-  - [Performance Audit (14-Day)](https://github.com/JustinWhitty1981/openclaw_blueprint/blob/main/14-DAY_PERFORMANCE_AUDIT.md) - Demonstrates benefits of shared memory architecture
-- **Interface:** Telegram, Teams, Slack, lightweight UI → Natural Language → SQL/Vector Queries → Response.
-- **Validation:** Every agent action is logged and verified.
+- **Specialized Agents:** Independent processes (customer service and inventory are deployed) that read
+  `vw_*` views and call stored functions — never compose their own INSERT against business tables.
+- **Shared Memory:** PostgreSQL with **PGVector** for semantic search, context-aware memory, and hybrid
+  queries. The context part is real today (`agent_memories`, plus conversation history rehydrated from
+  `agent_interactions` after a restart); the semantic part is not.
+- **Interface:** the deployed agents speak HTTP and SSE into a React UI; the blueprint speaks Telegram.
+  The transport is a `main.go` change and the loop does not care which is attached.
+- **Validation:** every agent action lands a row — in `agent_interactions` for the run, in `audit_log`
+  for the row-change — and the acceptance harness asserts the database agrees with what the agent said.
 
 ## Documentation Navigation
 
@@ -78,28 +129,43 @@ Create a swarm of specialized AI agents to run a business where **the conversati
 | [architecture.md](architecture.md) | System architecture and agent roles |
 | [QUICKSTART.md](QUICKSTART.md) | Setup and deployment instructions |
 | [PLAN.md](PLAN.md) | Development roadmap and priorities |
+| [agents/customer_service/README.md](agents/customer_service/README.md) | The deployed customer service agent: tools, environment, endpoints |
+| [agents/inventory/README.md](agents/inventory/README.md) | The second deployed agent, and its check timer |
+| [db/README.md](db/README.md) | **Single source of truth for the schema**, and which SQL directories are superseded |
+| [db/MIGRATIONS.md](db/MIGRATIONS.md) | finding → migration, one row per thing the review found |
+| [dev/README.md](dev/README.md) | This development server: container, roles, TLS, gotchas |
+| [docs/agent_requirements/agent_test_plan.md](docs/agent_requirements/agent_test_plan.md) | The acceptance plan for every tool of both agents |
 | [blueprint/AGENT_SUMMARY.md](blueprint/AGENT_SUMMARY.md) | Blueprint pattern reference |
 | [docs/database/](docs/database/) | Database schema and documentation |
 | [OpenClaw Blueprint (Precursor)](https://github.com/JustinWhitty1981/openclaw_blueprint/tree/main) | Reference implementation and performance benchmarks |
 
 ## Tech Stack
 
-- **Database:** PostgreSQL with **PGVector** extension (for semantic search).
-- **LLM:** `ornith:35b` via Ollama (`http://{your-ollama-host}:11434`) for agent inference.
-- **Complex Reasoning:** `qwen3.5:122b` via vLLM (`http://{your-llm-host}:8001`) for architecture decisions.
-- **Orchestration:** OpenClaw/Hermes (sessions, cron, memory, message tools).
-- **Current Interface:** Telegram (via OpenClaw message tool or direct bot).
-- **Validation:** Custom Python framework for CAO verification of agent actions.
+- **Database:** PostgreSQL 17 with **PGVector** (`pgvector/pgvector:pg17`), TLS `verify-full`, three
+  roles (`afpc_app` for the agents, `afpc_readonly` and `afpc_auditor` for humans reading).
+- **Agents:** Go backends (module `jada-backend`, one per agent), a React UI built into the binary's
+  `static/`, chi router, `pgx` pool.
+- **LLM:** `qwen3.8-flash-next` on vLLM behind an OpenAI-compatible endpoint
+  (`VLLM_BASE_URL=http://<host>:18300/v1`, `LLM_PROVIDER=local`) for agent inference. Self-hosted; no
+  commercial API spend. The Azure path in `pkg/llm` is inherited from the reference drop and unused
+  here.
+- **Orchestration:** none yet — the CAO is not built, so an agent's schedule is either a human prompt or
+  the inventory container's own timer.
+- **Current Interface:** HTTP `POST /api/chat` and SSE `POST /api/chat/stream`. Telegram exists in the
+  blueprint and in the upstream reference, not in the deployed agents.
+- **Validation:** the database's own constraints and doors, the trajectory table, and
+  `scripts/agents/tool_testplan.sh`, which is the custom framework standing in for CAO verification.
 
 ## Why This Approach?
 
 | Feature | Traditional ERP | Agent First ERP CRM (Database-First) |
 | :--- | :--- | :--- |
 | **Interface** | Web UI (Clicks, Forms) | **Conversation (Natural Language)** |
-| **Speed** | Slow (API overhead, App layer) | **Instant** (Direct SQL + Vector) |
-| **Flexibility** | Fixed schema, hard to change | **Custom schema**, evolve as needed |
-| **Agent Access** | Restricted by API permissions | **Full access** (with row-level security) |
-| **Memory** | Static records | **Semantic Memory** (PGVector) |
+| **Speed** | Slow (API overhead, App layer) | **Direct SQL** (through views and functions, not free-form queries) |
+| **Flexibility** | Fixed schema, hard to change | **Custom schema**, migrations in order, every one of them asserted |
+| **Agent Access** | Restricted by API permissions | **Full access** (with row-level security enforced, `vw_rls_status`) |
+| **Memory** | Static records | **Rows first** (`agent_memories`, `agent_interactions`); semantic recall via PGVector is designed, not deployed |
+| **Accountability** | "Someone changed it" | **One row per change, chained** — `audit_log` plus a per-run trajectory |
 
 ---
 

@@ -426,9 +426,6 @@ in both directions - names the view never had, and columns 0009 added to every t
 - `currency_code` - What the numbers on this row are in. Nothing converts (0018)
 - `tenant_id` - Whose row this is. Every tenant-coded view exposes it last (0009), which is what makes an agent's and an auditor's result sets differ without two views
 
-different names and no `tenant_id`)
-
-different names and no `tenant_id`)
 - `warehouse_id` - Which warehouse
 - `warehouse_name` - Its name
 - `warehouse_type` - PRIMARY / SECONDARY / TRANSIT
@@ -473,21 +470,6 @@ in both directions - names the view never had, and columns 0009 added to every t
 - `in_force` - Whether a row covers the instant the view was asked at
 - `rows_for_pair` - How many rows the pair has ever had, so *expired* and *never quoted* read differently
 - `as_of` - The instant the view measured at - a `now()` in a view answers a different question on every scan, so it is named
-
-  from this view rather than present with NULLs - which is what makes `rows_for_pair` meaningful.
-
-  from this view rather than present with NULLs - which is what makes `rows_for_pair` meaningful.
-- `rate_in_force` - The number, or NULL when the pair has no row covering now
-- `valid_from` / `valid_to` - The window that row covers; NULL `valid_to` means it is the open row
-- `source` - Where the number came from; NULL is information (an unattributed rate)
-- `in_force` - Whether a covering row exists at all. `false` with `rows_for_pair > 0` means
-
-  *expired*, which is a different fact from a pair that has no rows; conflating them is how a rate
-  table stops being trusted by the person reading it
-- `rows_for_pair` - How much history this pair has
-- `as_of` - `now()`, stated rather than implicit: a view that quietly contains a clock answers a
-
-  different question on every scan
 
 **Use Case:** Asking whether a conversion is even possible. Nothing in the schema reads this view
 to price anything - `vw_inventory_valuation` is grouped by currency instead of translated - so it is
@@ -554,13 +536,10 @@ in both directions - names the view never had, and columns 0009 added to every t
 - `net_quantity` - What the stock level moved by, reservations included
 - `movement_count` - How many ledger rows the window holds
 - `avg_unit_cost` - Mean cost per unit over the window
-- `total_inbound` - Receipts in the window, reservations excluded - a commitment makes stock unavailable, it moves nothing (0019's note)
+- `total_inbound` - Receipts in the window, reservations excluded - a commitment makes stock unavailable, it moves nothing (0014 made the reservation a commitment rather than a movement, and the view's own COMMENT says which rows its totals count)
 - `total_outbound` - Issues in the window, reservations excluded, for the same reason
 - `tenant_id` - Whose row this is. Every tenant-coded view exposes it last (0009), which is what makes an agent's and an auditor's result sets differ without two views
 
-five columns this view has never had)
-
-five columns this view has never had)
 - `item_id` - The item the movements are for
 - `movement_date` - Day, truncated
 - `movement_type` - `RECEIPT` / `ISSUE` / `TRANSFER` / `ADJUSTMENT` / `RESERVATION` / `RETURN`
@@ -612,56 +591,55 @@ in both directions - names the view never had, and columns 0009 added to every t
 
 ## Usage Examples
 
-### Get Customer Communications
+Every statement below was run against this server's database before it was written into this page, and
+each names only columns `pg_attribute` says the view has. That sentence is the whole difference between
+this section and the one it replaced, which had four examples, all of which raised `42P01` or `42703`:
+`customer_communications_summary` and `pending_followups` and `agent_activity_summary` are the view names
+*without* the `vw_` prefix this repository requires, `bot_id` is a column of `agent_interactions` and not
+of `vw_agent_activity_summary` (which groups by `agent_id`), `item_name` is `name`, and the two
+`follow_up_*` names described a `communications` row while the view reads the `followups` table, where
+the column is `due_date`.
+
+### One customer's communications, newest first
 
 ```sql
-SELECT 
-    communication_type,
-    summary,
-    outcome,
-    sentiment_label
-FROM customer_communications_summary
-WHERE entity_id = 123
-ORDER BY started_at DESC
-LIMIT 10;
+SELECT communication_type, direction, summary, outcome, sentiment_label, started_at
+  FROM vw_customer_communications_summary
+ WHERE entity_id = 5
+ ORDER BY started_at DESC
+ LIMIT 10;
 ```
 
-### Get Pending Follow-ups
+### Tasks that are due
+
+Note what this one answers on this server today: **zero rows**, because `followups` has no writer in the
+schema (0021 §5 leaves that decision open). The live "who needs contact" question is
+`SELECT * FROM get_followup_customers(7)`, and an agent that says it checked the pending list has told
+you something true and useless.
 
 ```sql
-SELECT 
-    entity_name,
-    contact_name,
-    follow_up_action,
-    follow_up_date,
-    priority
-FROM pending_followups
-WHERE priority IN ('high', 'critical')
-ORDER BY follow_up_date ASC;
+SELECT entity_name, contact_name, description, due_date, priority, status
+  FROM vw_pending_followups
+ WHERE priority IN ('high', 'critical')
+ ORDER BY due_date;
 ```
 
-### Get Agent Performance
+### What the agents have been doing
 
 ```sql
-SELECT 
-    bot_id,
-    total_actions,
-    ROUND(avg_sentiment::numeric, 2) as avg_sentiment
-FROM agent_activity_summary
-ORDER BY total_actions DESC;
+SELECT agent_id, total_actions, unique_entities, resolved_count,
+       escalated_count, ROUND(avg_sentiment::numeric, 2) AS avg_sentiment, last_activity
+  FROM vw_agent_activity_summary
+ ORDER BY total_actions DESC;
 ```
 
-### Check Item Availability
+### Where an item is, and whether it needs reordering
 
 ```sql
-SELECT 
-    sku,
-    item_name,
-    warehouse_name,
-    quantity_available,
-    stock_status
-FROM vw_item_availability
-WHERE sku = 'WIDGET-A';
+SELECT sku, name, warehouse_name, quantity_on_hand, quantity_reserved,
+       quantity_available, reorder_point, stock_status, needs_reorder
+  FROM vw_item_availability
+ WHERE sku = 'IN-1003';
 ```
 
 ---

@@ -1,282 +1,153 @@
-# Customer Functions Reference
+# Customer Functions - the doors, as they exist
 
-**Purpose:** SQL functions for customer management operations.
+> **What changed on this page.** It used to reference a function library that was never in this
+> database: `get_customer_by_id`, `search_customers_by_name`, `search_customers_by_email`,
+> `search_customers_by_phone`, `create_customer`, `delete_customer`, `log_communication`,
+> `get_communications`, `get_communication_thread`, `get_entity_relationships`,
+> `get_customer_statistics`, `add_contact_to_entity`, `update_contact`, `set_primary_contact`. Measured
+> against `pg_proc`, **every one of those answers zero rows** - they are the shape the July design
+> assumed, and `db/migrations/` built something smaller and stricter instead. What the schema really
+> offers is below: four customer doors, one read function, three memory doors, and views for every
+> read that does not need a parameter.
+>
+> The rule that decides which half a capability lands in is ADR-002 and ADR-003: **a read is a `vw_*`
+> view, a write is a function, and a parameterised read is a function too.** A tool that composed its
+> own `INSERT` would put the business rule where the database cannot enforce it, which is finding 4.5
+> and the reason `code:cs_writes_through_doors` exists.
 
-**Location:** `scripts/database/09_customer_functions.sql`
+## The customer doors
 
----
+### `add_customer` - create a customer
 
-## Overview
-
-Customer functions provide a clean API for managing entities, contacts, and their relationships. All functions are stored in the PostgreSQL catalog and can be called directly from Python tools.
-
----
-
-## Customer Lookup Functions
-
-### `get_customer_by_id(entity_id)`
-
-Retrieve complete customer information by entity ID.
-
-```sql
-SELECT * FROM get_customer_by_id(123);
-```
-
-**Returns:**
-- entity_id, entity_type, name, legal_name, industry, website, status
-- Primary contact information (first_name, last_name, email, phone, title)
-- Primary address (street, city, state, postal_code, country)
-- Total communication count
-- Last communication date
-
-**Example:**
-```python
-result = cursor.execute("""
-    SELECT * FROM get_customer_by_id(%s),
-    (123,)
-).fetchone()
-```
-
-### `search_customers_by_name(search_term)`
-
-Search customers by name using full-text search.
+15 parameters, every one `DEFAULT`ed (0016's shape: one head, no overloads, so a call cannot resolve to
+a definition nobody intended). Returns `TABLE(success, entity_id, contact_id, message)`.
 
 ```sql
-SELECT * FROM search_customers_by_name('bob');
+SELECT * FROM add_customer(
+  p_first_name := 'Grace', p_last_name := 'Okafor',
+  p_email := 'grace@okafor.example', p_phone := '+15125550111',
+  p_street := '18 Cedar Ct', p_city := 'Austin', p_state := 'TX',
+  p_postal_code := '78704', p_country := 'US',
+  p_entity_type := 'individual', p_status := 'active',
+  p_idempotency_key := gen_random_uuid());
 ```
 
-**Returns:** Matching entities with primary contact and communication stats.
+It writes four tables in one transaction - `entities`, `contacts`, `entity_relationships`, and
+`addresses` when an address was given - and refuses a name or email that already exists (`ILIKE`, so
+`Grace Okafor` cannot be added twice, which is why the acceptance harness stamps its fixtures).
+For a business, pass `p_organization_name` (that becomes the entity name) plus the contact person's
+name; `p_is_primary` decides whose number the read paths reach through.
 
-### `search_customers_by_email(email)`
+There is **no `delete_customer`**, and the closest thing to one is the referential rule 0008 left in
+place: `communications.entity_id` and `.contact_id` are `NO ACTION`, so an entity with a history cannot
+be dropped out from under it (0008's own note counts the CASCADE edges it *did* remove, against business
+data, and what it converted to RESTRICT is the stock and reservation keys). Soft delete is planned for
+`0025`. Until it lands, a customer is retired by `p_status`, not removed.
 
-Find customer by email address.
+And read `p_entity_type` honestly, because it is the clearest live example of T2: the parameter decides
+only **how the name is assembled** - `business` takes `p_organization_name`, anything else concatenates
+first and last. The `INSERT` writes the literal `'customer'` into `entities.entity_type` either way.
+`vendor` and `prospect` are values the column's CHECK admits and no function ever stores, which is why
+`vw_customers` cannot filter on them and why the marker `code:vw_customers_filter` has no `closed()`
+branch: the decision has not been made, and a page that said otherwise would be describing a column
+nobody writes.
+
+### `update_customer` - change an existing customer's fields
+
+13 parameters; identification is by **search** fields, and an omitted value keeps what is stored.
 
 ```sql
-SELECT * FROM search_customers_by_email('john@example.com');
+SELECT * FROM update_customer(
+  p_search_name := 'Grace Okafor', p_search_email := 'grace@okafor.example',
+  p_street := '19 Cedar Ct');
 ```
 
-### `search_customers_by_phone(phone)`
+`p_search_*` select and never change anything, and a selection that reaches two rows is refused rather
+than applied to whichever the scan hit first - the same rule `add_communication` has and for the same
+reason. `vw_customers` carries the row it changed. Note two facts about this door that the register
+publishes: it is **UNGUARDED** in `vw_idempotency_status` (it sets values, so a retry lands the same
+state - ADR-005's pattern-1 reasoning rather than a claim), and `p_status` cannot make a customer a
+`prospect`, because `prospect` is an `entity_type` value and no function in the schema writes
+`entity_type` after creation. That open question is `code:vw_customers_filter` / **T2**, and probe
+`4_5` prints it as KNOWN-OPEN rather than pretending it passes.
 
-Find customer by phone number.
+### `add_communication` - log one interaction
+
+The only door that writes `communications` (20 parameters, all `DEFAULT`ed, 0021).
 
 ```sql
-SELECT * FROM search_customers_by_phone('555-1234');
+SELECT * FROM add_communication(
+  p_customer_name := 'Grace Okafor',
+  p_communication_type := 'call', p_direction := 'inbound',
+  p_subject := 'Shipping timeline', p_summary := 'Discussed ORD-10001 shipping.',
+  p_channel := 'phone', p_sentiment_label := 'neutral', p_outcome := 'pending',
+  p_follow_up_required := true, p_follow_up_date := CURRENT_DATE + 3,
+  p_idempotency_key := gen_random_uuid());
 ```
 
----
+Four behaviours a caller-side `INSERT` could not have promised, all of them in the migration's prose:
+a name matching more than one row is **refused with the candidates listed**; an id that row security
+hides answers as a refusal instead of a NULL a foreign key would accept; the six vocabularies are the
+column CHECKs' own, so `p_direction := 'sideways'` keeps its `23514`; and `thread_root_id` inherits the
+parent's root, so a reply to a reply lands on the thread the first message started. A
+`p_follow_up_required` without a date is refused - the flag and the date are one decision. It creates
+**no `followups` row**: that table has no writer anywhere in the schema, and 0021 §5 says so rather
+than deciding it.
 
-## Customer Management Functions
-
-### `create_customer(name, entity_type, email, phone, ...)`
-
-Create a new customer entity with optional contact and address.
+### `mark_customer_followup` - set or clear the follow-up mark
 
 ```sql
-SELECT create_customer(
-    name => 'Acme Corporation',
-    entity_type => 'customer',
-    email => 'contact@acme.com',
-    phone => '555-1234',
-    industry => 'Manufacturing'
-);
+SELECT * FROM mark_customer_followup(p_entity_id := 11, p_followup := true);
 ```
 
-**Returns:** New entity ID.
+Writes `entities.status` (`'follow-up'` / `'active'`), which is what `get_followup_customers`' first
+branch reads. Unguarded by claim, for the same reason `update_customer` is.
 
-**Parameters:**
-- `name` (TEXT, required): Entity name
-- `entity_type` (VARCHAR, default 'customer'): Type of entity
-- `email` (TEXT, optional): Primary contact email
-- `phone` (TEXT, optional): Primary contact phone
-- `legal_name` (TEXT, optional): Legal business name
-- `industry` (TEXT, optional): Industry classification
-- `website` (TEXT, optional): Website URL
-- `first_name` (TEXT, optional): Primary contact first name
-- `last_name` (TEXT, optional): Primary contact last name
-- `title` (TEXT, optional): Primary contact title
-- `street` (TEXT, optional): Street address
-- `city` (TEXT, optional): City
-- `state` (TEXT, optional): State
-- `postal_code` (TEXT, optional): Postal code
-- `country` (TEXT, optional): Country (default 'US')
+## The parameterised read
 
-### `update_customer(entity_id, ...)`
+### `get_followup_customers(p_days_threshold integer DEFAULT 7)`
 
-Update customer information with audit logging.
+Returns `TABLE(entity_id, name, email, phone, last_communication_date, follow_up_reason)` for the
+customers who need contact, with the reason named: `No recent communications`, `Status marked for
+follow-up`, or `Unresolved communication`, checked in that order. A negative or NULL threshold is
+`22023` before any scan (0022), and the staleness clock is the *interaction*, not the row's write time -
+which is the difference 0022 found, and why `db/seeds/01_demo_customers.sql` with its backdated history
+is what makes the probe discriminating.
+
+It is a function rather than a view because it takes an argument, and it joins through each customer's
+**primary** contact, so an account without one appears nowhere.
+
+## Memory (ADR-002's half that is not a customer table)
 
 ```sql
-SELECT update_customer(
-    entity_id => 123,
-    name => 'Acme Corp Updated',
-    industry => 'Technology'
-);
+SELECT * FROM save_memory(p_key := 'grace.pref', p_content := 'prefers email',
+                          p_idempotency_key := gen_random_uuid());
+SELECT * FROM get_memory(p_key := 'grace.pref', p_limit := 10);
+SELECT * FROM list_memories();
 ```
 
-**Parameters:** All parameters are optional. Only provided fields are updated.
+`agent_memories` is append-only by grant (B28 asserts it), keyed per tenant, and it is what both agents
+read after a restart instead of a container directory.
 
-**Audit:** Updates are logged to `audit_log` table with old and new values.
+## Reading, which is views and not functions
 
-### `delete_customer(entity_id)`
+| Need | Read |
+|---|---|
+| A customer by id, name, email or phone | `vw_customers` (`WHERE` is yours; the columns are `id, name, email, phone, address, status, created_at, updated_at, tenant_id`) |
+| One customer's interaction history | `vw_customer_communications_summary` |
+| The last seven days | `vw_recent_communications` |
+| Per-customer counts, sentiment, first/last contact | `vw_entity_communication_stats` |
+| A thread, flattened | `vw_communication_thread` |
+| Who is due a call | `get_followup_customers(days)` - the one above |
 
-Soft delete a customer (sets status to 'inactive').
+The old names on this page were `get_customer_by_id` and `get_communications`; both are a `SELECT` now,
+and ADR-003 is why they are not functions.
 
-```sql
-SELECT delete_customer(123);
-```
+## Applying them
 
-**Note:** Does not physically delete records to preserve audit trail.
-
----
-
-## Contact Management Functions
-
-### `add_contact_to_entity(entity_id, first_name, last_name, ...)`
-
-Add a contact to an existing entity.
-
-```sql
-SELECT add_contact_to_entity(
-    entity_id => 123,
-    first_name => 'Jane',
-    last_name => 'Smith',
-    email => 'jane@acme.com',
-    title => 'Procurement Manager',
-    is_primary => true
-);
-```
-
-**Returns:** New contact ID.
-
-### `update_contact(contact_id, ...)`
-
-Update contact information.
-
-```sql
-SELECT update_contact(
-    contact_id => 456,
-    email => 'jane.smith@acme.com',
-    title => 'Senior Procurement Manager'
-);
-```
-
-### `set_primary_contact(entity_id, contact_id)`
-
-Set a contact as the primary contact for an entity.
-
-```sql
-SELECT set_primary_contact(123, 456);
-```
-
----
-
-## Communication Functions
-
-### `log_communication(entity_id, communication_type, summary, ...)`
-
-Log a communication with an entity.
-
-```sql
-SELECT log_communication(
-    entity_id => 123,
-    communication_type => 'email',
-    direction => 'inbound',
-    subject => 'Product Inquiry',
-    summary => 'Customer asked about pricing for bulk orders',
-    outcome => 'resolved',
-    sentiment_score => 0.8
-);
-```
-
-**Returns:** Communication ID.
-
-**Parameters:**
-- `entity_id` (INTEGER, required): Entity to log communication for
-- `communication_type` (VARCHAR, required): Type of communication
-- `direction` (VARCHAR, optional): 'inbound', 'outbound', 'internal'
-- `subject` (TEXT, optional): Subject line
-- `summary` (TEXT, required): AI-generated summary
-- `full_content` (TEXT, optional): Full transcript
-- `outcome` (VARCHAR, optional): 'resolved', 'escalated', 'pending', 'closed'
-- `sentiment_score` (FLOAT, optional): Sentiment score (-1 to 1)
-- `follow_up_required` (BOOLEAN, optional): Requires follow-up?
-- `follow_up_date` (DATE, optional): Follow-up date
-
-### `get_communications(entity_id, days)`
-
-Retrieve communications for an entity.
-
-```sql
-SELECT * FROM get_communications(123, 30);
-```
-
-**Returns:** Communications from the last N days.
-
-### `get_communication_thread(communication_id)`
-
-Get complete conversation thread.
-
-```sql
-SELECT * FROM get_communication_thread(789);
-```
-
----
-
-## Utility Functions
-
-### `split_name(full_name)`
-
-Parse a full name into first and last name.
-
-```sql
-SELECT split_name('John Doe');
--- Returns: ('John', 'Doe')
-```
-
-### `get_entity_relationships(entity_id)`
-
-Get all contacts and their roles for an entity.
-
-```sql
-SELECT * FROM get_entity_relationships(123);
-```
-
-### `get_customer_statistics(entity_id)`
-
-Get aggregated statistics for a customer.
-
-```sql
-SELECT * FROM get_customer_statistics(123);
-```
-
-**Returns:**
-- Total communications
-- Resolved count
-- Escalated count
-- Average sentiment
-- Last contact date
-- Open follow-ups count
-
----
-
-## Best Practices
-
-1. **Always use functions** - Don't directly INSERT/UPDATE tables for customer operations
-2. **Audit logging** - All changes are automatically logged
-3. **Soft deletes** - Use `delete_customer()` instead of direct DELETE
-4. **Vector embeddings** - Automatically generated for semantic search
-5. **Transaction safety** - Functions run in transactions for data integrity
-
----
-
-## Error Handling
-
-Functions raise descriptive errors:
-
-- `NOT_FOUND`: Entity or contact not found
-- `DUPLICATE_EMAIL`: Email already exists
-- `INVALID_TYPE`: Invalid entity_type or communication_type
-- `REQUIRED_FIELD`: Missing required field
-
----
-
-*Generated for Agent First ERP CRM - Customer management function reference*
+Nothing here is applied by hand. The definitions are in `db/migrations/0001` (ported), `0016`
+(one `add_customer` head), `0017` (the interaction read path), `0021` (`add_communication`), `0022`
+(`get_followup_customers`) and `0023` (memory), and `scripts/db/db up` applies them in filename order.
+`blueprint/09_add_update_customer_functions.sql` and `scripts/database/09_customer_functions.sql` are
+the superseded copies of the first two - kept so the fork is legible, and both qualified to a schema no
+migration creates, so running either writes somewhere the views cannot see.

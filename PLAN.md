@@ -5,104 +5,100 @@
 Before starting work, AI agents should review:
 - **[AGENTS.md](AGENTS.md)** - Complete guide for navigating this project
 - **[README.md](README.md)** - Project overview
-- **[architecture.md](architecture.md)** - System architecture
-- **[blueprint/AGENT_SUMMARY.md](blueprint/AGENT_SUMMARY.md)** - Blueprint pattern reference
-- **[docs/database/](docs/database/)** - Database documentation
+- **[architecture.md](architecture.md)** - System architecture, and what the two deployed agents are
+- **[db/MIGRATIONS.md](db/MIGRATIONS.md)** - the ledger of what the schema review found and which migration closed it
+- **[docs/agent_requirements/agent_test_plan.md](docs/agent_requirements/agent_test_plan.md)** - how a tool is proven, which is how "done" is defined here
 
 ---
 
 ## Current Status
-✅ **Blueprint Complete:** Working customer service agent in `blueprint/`  
-✅ **Schema Designed:** Enterprise-grade database schema documented in `docs/database/schema.md`  
-✅ **Architecture Defined:** Simple, scalable agent pattern established  
-✅ **Schema Graph Updated:** All customer relationships (entities, contacts, communications, etc.) added to `_schema_graph` table  
 
-## Immediate Priorities (This Week)
+✅ **Blueprint complete** - `blueprint/bot.py`, the pattern in one Python file
+✅ **Two agents deployed** - `agents/customer_service/` (`:4550`, 14 tools) and `agents/inventory/` (`:4560`, 11 tools plus a 30-minute check timer)
+✅ **Schema enforced, not documented-only** - 23 applied migrations; `./scripts/db/verify.sh` reports 37 structural checks green, `./scripts/db/test-functions.sh` runs one probe per review finding
+✅ **A method that catches itself** - `scripts/agents/tool_testplan.sh` prompts every registered tool of both agents through the real endpoint and verifies the answer against the database (25 verdicts green, 2026-11-04); `scripts/docs/check_agent_docs.sh` fails when a README describes a tool or a view that is not there
+⚠️ **`_schema_graph` exists** and is a knowledge graph of the schema; the documentation sweep of 2026-11-04/05 was the thing that actually caught drift, so treat the graph as an index, not as the source
 
-### 1. Verify Database Schema is Deployed ✅ COMPLETED
-- [x] Check if `agent_first_erp_crm` schema exists in PostgreSQL
-- [x] Verify required views (`customers`, `recent_communications`, `entity_communication_stats`)
-- [x] Run `blueprint/setup_sample_data.sql` if tables don't exist
-- [x] Test blueprint bot against real database
-- [x] Update `_schema_graph` table with all customer relationship nodes (entities, contacts, communications, etc.)
+## Now: the two known-open defects on the deployed surface
 
-**See [docs/database/agent_schema_reference.md](docs/database/agent_schema_reference.md) for schema details.**
+### 1. Semantic search is indexes without vectors
+- [ ] Choose or build an embedder that emits the 1536 dimensions `communications.embedding` and `contacts.embedding` declare (measured: the local models answer 1024 and 4096) — or change the columns, which is a migration with a reindex in it
+- [ ] Decide the backfill for existing rows, and who runs it: an `UPDATE` in a migration is a lock on a table the agents are reading
+- [ ] Add the tool that reads them, and its case in `docs/agent_requirements/agent_test_plan.md`
+- Blocked on: a model choice, not a code change. Requirement 1's "find customers who complained about shipping last week" stays unimplemented until then.
 
-### 2. Test the Blueprint
-- [ ] Run `docker-compose up --build` in `blueprint/`
-- [ ] Send test messages to Telegram bot
-- [ ] Verify tool calls work (customer lookup, communication logging)
-- [ ] Check error handling and logging
+### 2. `idempotency_sweep` has no keeper
+- [ ] Something must call it: a container's timer (the inventory agent's `RunCheck` is the working pattern), a cron entry, or the deployment's housekeeping phase
+- [ ] Assert it in `db/tests/`: today the retention policy is a promise, and probe `6_1`'s §F already discovered the difference the hard way - it now sweeps to a baseline first, because an uncollected field makes an honest count into a false alarm
+- Cheapest item on this page, and the one that keeps ADR-005's garbage-collection clause from being paper.
 
-### 3. Document Lessons Learned
-- [ ] Update `blueprint/README.md` with any deployment notes
-- [ ] Create troubleshooting guide for common issues
-- [ ] Document any schema adjustments needed
+## Now, item 3: the two test directories that write to the database they test
 
-## Short-Term (Next 2 Weeks)
+`blueprint/tests/` and `scripts/tests/` hold the same five ad-hoc scripts, and two of them
+(`test_create_functions.py`, `test_update_function.py`) connect at import with `POSTGRES_DB` defaulting
+to **`agent_first_erp_crm`** and run, on the success path, `DROP FUNCTION IF EXISTS
+add_customer(...)` / `update_customer(...)` then a stub `CREATE FUNCTION` returning `TRUE, 1, 1,
+'Test'` — committed. `pytest blueprint/tests/` imports every module it collects, so the command this
+repository's own `AGENTS.md` listed as harness four does that without running a single assertion first.
 
-### 4. Build CAO Validation Layer
-- [ ] Design validation API (receive agent claims, verify against DB)
-- [ ] Implement `tools/validator.py` with SQL-based verification
-- [ ] Add validation hooks to blueprint agent
-- [ ] Test with intentional false claims
+- [ ] Guard the module bodies with `if __name__ == "__main__":` or delete the two files (they recreate
+      pre-`0016`/pre-`0021` bodies of doors the migrations own — there is nothing left for them to check)
+- [ ] Default `POSTGRES_DB` to a name that cannot be the live database, so a mistake fails loudly
+- [ ] Then re-point `AGENTS.md`'s harness list at whatever survives, and say in `scripts/tests/README.md`
+      and `blueprint/tests/README.md` what the run costs
 
-**See [docs/MISALIGNMENT_FIXES.md](docs/MISALIGNMENT_FIXES.md) for known issues and [docs/STABILITY_IMPROVEMENTS.md](docs/STABILITY_IMPROVEMENTS.md) for best practices.**
+Found by this sweep, not by a failure: the docs said "run these", and the code said what running them does.
 
-### 5. Add Second Agent (HR Onboarding)
-- [ ] Copy blueprint to `agents/hr-onboarding/`
-- [ ] Define HR-specific tools (employee lookup, document generation, task tracking)
-- [ ] Update system prompt for HR domain
-- [ ] Test independently, then integrate with CAO
+## Next: the queued migrations (numbered, so they cannot be lost)
 
-**See [docs/agent_requirements/](docs/agent_requirements/) for domain-specific requirements.**
+| Task | Finding | Shape of the work |
+|---|---|---|
+| `0024_partitioning` | 6.6 | Partition the append-only tables (`agent_interactions`, `audit_log`, `inventory_movements`) and put BRIN on the time columns. `0013` refers to this number four times in prose; read those as "the partitioning migration" |
+| `0025_temporal_controls` | 6.6 | Soft delete / bitemporal columns on `contacts`, `addresses`, `communications`. Depends on 0008's delete-safety rules staying true afterward |
 
-### 6. Implement Agent Registry
-- [ ] Create `agents` table in database
-- [ ] Build agent identity management (API keys, permissions)
-- [ ] Add agent status tracking (active, idle, error)
-- [ ] Create CAO dashboard for agent monitoring
+Both were planned as `0019`/`0020` and moved — see "Why the two planned migrations moved" in `db/MIGRATIONS.md`. Take the next free number, never a reused one: `migrate.sh` refuses a file at or below the highest applied.
 
-## Medium-Term (Next Month)
+## Then: the roles the swarm needs
 
-### 7. Add More Agents
-- [ ] **Inventory Agent:** Stock tracking, reorder alerts, supplier management
-- [ ] **Accounting Agent:** Invoicing, payment tracking, reconciliation
-- [ ] **Sales Agent:** Lead management, pipeline tracking, conversion analytics
+### 3. A third agent, and the registry that would make it more than a copy
+- [ ] Pick a domain whose tables already exist (the accounting side has `currencies` and `currency_rates`; sales does not have `orders` yet), write its requirement first in `docs/agent_requirements/<role>/<role>.md`, naming views and doors that exist
+- [ ] Fork `agents/customer_service/`, replace `pkg/crm`, keep the loop, the trajectory writer and the memory store - that is the sequence the inventory agent proved in one working day
+- [ ] **Agent registry:** still open, and still not a table. Before one exists, "an agent" is a process with an `AGENT_ROLE`, a set of grants, a port and a README; the honest first increment is `agent_interactions`-derived presence (`vw_agent_activity_summary` plus a heartbeat row) rather than a registry nobody keeps current
+- [ ] `bot_actions` and `human_sessions`: either give them writers (a human console logs in; an action audit beyond the row trail) or say in `db/README.md` that they are vestigial. Two empty tables that documentation describes as live is how a debugger loses an afternoon
 
-### 8. Enhanced Validation
-- [ ] Implement multi-step validation (pre-action, post-action, periodic audit)
-- [ ] Add anomaly detection for unusual agent behavior
-- [ ] Create escalation workflow for validation failures
+### 4. The CAO and the escalation it would receive
+- [ ] Requirement 7's routing half: detection exists (sentiment, `escalated` outcomes, `get_entity_stats`); there is nothing to route *to*. A second agent with a validation prompt over the same views is the whole architecture decision
+- [ ] Validation rules worth having, in SQL first: the claim an agent made versus the row that resulted. `scripts/agents/tool_testplan.sh` does this per release; a CAO does it per turn
+- [ ] Multi-step validation (pre-action, post-action, periodic) and anomaly detection — `vw_failed_interactions` and `vw_tool_performance` are the inputs that already exist
 
-### 9. Performance Optimization
-- [ ] Add Redis caching for frequent queries
-- [ ] Optimize PGVector indexes for production load
-- [ ] Implement connection pooling for database access
-- [ ] Monitor and tune agent response times
+### 5. Finish the CRM's own loose ends
+- [ ] **`followups` has no writer.** `add_communication` sets the flags on the interaction and deliberately creates no task row (0021 §5 hands the decision over); `vw_pending_followups` reads an empty table. Decide: a task door, or retire the view
+- [ ] **T2:** whether `entity_type` gets a writer, which is the same decision as `vw_customers`' filter (`= 'customer'` vs `IN ('customer','prospect')`). `code:vw_customers_filter` is the marker; whoever lands it adds the `closed()` branch, or probe `4_5`'s row stays honestly open
+- [ ] **`orders` and `products`**, which three other plans keep assuming: inventory reservations already carry an `order_id` with nothing behind it
+- [ ] T3: two-backend idempotency assertion in CI - the measurement that closed 0011's question came from a shell one-liner
+
+## Medium-term: the operational floor
+
+- [ ] **Alerting:** the trajectory has failures in it and nobody reads it on a schedule. A monitor over `vw_failed_interactions` and `vw_low_stock_alerts` is the difference between "queryable" and "watched"
+- [ ] `GET /api/interactions` is the agent reading its own trajectory; a dashboard is not on this plan and `architecture.md`'s "No Dashboards" is deliberate
+- [ ] Connection pooling (`pgbouncer`), if two agents become five; the pool today is per-process and lazy
+- [ ] Backup and restore rehearsal: `scripts/db/db backup` exists, a restored database has not been proven to run the agents
+- [ ] Load: the requirements' "10,000 products" claim is a load-plan question, and the honest answer today is that the views are indexed for a few hundred
 
 ## Long-Term (Future)
 
-### 10. Advanced Features
-- [ ] Multi-agent collaboration (multiple agents working on complex tasks)
-- [ ] Automated learning from successful interactions
-- [ ] Predictive analytics (forecasting, trend detection)
-- [ ] Advanced semantic search across all business data
-
-### 11. Production Hardening
-- [ ] Comprehensive monitoring and alerting
-- [ ] Disaster recovery procedures
-- [ ] Security audit and penetration testing
-- [ ] Performance benchmarking and scaling
+- [ ] Multi-agent collaboration, and an agent that can hand a thread to another with its trajectory intact
+- [ ] Predictive analytics over the accumulated trail (forecasting from `inventory_movements`, trend detection from `communications`)
+- [ ] Security audit and penetration testing; the SSRF and masking guards are asserted by the acceptance plan, which is not the same as an external review
 
 ## Success Metrics
 
-- **Agent Reliability:** >95% validation pass rate
-- **Response Time:** <30 seconds for typical queries
-- **Database Performance:** <100ms for standard queries, <500ms for semantic search
-- **Agent Coverage:** Handle 80% of routine customer service inquiries without human intervention
+- **Acceptance:** every registered tool has a case in `docs/agent_requirements/agent_test_plan.md`, and the suite is green - a tool no prompt exercises is a tool whose contract nobody knows
+- **Schema:** `verify.sh` 37 green, `test-functions.sh` reporting no REGRESSION and only documented KNOWN-OPEN rows, no residue
+- **Reliability:** the inventory timer's ticks have no gaps in `agent_interactions`; a missing row is an outage, not a log search
+- **Response Time:** under 30 seconds for a typical single-tool turn on the local model; the plan's runs are the measurement
+- **Honesty:** `scripts/docs/check_agent_docs.sh` green, and no page in this repository claiming semantic search works
 
 ---
 
-*This plan follows the blueprint-first approach: prove the pattern works, then replicate it.*
-*Each new agent should be built from the blueprint, not from scratch.*
+*This plan follows the blueprint-first approach: prove the pattern works, then replicate it — and make each claim a check. Everything above marked "done" was verified by running something, not by writing about it.*

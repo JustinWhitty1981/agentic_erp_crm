@@ -1,8 +1,36 @@
 # Agent First ERP CRM Schema Reference
 
-**Purpose:** Complete database schema reference for AI agents and developers.
+> **This is not the current schema, and it is not generated from anything on this server.** It is the
+> design-era reference: `pgschema 1.12.0` run against PostgreSQL 16.14 on a machine that had executed the
+> pre-`0001` scripts, which is why no column list below carries `tenant_id` - a column 0003 added to
+> every tenant-coded table afterwards - and why it names objects (`tickets`, `products`, ivfflat
+> embedding indexes) that the canonical schema does not contain. `pgschema` is not installed here and
+> `docs/schema/` has never existed; the generated pages that *are* current are
+> [../../docs/database/tables.md](../../docs/database/tables.md),
+> [views.md](../../docs/database/views.md) and [indexes.md](../../docs/database/indexes.md), rebuilt
+> from the live catalog by `make docs-schema`. The single source of truth is
+> [../../db/README.md](../../db/README.md).
+>
+> Six specific things to un-learn from this page, each measured against the running catalog:
+>
+> | Here | The database |
+> |---|---|
+> | "Support - Tickets and follow-ups" | `tickets` does not exist. 0017 removed what competed with `followups`, and `followups` itself has no writer |
+> | "Inventory - Products, warehouses..." | There is no `products` table; the item table is `inventory_items`, and `item_categories`/`units_of_measure`/`costing_methods` are its master data |
+> | `idx_entities_embedding ... USING ivfflat` | hnsw, from 0012 - and the columns are **empty**: no embedder in this deployment writes them |
+> | `last_updated` on `inventory_on_hand` | no such column; it is `updated_at`, alongside `last_movement_at` and `last_counted_at` |
+> | `order_id INTEGER, "Reference to orders"` | `order_id uuid` with `order_type` and `order_line_id`; there is no `orders` table to reference, which is the honest version of that claim |
+> | `category_id`/`item_id` as `SERIAL` | `uuid`, defaulted by `afpc_uuid_v7()` (0005). 0005 also widened the integer keys to bigint and gave the UUID primary keys v7 ordering |
+>
+> And the note this page used to carry as a feature - "All bot actions are logged via `human_sessions` →
+> `bot_actions`" - describes two tables that exist, are read by the coverage machinery, and hold **zero
+> rows**: nothing in either deployed agent writes them. The live trail is `agent_interactions` (one row
+> per run) and `audit_log` (one row per row-change, chained, since 0013).
 
-**Generated from:** PostgreSQL 16.14 using pgschema 1.12.0
+**Purpose:** Design-era schema reference, kept as the record of what the 2026-07 review worked from.
+
+**Generated from:** PostgreSQL 16.14 using pgschema 1.12.0 - neither of which is this server: it runs
+PostgreSQL 17.11 and does not have pgschema installed.
 
 ---
 
@@ -13,8 +41,8 @@ The Agent First ERP CRM database is organized into the following domains:
 1. **Party Management** - Entities, contacts, relationships, and addresses
 2. **Communications** - All interactions with threading and sentiment analysis
 3. **Audit Logging** - Human sessions, bot actions, and interaction tracking
-4. **Inventory** - Products, warehouses, stock levels, and movements
-5. **Support** - Tickets and follow-ups
+4. **Inventory** - Items (`inventory_items`), warehouses, stock levels, and movements
+5. **Support** - Follow-ups (`followups`, with no writer); `tickets` was removed by 0017
 
 ---
 
@@ -330,8 +358,9 @@ Allocated stock for orders.
 
 ```sql
 -- Entity and contact indexes
-CREATE INDEX idx_entities_embedding ON entities USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
-CREATE INDEX idx_contacts_embedding ON contacts USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+-- 0012 built these as hnsw, not ivfflat, and nothing writes the vectors:
+CREATE INDEX idx_entities_embedding ON entities USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX idx_contacts_embedding ON contacts USING hnsw (embedding vector_cosine_ops);
 
 -- Communication indexes
 CREATE INDEX idx_comm_entity ON communications (entity_id);

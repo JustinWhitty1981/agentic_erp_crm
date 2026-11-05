@@ -1,5 +1,20 @@
 # Sample Data Setup
 
+> **Superseded, and running what this page points at is the one action most likely to make a
+> healthy database unfixable.** The live demo data is two files that go through the same doors the
+> agents use:
+>
+> ```bash
+> ../scripts/db/db seed        # db/seeds/01_demo_customers.sql, then 02_demo_inventory.sql
+> ```
+>
+> Both are idempotent by contract and neither contains DDL. The `setup_sample_data.sql` copies (in
+> `scripts/database/`, `blueprint/`, `docs/database/`) start with `CREATE SCHEMA
+> agent_first_erp_crm` and create eight tables *inside* it - the twin schema that
+> `docs/database/DATABASE_REVIEW.md` 3.1 measured no migration creates. A database with both is a
+> database where `SELECT * FROM vw_customers` works and nothing sees the rows the script wrote, which is
+> the symptom, not the problem. Everything below is kept as the record of what the design intended.
+
 **Purpose:** SQL scripts for populating the database with sample data for testing and development.
 
 **Location:** `scripts/database/setup_sample_data.sql`
@@ -187,7 +202,7 @@ VALUES (4, 4, 'Sales Director', true);
 
 ```bash
 # Execute the sample data script
-psql -h {your-host} -U {your-username} -d {your-database-name} -f scripts/database/setup_sample_data.sql
+../scripts/db/db seed   # the supported path; the script named here is superseded
 ```
 
 ---

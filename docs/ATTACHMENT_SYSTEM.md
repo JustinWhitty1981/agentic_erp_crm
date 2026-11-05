@@ -1,7 +1,27 @@
 # Attachment System
 
+> **Status: design record only. Nothing this page describes is implemented.** It is kept because it is
+> the fullest statement of an intent someone wrote down, and because the one database object it names is
+> real. Measured on this server:
+>
+> | This page | The repository |
+> |---|---|
+> | `tools/attachment_manager.py` (`AttachmentManager`) | **does not exist**; `grep -r AttachmentManager` over `**/*.py` and `**/*.go` returns nothing |
+> | `agents/communication_logger.py` integration | no such file. The Python door is `blueprint/tools/add_communication.py`, and it has no attachment code |
+> | "Files Created: `attachments/communications/…`" | no `attachments/` directory exists, and no code writes one |
+> | `add_communication`'s `p_attachments` | the door takes 20 parameters and **none of them is attachments**. Measured from `pg_get_function_arguments` |
+> | `communications.attachments` | **this part is true**: a `jsonb` column, `NOT NULL DEFAULT '[]'`. And 0 of the 20 rows in it hold anything but the default, because there is no writer |
+>
+> So: the storage decision ("not BLOBs in the database") was made, the column for it was created, and the
+> half that uses it was never built. If you implement it, the work is one parameter on the door, one
+> column already in place, the acceptance case the plan will demand, and a size limit - `MAX_BODY_BYTES`
+> caps the HTTP request, not the file, so an attachment path needs its own. Until then no agent can see,
+> create, or read an attachment, and `/api/tools` on neither deployed agent lists one.
+
 **Date:** July 11, 2026  
-**Status:** Complete  
+> **(the line below is the original July text; the banner above is the measured state)**
+
+**Status:** Complete - *superseded by the banner above*  
 **Purpose:** Manage file attachments for communications without storing BLOBs in the database
 
 ---

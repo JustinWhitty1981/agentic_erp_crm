@@ -1,4 +1,43 @@
-# Test Suite
+# `scripts/tests/` - ad-hoc scripts, **not a test suite, and not safe to run**
+
+> **What this directory is:** five standalone Python scripts from before the database was remediated,
+> kept because they are the ancestry of the SQL the migrations corrected. Four of them connect at import
+> time and two of them run **DDL** at import time:
+>
+> | File | What importing it does |
+> |---|---|
+> | `test_create_functions.py` | `DROP FUNCTION IF EXISTS add_customer(...)` then `CREATE FUNCTION` - the pre-0016 body, into `POSTGRES_DB` which defaults to **`agent_first_erp_crm`**, the live database |
+> | `test_update_function.py` | the same shape for `update_customer` |
+> | `test_functions.py`, `verify_functions.py` | connect and `SELECT` against the same default |
+> | `test_agent.py` | builds a LangChain agent against `OLLAMA_BASE_URL` (`http://localhost:11434`) and `OLLAMA_MODEL` (`ornith:35b`) - neither of which the deployed agents use; they call an OpenAI-compatible vLLM endpoint, see `VLLM_BASE_URL` in each agent's README |
+>
+> **There are no collectable tests here.** `grep -c 'def test_' *.py` answers `0` for all five files, so
+> `pytest scripts/tests/` does not run tests - it *imports* modules, and importing them is what writes to
+> the database. Any pass count this page printed described a run that had just replaced two of the four
+> customer doors with pre-`0001` definitions. The real harness is
+> [`scripts/db/test-functions.sh`](../db/test-functions.sh), which runs each probe against a **copy** of
+> the database with a row-count residue check around it - the difference being exactly the point.
+>
+> If one of these scripts must run again, point it at a scratch database:
+>
+> ```bash
+> createdb afpc_scratch && POSTGRES_DB=afpc_scratch python3 scripts/tests/test_functions.py
+> ```
+>
+> ## Where the tests actually live
+>
+> | Need | Run |
+> |---|---|
+> | Structural assertions over the catalog (the B-checks) | `./scripts/db/verify.sh` |
+> | One probe per review finding, behaviour over SQL | `./scripts/db/test-functions.sh` |
+> | The agent loop, tool wiring, derivations - no database | `go test ./...` in each `agents/*/backend_go` |
+> | The Python reference implementation | `pytest blueprint/tests/` (needs `createdb agent_first_erp_crm_test`) |
+> | What a human gets: one prompt per registered tool, verified against rows | `./scripts/agents/tool_testplan.sh` |
+> | That the documentation matches the surface | `./scripts/docs/check_agent_docs.sh` |
+>
+> `AGENTS.md`'s Testing section is the prose version of that table.
+
+---
 
 This directory contains the comprehensive test suite for the Agent First ERP CRM system. These tests validate the database functions, agent behavior, and customer management tools.
 
@@ -156,11 +195,12 @@ export TEST_DATABASE_PASSWORD=${POSTGRES_PASSWORD}
 # Create test database
 psql -h "${POSTGRES_HOST:-localhost}" -U "${POSTGRES_USER:-postgres}" -c "CREATE DATABASE ${POSTGRES_DB:-agent_first_erp_crm_test};"
 
-# Run schema
-psql -h "${POSTGRES_HOST:-localhost}" -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-agent_first_erp_crm_test}" -f scripts/database/agent_first_erp_crm_schema.sql
-
-# Run functions
-python3 scripts/database/apply_functions.py
+# Build it from the migrations - the ONLY supported route, and the file+script the two lines
+# this block used to carry do not exist / do damage:
+#   scripts/database/agent_first_erp_crm_schema.sql   - not in that directory at all
+#   scripts/database/apply_functions.py               - FileNotFoundError, and even if it ran it
+#                                                       applies pre-0001 bodies over the doors
+for f in db/migrations/*.sql; do psql -d "${POSTGRES_DB:-afpc_scratch}" -f "$f"; done
 ```
 
 ### Using `.env.test`
@@ -257,10 +297,10 @@ fi
 
 ## 📚 Related Documentation
 
-- [Database Scripts README](../database/README.md)
-- [Blueprint Documentation](../../blueprint/README.md)
+- [Database Scripts README](../database/README.md) — the superseded copies, with the banner explaining why nothing in that directory should be run
+- [Blueprint Documentation](../../blueprint/README.md) — the reference implementation, and what differs from the deployments
 - [Customer Service Agent Requirements](../../docs/agent_requirements/customer_service/customer_service.md)
-- [Attachment System](../../docs/attachments/ATTACHMENT_SYSTEM.md)
+- [Attachment System](../../docs/ATTACHMENT_SYSTEM.md) — a design record: the `communications.attachments` column exists and nothing writes it
 
 ## 🤖 Agent Guidelines
 

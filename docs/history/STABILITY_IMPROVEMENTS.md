@@ -1,5 +1,17 @@
 # Gateway Stability Improvements
 
+> **A dated record, and three of its five items describe code that was never committed.** Kept because
+> `docs/history/MISALIGNMENT_FIXES.md` and the review cite its findings. Measured, today:
+>
+> | Item | State |
+> |---|---|
+> | try/finally in `agents/audit_logger.py`, `agents/communication_logger.py` | those files do not exist. The pattern does, in `blueprint/tools/*.py`, and in the deployed agents it is stronger: the run record is written in the loop's `defer` (`pkg/agent/agent.go`), so a panicking or cancelled run still files its row |
+> | §2 `safe_query()` with enforced `LIMIT` | never implemented (`grep -rn safe_query` finds nothing). What enforces bounded reads instead: the views carry no hidden `LIMIT` (0017 removed the ones that truncated *before* the caller's filter), and `MAX_BODY_BYTES` caps the request, not the result |
+> | §3 `tools/gateway_health_monitor.py`, "killed stale connection" | the file does not exist and `pg_terminate_backend` appears nowhere in the repository. What actually bounds a stuck query: the record's own detached 10-second deadline, the timeouts `scripts/db/roles.sql` sets per role - `afpc_app` at `statement_timeout = 30s`, the auditor at 60s with a 2-minute idle-in-transaction limit - which is the mechanism that actually bounds a stuck query here |
+>
+> This page's path is also cited wrong in `AGENTS.md`-adjacent docs: it is
+> `docs/history/STABILITY_IMPROVEMENTS.md`, not `docs/STABILITY_IMPROVEMENTS.md`.
+
 **Date:** July 11, 2026  
 **Status:** Complete  
 **Purpose:** Prevent gateway crashes from database connection leaks and memory bloat

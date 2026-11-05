@@ -2,7 +2,11 @@
 
 **Purpose:** Visualize and document all relationships between tables in the Agent First ERP CRM database.  
 **Design Philosophy:** Enterprise-grade, mirroring SAP, Oracle, and Salesforce architectures.  
-**Status:** Complete - Entity-Contact-Communication Model
+**Status:** Design record - the entity-contact-communication model. Read it as *what the graph
+looks like*, not as what is enforced. It predates the 2026-07 schema review, and four of its
+claims are contradicted by the canonical schema; each is corrected in place below. The review's
+findings are in [DATABASE_REVIEW.md](DATABASE_REVIEW.md) and which migration closed each one is
+in [../../db/MIGRATIONS.md](../../db/MIGRATIONS.md).
 
 ---
 
@@ -96,7 +100,13 @@
 - `is_primary`: Is this the primary contact?
 - `start_date`, `end_date`: Temporal relationship tracking
 
-**Unique Constraint:** One primary contact per entity (`is_primary = TRUE`)
+**Intended constraint:** one primary contact per entity (`is_primary = TRUE`). **Not enforced.**
+Measured: `idx_primary_contact` is a plain btree on `(tenant_id, entity_id, is_primary)`, the only
+unique keys on the table are its primary key and `(tenant_id, entity_id, contact_id)`, and there
+is no partial-unique index and no CHECK. Two rows can both be primary. This tenant has zero such
+entities today, which is the difference between an invariant and a habit - and the read paths that
+go "through the primary contact" (`vw_primary_contact_communications`,
+`get_followup_customers`) are the ones that would quietly pick whichever row the scan reached.
 
 ---
 
@@ -185,7 +195,7 @@
 | **LINKS_TO** | `communications` | N:1 | Optional link to related communication |
 
 **Key Fields:**
-- `session_id` (FK): References `human_sessions.id`
+- `session_id` (FK): References `human_sessions.session_id` - there is no `human_sessions.id` column
 - `user_id`: Human user identifier
 - `contact_id` (FK): Links to `contacts.id` (if known)
 - `entity_id` (FK): Links to `entities.id` (if applicable)
@@ -356,7 +366,13 @@ WHERE e.id = 123;
 3. **`products`** - Product catalog
 4. **`tickets`** - Support tickets (may merge with communications)
 5. **`agents`** - Registry of all bots with permissions
-6. **`audit_log`** - Immutable log of all system changes (**Not yet created**)
+6. `audit_log` - immutable log of all system changes. **Built, and the opposite of "not yet
+   created": `0013_audit_log` made it a chained, append-only-by-grant, row-level trail whose
+   `row_pk` is jsonb precisely so one trigger could serve eighteen tables. Two other items on
+   this list were decided *against* rather than left undone - `tickets` (0017 removed what
+   competed with `followups`) and `agents` (there is no registry table; an agent is an
+   `AGENT_ROLE` and a set of grants). `orders` and `products` are still genuinely absent, and
+   `followups` exists with no writer at all.**
 
 ### Future Enhancements
 

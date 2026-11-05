@@ -1,5 +1,21 @@
 # Code-Documentation Misalignment Fixes
 
+> **A dated record of a July 2026 cleanup pass, not a current file list.** Several of the paths it
+> names no longer exist, and one of its "verification commands" fails when run today - which is what a
+> record looks like when the thing it recorded moved. Corrected in place, because the *findings* are
+> still cited by `db/MIGRATIONS.md` and deleting them would delete the evidence:
+>
+> | The record says | Today |
+> |---|---|
+> | `blueprint/10_create_audit_log.sql`, `blueprint/test_functions.py`, `blueprint/verify_functions.py`, `blueprint/bot_with_full_logging.py`, `blueprint/customer_tools.py`, `tools/`, `memory/` | none of these exist. The audit trail is `db/migrations/0013_audit_log.sql`; the verification scripts are `scripts/db/verify.sh` and `scripts/db/test-functions.sh`; the customer tools are `blueprint/tools/*.py`; `tools/` and `memory/` at the root were never created |
+> | alias view `agent_communications_summary` - "both names now work" | the alias was never adopted. One name exists: `vw_customer_communications_summary`, and probe `4_5` asserts the qualified twin-schema forms are gone |
+> | `log_agent_action()` / `validate_audit_action()` helpers | do not exist in `pg_proc`. `audit_log` is written by the `afpc_audit_row` trigger and read back by `audit_chain_verify()` |
+> | `docs/MISALIGNMENT_FIXES.md` - "Created" | the file moved to `docs/history/MISALIGNMENT_FIXES.md`; every link that says otherwise is broken, and `PLAN.md`'s copy of that link was fixed in the 2026-11-05 sweep |
+>
+> `agents/` does exist, and the sentence above about it being "empty" is the single most outdated line in
+> the file: it holds two deployed agents, each with a Go backend, a React UI, a Dockerfile and a
+> README - `agents/customer_service/` on `:4550` and `agents/inventory/` on `:4560`.
+
 This document tracks the misalignments identified between the codebase and documentation, and the fixes applied.
 
 ## Summary

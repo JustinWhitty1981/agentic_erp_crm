@@ -1,4 +1,39 @@
-# Database Scripts
+# Database Setup Scripts - **SUPERSEDED. Do not run anything in this directory.**
+
+> Every file here is a pre-`0001` copy of SQL that has since been ported, corrected and superseded;
+> `db/README.md` lists them file by file against the migration that replaced each one. The schema lives
+> in `db/migrations/` and is applied by:
+>
+> ```bash
+> scripts/db/db up          # container, roles, migrations, verify
+> scripts/db/db seed        # db/seeds/*.sql, idempotent
+> scripts/db/db verify      # the structural assertions
+> ```
+>
+> **Two commands this page used to recommend will damage a working database, and the warning is the
+> reason this banner is longer than the page:**
+>
+> | The command | What actually happens |
+> |---|---|
+> | `python3 scripts/database/setup_customer_functions.py` | Parses no arguments - there is no `--verify`, no `--help`, nothing it accepts - and its module-level SQL runs `DROP FUNCTION IF EXISTS add_customer(...)`, `update_customer(...)` and `get_followup_customers(INTEGER)` in `public`, then recreates the pre-0001 bodies. That removes the doors both deployed agents write through (0016, 0021, 0022's rewrite included), so `add_customer` stops existing as the function `db/tests/4_4` and `4_7` assert, the agent's tools start erroring, and `verify.sh` fails. **Run against a copy, never the live database** - and there is no reason to run it against a copy either, because `db/migrations/` is the definition |
+> | `python3 -m pytest scripts/tests/` | Same story from the other direction: see `scripts/tests/README.md`. Those modules do DDL at import time |
+> | `python3 scripts/database/apply_functions.py` | Cannot work: line 23 opens `09_add_update_customer_functions.sql` **in this directory**, and the file here is named `09_customer_functions.sql`. FileNotFoundError before it touches a database |
+> | `./scripts/database/apply_customer_functions.sh` | Cannot work either: it bind-mounts `$(pwd)/09_add_update_customer_functions.sql` into a container, which does not exist here |
+> | `psql -f scripts/database/agent_first_erp_crm_schema.sql` | This directory has no such file (the copy is `docs/database/agent_first_erp_crm_schema.sql`, itself superseded) |
+>
+> The `09_customer_functions.sql` in this directory also creates its functions in `agent_first_erp_crm`,
+> the schema `DATABASE_REVIEW.md` 3.1 measured that no migration creates, so even the SQL that "ran" here
+> wrote into a schema the rest of the system cannot see through the `vw_*` views. And
+> `11_interaction_logging.sql`'s full-text GIN index on `human_input` was not carried by the canonical
+> port: the live `agent_interactions` has no such index, which is why a keyword search over interaction
+> text is a sequential scan and why no tool offers one.
+>
+> What is still true about these files: they are the ancestry. `0001` was ported from them, the review's
+> findings quote them, and `docs/database/DATABASE_REVIEW.md` cites their line numbers as evidence. That
+> is why they are kept rather than deleted, and why the fix for a defect they describe is a numbered
+> migration and never an edit here.
+
+---
 
 This directory contains all SQL migration scripts and Python helpers for setting up and managing the Agent First ERP CRM database.
 

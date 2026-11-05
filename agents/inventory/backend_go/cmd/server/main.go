@@ -930,16 +930,21 @@ func healthHandler(am *agent.AgentManager, d *db.DB, list []tools.ToolDefinition
 				"SELECT coalesce(afpc_current_tenant()::text, 'none')").Scan(&tenant); err == nil {
 				dbStatus["tenant"] = tenant
 			}
+			// The doors THIS agent's tools call, and no others. The list was copied from the customer
+			// service fork verbatim, which meant a database without reserve_inventory_for_order - the
+			// one write this agent has - answered "healthy" and then failed at the first reservation,
+			// exactly the silence the sibling's own comment says a probe exists to prevent. save_memory
+			// stays because the three memory tools are registered here too.
 			if err := d.Pool().QueryRow(ctx, `
 				SELECT coalesce(array_agg(t), ARRAY[]::text[]) FROM unnest(
-					ARRAY['add_communication','save_memory','get_followup_customers']
+					ARRAY['reserve_inventory_for_order','save_memory']
 				) AS t(name)
 				 WHERE NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = t.name)`).
 				Scan(&missing); err == nil && len(missing) > 0 {
 				dbStatus["missing_functions"] = missing
 				out["status"] = "degraded"
 				out["degraded_reason"] = fmt.Sprintf(
-					"the connected database lacks %s - it is not migrated to 0023",
+					"the connected database lacks %s - it is not migrated as far as this agent's tools",
 					strings.Join(missing, ", "))
 			}
 		}
