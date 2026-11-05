@@ -22,30 +22,30 @@ that: the database, not the agent, is what makes a claim true. A read names a `v
 a stored function. Both land a row someone can read back.
 
 **Design Principle:** Start simple. Complexity comes from orchestration and enforcement, not from
-individual agent complexity. The blueprint proved that with one file; the deployed agents proved the
+individual agent complexity. Its Python ancestor proved that with one file; the deployed agents proved the
 same loop in Go with a tool surface, a trajectory writer, and a second role reusing all of it.
 
-## 2. Two implementations of one pattern
+## 2. The blueprint, and its ancestor
 
-| | The reference | The deployments |
+| | The blueprint (ships) | The ancestor (archived) |
 |---|---|---|
-| Where | `archive/blueprint/` | `agents/customer_service/`, `agents/inventory/` |
-| Shape | `bot.py`, ~215 lines, Python + LangChain | Go backend (module `jada-backend`) + React UI, one process each |
-| Transport | Telegram bot | HTTP `POST /api/chat`, SSE `POST /api/chat/stream`, bundled UI |
-| Memory | LangChain checkpointer + in-process state | `agent_memories` (0023) plus history rehydrated from `agent_interactions` on a cold thread |
-| Tools | 8, all customer-domain | 14 (customer service) / 11 (inventory): domain tools + three memory tools + a clock + two web tools |
-| Schedule | whatever wakes the bot | customer service: a prompt. inventory: a prompt **or** a 30-minute in-container timer |
-| Trajectory | `interaction_logger.py`, best effort | the loop's own `defer`: a run that panics still records itself |
+| Where | `agents/customer_service/`, `agents/inventory/` | `archive/blueprint/` |
+| Shape | Go backend (module `jada-backend`) + React UI, one process each | `bot.py`, ~215 lines, Python + LangChain |
+| Transport | HTTP `POST /api/chat`, SSE `POST /api/chat/stream`, bundled UI | Telegram bot |
+| Memory | `agent_memories` (0023) plus history rehydrated from `agent_interactions` on a cold thread | LangChain checkpointer + in-process state |
+| Tools | 14 (customer service) / 11 (inventory): domain tools + three memory tools + a clock + two web tools | 8, all customer-domain |
+| Schedule | customer service: a prompt. inventory: a prompt **or** a 30-minute in-container timer | whatever wakes the bot |
+| Trajectory | the loop's own `defer`: a run that panics still records itself | `interaction_logger.py`, best effort |
 
-The two agree on the rules that matter — which is the point of keeping both in the repository. Where
-they disagree, the deployments are right about this system: **a write calls a database function and
-never composes its own INSERT**, and the model never chooses an audit column's value. Why the Python
-half is lineage rather than the runtime — a connection opened per tool call with no `sslmode`, a
+The two agree on the rules that matter — which is the point of keeping the archived half in the
+repository. Where they disagree, the blueprint is right about this system: **a write calls a database
+function and never composes its own INSERT**, and the model never chooses an audit column's value. Why
+the ancestor gave up its seat — a connection opened per tool call with no `sslmode`, a
 default thread pool running blocking I/O under a GIL, an `InMemorySaver` that dies with the process,
 one polling worker — is measured in
 [ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md).
 
-### 2.1 The reference implementation (Blueprint) — lineage, not deployed
+### 2.1 The ancestor (`archive/blueprint/`) — inert, kept for legibility
 - **Single File:** `bot.py` contains all logic (config, tools, agent, Telegram handler)
 - **LangChain v1:** automatic tool calling and conversation memory
 - **Direct SQL:** parameterized queries via psycopg2
@@ -55,7 +55,7 @@ one polling worker — is measured in
   `current_time`, `add_communication`, `add_customer_tool`, `update_customer_tool`,
   `get_followup_customers_tool` — each in its own module under [archive/blueprint/tools/](archive/blueprint/tools/)
 
-### 2.2 The deployed loop (`agents/*/backend_go/pkg/`)
+### 2.2 The blueprint loop (`agents/*/backend_go/pkg/`)
 ```
 cmd/server/main.go    routes, auth (API_KEYS), startup order: connect (with a grace window) → register
   │                   the domain tools only if a pool exists → start the router (and the timer, in inventory)
@@ -160,8 +160,8 @@ thread history read back out of `agent_interactions`.
 ## 5. Communication Flow
 
 ### 5.1 Human → Agent
-- A person types into the React UI, or `curl`s `POST /api/chat`, or (in the blueprint) messages the
-  Telegram bot.
+- A person types into the React UI, or `curl`s `POST /api/chat`, or — in the archived ancestor only —
+  messaged a Telegram bot.
 - The process rehydrates the thread from `agent_interactions` if it has no in-process memory of it, runs
   the loop — model, tool calls, observations, up to `MAX_TOOL_ITERATIONS` round trips — and answers.
 - The answer and every call it took are already a row by the time the response finishes.
@@ -236,7 +236,7 @@ thread history read back out of `agent_interactions`.
 ### 9.1 Adding a New Agent
 1. **Read the loop that ships:** `agents/customer_service/backend_go/pkg/agent/agent.go` — dispatch, the trajectory `defer`, rehydration. [archive/blueprint/bot.py](archive/blueprint/bot.py) is the same pattern in 215 Python lines and is background reading, not an on-ramp ([ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md)).
 2. **Write the requirement first:** `docs/agent_requirements/<role>/<role>.md`, naming the views and functions that exist — a doc that names tables which the schema sweep removed is how an agent gets built against a fiction.
-3. **Fork the deployment, not the blueprint:** `cp -r agents/customer_service agents/<role>`, replace `pkg/crm` with your domain package, keep `pkg/agent`, `pkg/db`, `pkg/memory`, `pkg/logging`, `pkg/turn`.
+3. **Fork the deployment, not the ancestor:** `cp -r agents/customer_service agents/<role>`, replace `pkg/crm` with your domain package, keep `pkg/agent`, `pkg/db`, `pkg/memory`, `pkg/logging`, `pkg/turn`.
 4. **Build the write half in SQL first** (`db/migrations/NNNN_*.sql`, next free number — see `db/MIGRATIONS.md` on why numbers cannot be reused), then the tool that calls it, with an idempotency key (ADR-005).
 5. **Give it an identity:** `AGENT_ROLE=<role>`, a distinct `AFPC_PG_APPNAME`, its own port, and a `bot_id` that will therefore appear on every row it writes. There is no registration step because there is no registry; the environment and the grants *are* the registration.
 6. **Document it** in `agents/<role>/README.md` — the tool table must match `GET /api/tools`, because `scripts/docs/check_agent_docs.sh` fails when they don't.
@@ -245,10 +245,11 @@ thread history read back out of `agent_interactions`.
 ### 9.2 Testing
 Five things can be wrong independently, and each has its own harness — `verify.sh` (structure),
 `test-functions.sh` (behaviour, one probe per finding), `go test` (the loop against fakes), `pytest
-archive/blueprint/tests/` (the reference, against a test database), and `scripts/agents/tool_testplan.sh`
+archive/blueprint/tests/` (the ancestor, against a scratch database — read the hazard note in
+`AGENTS.md` first), and `scripts/agents/tool_testplan.sh`
 (a real prompt through a real model, verified against the database). `AGENTS.md` has the commands.
 
 ---
 
-*This architecture emphasizes simplicity and maintainability. Each agent is a standalone, testable unit following the pattern the blueprint first stated and the Go runtimes deploy.*
+*This architecture emphasizes simplicity and maintainability. Each agent is a standalone, testable unit running the blueprint loop — one loop, one database, every run recorded. Its ancestor first stated the pattern in a single Python file.*
 *Complexity comes from orchestration and validation, not from individual agent complexity.*
