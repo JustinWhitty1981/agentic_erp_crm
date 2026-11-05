@@ -12,6 +12,7 @@ Welcome! This guide is designed specifically for AI agents working on the Agent 
 
 ### 🤖 Agent-Specific Guides
 - **[agents/customer_service/README.md](agents/customer_service/README.md)** - **the deployed agent**: Go backend, tools, environment, endpoints
+- **[agents/inventory/README.md](agents/inventory/README.md)** - **the second deployed agent**: same loop, stock tools, and the in-container check timer
 - **[agents/customer_service/backend_go/](agents/customer_service/backend_go/)** - that backend's source
 - **[blueprint/AGENT_SUMMARY.md](blueprint/AGENT_SUMMARY.md)** - Blueprint pattern reference implementation
 - **[blueprint/tools/README.md](blueprint/tools/README.md)** - Tool development guidelines
@@ -82,9 +83,12 @@ All agent state and knowledge lives in PostgreSQL:
    agent has the detection half of an escalation and no second agent to route one to
 2. **Customer Service Agent** - Handles customer inquiries and support. **Deployed**, in
    `agents/customer_service/`; it is the role `AGENT_ROLE` defaults to
-3. **Inventory Agent** - Manages stock and product information. Requirements in
-   `docs/agent_requirements/inventory/inventory.md`; the schema side is ready (the inventory views and
-   both doors exist), the agent is not
+3. **Inventory Agent** - Monitors stock, alerts on shortages, reserves on instruction. **Deployed**,
+   in `agents/inventory/` (`:4560`, `AGENT_ROLE=inventory`): the same Go loop as the customer service
+   agent plus an in-container timer — a deterministic check every 30 minutes whose every tick lands
+   an `agent_interactions` row, so "it ran" is a query and not a log. Requirements in
+   `docs/agent_requirements/inventory/inventory.md`, rewritten in place on 2026-11-04 to name the
+   views and doors that exist rather than the tables that were reviewed out of existence
 4. **Communication Agent** - Handles multi-channel messaging. Not built
 
 ---
@@ -189,6 +193,10 @@ agent_first/
 ├── ARCHITECTURE_DECISION_RECORDS/  # ADR-001..005, cited by the code that obeys them
 │
 ├── agents/
+│   ├── inventory/                  # THE SECOND DEPLOYED AGENT: same loop, inventory tools, a timer
+│   │   ├── README.md               # tools, schedule, endpoints, what is not here
+│   │   ├── Dockerfile, docker-compose.yml   # :4560; AFPC_PG_HOST read from customer_service/.env
+│   │   └── backend_go/             # sibling fork: pkg/inventory (4 reads, 1 door, RunCheck) replaces pkg/crm
 │   ├── customer_service/           # THE DEPLOYED AGENT
 │   │   ├── README.md               # tools, environment, endpoints, what is not here
 │   │   ├── Dockerfile, docker-compose.yml

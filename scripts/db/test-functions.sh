@@ -254,6 +254,15 @@ CASES=(
 "4_7_cs_agent_surface|labels it the interaction time|4.5|0022_followup_threshold"
 "4_7_cs_agent_surface|cannot fire (rows=|4.5|0022_followup_threshold"
 "4_7_cs_agent_surface|memory lives outside the database|ADR-002|0023_agent_memory"
+# 4_8 is the inventory agent's surface (agents/inventory). 8a's phrase is 0026's defect - the
+# ledger VALUES rotated against the column list - which no CASES row carried until the seed
+# reproduced it by succeeding at a reservation for the first time since 0018. 8b's two phrases
+# are 0015's signature contract the tool's positional Call is built on. 8c's column census is
+# deliberately unmapped: it credits no past finding, and when it fires, the row to add maps it
+# to whatever migration renamed the column - see the probe's own header.
+"4_8_inventory_agent_surface|ledger values sit in the wrong|4.3|0026_reservation_ledger_order"
+"4_8_inventory_agent_surface|parameter positions are not what|4.3|0015_reservation_locking"
+"4_8_inventory_agent_surface|the reservation door answers|4.3|0015_reservation_locking"
 "4_7_cs_agent_surface|normalisation is not agreed|ADR-002|0023_agent_memory"
 "4_7_cs_agent_surface|append-only is a comment, not a wall|ADR-002|0023_agent_memory"
 "4_7_cs_agent_surface|attaches by census is missing|ADR-002|0023_agent_memory"

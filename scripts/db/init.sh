@@ -127,34 +127,46 @@ docker compose -f "$COMPOSE_FILE" exec -T -u root postgres \
 umask 022; mkdir -p "$DBROOT/dev/tls"
 docker compose -f "$COMPOSE_FILE" exec -T postgres cat /certs/ca.crt > "$DBROOT/dev/tls/afpc-ca.crt"
 
-# Tell the agent stack which address to use, next door to its own compose file.
+# Tell every agent stack which address to use, next door to its own compose file.
 #
-# agents/customer_service/docker-compose.yml requires AFPC_PG_HOST and deliberately has no default,
-# because the only value that can work is an address the leaf certificate names in its subjectAltNames -
-# a fact about whichever machine provisioned it, not of the repository. A committed fallback would be
-# wrong for every other clone and would point a stranger's connections at somebody's private LAN. This
-# is the one place that knows both halves: the SAN list is being built a few lines above, from the same
-# variables. Compose reads the project directory's .env for ${...} interpolation, so this file is what
-# makes the required variable resolvable after a provisioning run.
+# The compose files require AFPC_PG_HOST and deliberately have no default, because the only value
+# that can work is an address the leaf certificate names in its subjectAltNames - a fact about
+# whichever machine provisioned it, not of the repository. A committed fallback would be wrong for
+# every other clone and would point a stranger's connections at somebody's private LAN. This is the
+# one place that knows both halves: the SAN list is being built a few lines above, from the same
+# variables. Compose reads the PROJECT DIRECTORY's .env for ${...} interpolation - and only that,
+# not the files it lists under env_file: - so one of these per project is what makes the required
+# variable resolvable after a provisioning run.
+#
+# One generated file per agent directory that has a docker-compose.yml, because a second COPY of a
+# fact is what 0018 §3b and this session's reservation rotation both warn about: the copy is right
+# the day it is made, and init.sh can keep every copy current at once only if it OWNS them all.
+# That replaced an early design where agents/inventory read customer_service's file through a
+# cross-directory env_file - which feeds container environment, never interpolation, so a
+# re-provision would update one agent's host and silently not the other's.
 #
 # An existing setting is left alone. Whoever typed it meant it, and silently rewriting it during a
 # re-provision - which init.sh otherwise is careful to permit - is how a working host edit disappears.
-AGENT_ENV="$DBROOT/agents/customer_service/.env"
 if [ -n "$LAN_IP" ]; then
-    if [ -f "$AGENT_ENV" ] && grep -q '^AFPC_PG_HOST=' "$AGENT_ENV"; then
-        echo "[3/5] agents/customer_service/.env already sets AFPC_PG_HOST - left as is"
-    else
-        mkdir -p "$(dirname "$AGENT_ENV")"
-        { printf '# Written by scripts/db/init.sh; gitignored, because it names a private address on a\n'
-          printf '# specific network rather than anything about this project.\n'
-          printf '#\n'
-          printf '# agents/customer_service/docker-compose.yml requires AFPC_PG_HOST and has no default:\n'
-          printf '# sslmode=verify-full only validates against an address the leaf certificate lists, and\n'
-          printf '# that list is %s. The tailnet address works from anywhere the node is reachable.%s\n' \
-              "${LAN_IP}${TS_IP:+, $TS_IP}" ""
-          printf 'AFPC_PG_HOST=%s\n' "$LAN_IP"; } > "$AGENT_ENV"
-        echo "[3/5] wrote agents/customer_service/.env (AFPC_PG_HOST=$LAN_IP)"
-    fi
+    for AGENT_ENV in "$DBROOT"/agents/*/docker-compose.yml; do
+        [ -f "$AGENT_ENV" ] || continue
+        AGENT_ENV="$(dirname "$AGENT_ENV")/.env"
+        AGENT_REL="${AGENT_ENV#"$DBROOT"/}"
+        if [ -f "$AGENT_ENV" ] && grep -q '^AFPC_PG_HOST=' "$AGENT_ENV"; then
+            echo "[3/5] $AGENT_REL already sets AFPC_PG_HOST - left as is"
+        else
+            mkdir -p "$(dirname "$AGENT_ENV")"
+            { printf '# Written by scripts/db/init.sh; gitignored, because it names a private address on a\n'
+              printf '# specific network rather than anything about this project.\n'
+              printf '#\n'
+              printf '# The docker-compose.yml beside this file requires AFPC_PG_HOST and has no default:\n'
+              printf '# sslmode=verify-full only validates against an address the leaf certificate lists, and\n'
+              printf '# that list is %s. The tailnet address works from anywhere the node is reachable.%s\n' \
+                  "${LAN_IP}${TS_IP:+, $TS_IP}" ""
+              printf 'AFPC_PG_HOST=%s\n' "$LAN_IP"; } > "$AGENT_ENV"
+            echo "[3/5] wrote $AGENT_REL (AFPC_PG_HOST=$LAN_IP)"
+        fi
+    done
 fi
 
 run_sql_multi "
