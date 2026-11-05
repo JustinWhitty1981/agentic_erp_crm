@@ -148,6 +148,6 @@ and ADR-003 is why they are not functions.
 Nothing here is applied by hand. The definitions are in `db/migrations/0001` (ported), `0016`
 (one `add_customer` head), `0017` (the interaction read path), `0021` (`add_communication`), `0022`
 (`get_followup_customers`) and `0023` (memory), and `scripts/db/db up` applies them in filename order.
-`blueprint/09_add_update_customer_functions.sql` and `scripts/database/09_customer_functions.sql` are
+`archive/blueprint/09_add_update_customer_functions.sql` and `scripts/database/09_customer_functions.sql` are
 the superseded copies of the first two - kept so the fork is legible, and both qualified to a schema no
 migration creates, so running either writes somewhere the views cannot see.

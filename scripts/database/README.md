@@ -191,7 +191,7 @@ psql -h "${POSTGRES_HOST:-localhost}" -U "${POSTGRES_USER:-postgres}" -c "GRANT 
 
 - [Database Mental Model](../../docs/database/agent_first_erp_crm_mental_model.md)
 - [Schema Reference](../../docs/database/agent_schema_reference.md)
-- [Blueprint Documentation](../../blueprint/README.md)
+- [Blueprint Documentation](../../archive/blueprint/README.md)
 
 ## 🤖 Agent Usage
 

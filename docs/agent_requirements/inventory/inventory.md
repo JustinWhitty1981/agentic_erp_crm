@@ -129,7 +129,7 @@ the same view, which is how a reader re-runs the alert's arithmetic anyway.
 ## What is not here yet
 
 - **Telegram / any push transport.** The reference implementations have working adapters
-  (`blueprint/`, `dumb_agent`); this deployment's transport decision is open. Alerting above is
+  (`archive/blueprint/`, `dumb_agent`); this deployment's transport decision is open. Alerting above is
   database-readable, not notification-delivered.
 - **The CAO.** Every "CAO validates" sentence in the old page was written about an agent that has
   never existed. Escalation detection exists in the customer service agent; there is no second

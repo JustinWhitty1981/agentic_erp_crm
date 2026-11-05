@@ -7,7 +7,7 @@
 > | This page | The repository |
 > |---|---|
 > | `tools/attachment_manager.py` (`AttachmentManager`) | **does not exist**; `grep -r AttachmentManager` over `**/*.py` and `**/*.go` returns nothing |
-> | `agents/communication_logger.py` integration | no such file. The Python door is `blueprint/tools/add_communication.py`, and it has no attachment code |
+> | `agents/communication_logger.py` integration | no such file. The Python door is `archive/blueprint/tools/add_communication.py`, and it has no attachment code |
 > | "Files Created: `attachments/communications/…`" | no `attachments/` directory exists, and no code writes one |
 > | `add_communication`'s `p_attachments` | the door takes 20 parameters and **none of them is attachments**. Measured from `pg_get_function_arguments` |
 > | `communications.attachments` | **this part is true**: a `jsonb` column, `NOT NULL DEFAULT '[]'`. And 0 of the 20 rows in it hold anything but the default, because there is no writer |

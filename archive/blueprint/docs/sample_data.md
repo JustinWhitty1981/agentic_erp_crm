@@ -9,7 +9,7 @@
 > ```
 >
 > Both are idempotent by contract and neither contains DDL. The `setup_sample_data.sql` copies (in
-> `scripts/database/`, `blueprint/`, `docs/database/`) start with `CREATE SCHEMA
+> `scripts/database/`, `archive/blueprint/`, `docs/database/`) start with `CREATE SCHEMA
 > agent_first_erp_crm` and create eight tables *inside* it - the twin schema that
 > `docs/database/DATABASE_REVIEW.md` 3.1 measured no migration creates. A database with both is a
 > database where `SELECT * FROM vw_customers` works and nothing sees the rows the script wrote, which is

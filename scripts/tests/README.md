@@ -31,7 +31,7 @@
 > | Structural assertions over the catalog (the B-checks) | `./scripts/db/verify.sh` |
 > | One probe per review finding, behaviour over SQL | `./scripts/db/test-functions.sh` |
 > | The agent loop, tool wiring, derivations - no database | `go test ./...` in each `agents/*/backend_go` |
-> | The Python reference implementation | `pytest blueprint/tests/` (needs `createdb agent_first_erp_crm_test`) |
+> | The Python reference implementation | `pytest archive/blueprint/tests/` (needs `createdb agent_first_erp_crm_test`) |
 > | What a human gets: one prompt per registered tool, verified against rows | `./scripts/agents/tool_testplan.sh` |
 > | That the documentation matches the surface | `./scripts/docs/check_agent_docs.sh` |
 >
@@ -281,7 +281,7 @@ Before running tests, ensure:
 ```yaml
 - name: Run Tests
   run: |
-    pip install -r blueprint/requirements.txt
+    pip install -r archive/blueprint/requirements.txt
     python3 -m pytest scripts/tests/ -v --tb=short
 ```
 
@@ -298,7 +298,7 @@ fi
 ## 📚 Related Documentation
 
 - [Database Scripts README](../database/README.md) — the superseded copies, with the banner explaining why nothing in that directory should be run
-- [Blueprint Documentation](../../blueprint/README.md) — the reference implementation, and what differs from the deployments
+- [Blueprint Documentation](../../archive/blueprint/README.md) — the reference implementation, and what differs from the deployments
 - [Customer Service Agent Requirements](../../docs/agent_requirements/customer_service/customer_service.md)
 - [Attachment System](../../docs/ATTACHMENT_SYSTEM.md) — a design record: the `communications.attachments` column exists and nothing writes it
 

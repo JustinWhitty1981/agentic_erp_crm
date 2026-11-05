@@ -12,9 +12,9 @@ does not rewrite anything: its ten statements are qualified to `agent_first_erp_
 exist` (measured). That is the reason this page's "ready to execute" never stopped being true and never
 stopped being a wish.
 
-The column lists on this page describe the same five-view shape `blueprint/docs/views.md` carried, and
+The column lists on this page describe the same five-view shape `archive/blueprint/docs/views.md` carried, and
 the same defect: `vw_item_movement_summary` listed with `sku`, `item_name`, `total_receipts`,
-`total_shipments` and `net_change`, of which the live view has none. `blueprint/docs/views.md` has been
+`total_shipments` and `net_change`, of which the live view has none. `archive/blueprint/docs/views.md` has been
 regenerated from `pg_attribute` and is checked against it by `code:agent_docs_match_surface`; this page
 is kept for its explanations, and its lists are not authoritative. Read `docs/database/views.md` for
 the catalog.
@@ -195,7 +195,7 @@ That answers **23 rows** today, and the authoritative list with a sentence per v
 [views.md](views.md) - regenerated from the catalog by `make docs-schema`, so it cannot drift the way
 the hand-kept list below did. Two names this page promised are **not** in that answer and never were in
 the canonical schema: `vw_entity_contact_details` and `vw_communication_timeline`, both defined only in
-the superseded `blueprint/08_create_views.sql`. Everything else the list names is real, and **twelve**
+the superseded `archive/blueprint/08_create_views.sql`. Everything else the list names is real, and **twelve**
 views the remediation added are absent from it: `vw_tool_calls` and `vw_tool_performance`'s companions
 from 0017 (`vw_recent_interactions` and `vw_failed_interactions` are the two the page does carry), then
 `vw_inventory_valuation`, `vw_item_availability`, `vw_item_movement_summary`, `vw_low_stock_alerts` and

@@ -8,7 +8,7 @@
 
 ## Context
 
-The pattern started in Python, and it was the right call at the time: `blueprint/bot.py` is ~215 lines
+The pattern started in Python, and it was the right call at the time: `archive/blueprint/bot.py` is ~215 lines
 that hold config, eight tools, the agent, memory, and a Telegram handler in one readable file. It proved
 the thesis - an agent that reads views, calls doors, and files its own trajectory is a *small* program -
 and the whole design of this repository still descends from reading it.
@@ -23,10 +23,10 @@ argued.
 
 ### 1. A connection per tool call, and none of them encrypted
 
-`blueprint/tools/*.py` opens its own database connection every time a tool runs: ten `conn =
+`archive/blueprint/tools/*.py` opens its own database connection every time a tool runs: ten `conn =
 get_db_connection()` sites and ten matching `conn.close()` calls across the eight modules, each one a
 fresh `psycopg2.connect(**DB_CONFIG)` (`customer_lookup.py:22-28`). A three-tool turn is three
-TCP handshakes, three authentications, three teardowns - and `grep sslmode blueprint/` returns nothing,
+TCP handshakes, three authentications, three teardowns - and `grep sslmode archive/blueprint/` returns nothing,
 so every one of those connections is plaintext to a server whose documented contract is
 `sslmode=verify-full` against a CA with IP SANs. The reference predates the TLS work; the schema did not
 stay behind.
@@ -78,20 +78,21 @@ The blueprint registers eight tools; `agents/customer_service/` registers fourte
 *one package both agents import*, not eight copies of a `@tool` function. The registry is what
 `GET /api/tools` answers from and what `scripts/docs/check_agent_docs.sh` diffs the README against; a
 Python function has no comparable handle to inspect at runtime without importing it, which is the trap
-`blueprint/tests/` fell into: pytest imports modules, those modules connect and run DDL at import, and a
+`archive/blueprint/tests/` fell into: pytest imports modules, those modules connect and run DDL at import, and a
 documentation page reported fifteen green tests that had actually just replaced two of the doors.
 
 ## Decision
 
-**The Go backends in `agents/*/backend_go/` are the runtime. `blueprint/` is lineage.**
+**The Go backends in `agents/*/backend_go/` are the runtime. `archive/blueprint/` is lineage.**
 
 - New agents are forked from `agents/customer_service/` and their domain package replaces `pkg/crm`. The
   inventory agent is the proof: `pkg/inventory` plus a prompt plus a timer, and the loop, pool, memory
   store and trajectory writer came along untouched.
-- `blueprint/` stays in the repository, unrun and unextended, because it is the shortest statement of the
-  pattern in existence and because three harnesses still read its files: `code:tool_prefix` greps
-  `blueprint/**/*.py`, `code:cs_writes_through_doors` greps it for caller-side `INSERT`s, and
-  `code:agent_docs_match_surface` compares `blueprint/docs/views.md`'s column lists against
+- The blueprint stays in the repository — since 2026-11-05 archived as `archive/blueprint/`, a directory
+  nothing runs and nothing is added to — because it is the shortest statement of the pattern in
+  existence and because three harnesses still read its files: `code:tool_prefix` greps
+  `archive/blueprint/**/*.py`, `code:cs_writes_through_doors` greps it for caller-side `INSERT`s, and
+  `code:agent_docs_match_surface` compares `archive/blueprint/docs/views.md`'s column lists against
   `pg_attribute`. Deleting the directory would break checks that guard the deployed code.
 - Where a page says "the same rules in one Python file," read it as the pattern's statement, not as a
   route. The on-ramp for a new agent is `agents/customer_service/backend_go/pkg/agent/agent.go`.
@@ -108,14 +109,14 @@ documentation page reported fifteen green tests that had actually just replaced 
 - A new agent is a domain package and a README, not a re-derivation of the loop.
 
 ### Negative
-- **The reference implementation cannot be copied any more.** A reader who follows `blueprint/`'s setup
+- **The reference implementation cannot be copied any more.** A reader who follows `archive/blueprint/`'s setup
   gets a plaintext connection, an in-memory memory, and no trajectory row - correct pattern, wrong
   substrate. Every page that used to say "start by reading bot.py" now says what it is for: the pattern,
   once, in one file.
 - Two implementations, one vocabulary. `add_customer` the stored function is the real contract; the
   Python wrapper around it is documentation that can rot, and has - twice, both times in
-  `blueprint/docs/`, whose phantom function names this sweep removed.
-- The blueprint's own tests are inert (`blueprint/tests/README.md` explains why nothing runs them), so
+  `archive/blueprint/docs/`, whose phantom function names this sweep removed.
+- The blueprint's own tests are inert (`archive/blueprint/tests/README.md` explains why nothing runs them), so
   the Python half has no regression net. Its guarantees are checked in SQL instead, where they live.
 - Go raises the floor for a contribution: a reader who knows Python now has to read a router, a pool and
   a struct registry. The mitigation is that the file to read is one package deep, and `pkg/agent` is a
@@ -149,4 +150,4 @@ documentation page reported fifteen green tests that had actually just replaced 
   endpoint implements)
 - `docs/agent_requirements/customer_service/customer_service.md` - the requirement the Go agent meets
 - `agents/customer_service/README.md`, `agents/inventory/README.md` - the runtimes
-- `blueprint/README.md`, `blueprint/AGENT_SUMMARY.md` - the pattern, with its banner
+- `archive/blueprint/README.md`, `archive/blueprint/AGENT_SUMMARY.md` - the pattern, with its banner

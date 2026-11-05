@@ -70,21 +70,21 @@ db-fresh:
 setup:
 	@echo "Setting up development environment..."
 	@python3 -m venv venv
-	@./venv/bin/pip install -r blueprint/requirements.txt
+	@./venv/bin/pip install -r archive/blueprint/requirements.txt
 	@echo "Now run: scripts/db/db up"
 
 test:
 	@echo "Running tests..."
-	@pytest blueprint/tests/ -v
+	@pytest archive/blueprint/tests/ -v -p no:cacheprovider
 
 test-coverage:
 	@echo "Running tests with coverage..."
-	@pytest blueprint/tests/ --cov=blueprint --cov-report=html --cov-report=term-missing
+	@pytest archive/blueprint/tests/ --cov=archive/blueprint --cov-report=html --cov-report=term-missing
 
 lint:
 	@echo "Running linting checks..."
-	@python3 -m pycodestyle blueprint/ --max-line-length=120
-	@python3 -m pyflakes blueprint/
+	@python3 -m pycodestyle archive/blueprint/ --max-line-length=120
+	@python3 -m pyflakes archive/blueprint/
 
 format:
 	@echo "Formatting code..."

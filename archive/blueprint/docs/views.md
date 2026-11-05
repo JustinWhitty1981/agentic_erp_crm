@@ -377,7 +377,7 @@ in both directions - names the view never had, and columns 0009 added to every t
 
 ### vw_tool_performance
 
-Per tool, per tenant: calls, runs, the mean duration of the runs that used it, and how many of those runs errored. Counts are at the call grain, timings and errors at the run grain - the version in `blueprint/11_interaction_logging.sql` mixed them, and `db/migrations/0017_interaction_readpath.sql` carries the two numbers it changed.
+Per tool, per tenant: calls, runs, the mean duration of the runs that used it, and how many of those runs errored. Counts are at the call grain, timings and errors at the run grain - the version in `archive/blueprint/11_interaction_logging.sql` mixed them, and `db/migrations/0017_interaction_readpath.sql` carries the two numbers it changed.
 
 ```sql
 SELECT * FROM vw_tool_performance;

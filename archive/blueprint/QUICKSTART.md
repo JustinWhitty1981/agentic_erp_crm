@@ -2,7 +2,7 @@
 
 ## 📚 Before You Start
 
-For AI agents working on this project, see **[AGENTS.md](../AGENTS.md)** for complete navigation guidance.
+For AI agents working on this project, see **[AGENTS.md](../../AGENTS.md)** for complete navigation guidance.
 
 ## Prerequisites
 - Docker installed and running
@@ -26,7 +26,7 @@ no `vw_*` view reads through. Build the database the supported way:
 
 ## Step 2: Configure Environment
 
-Edit `blueprint/.env` with your settings:
+Edit `archive/blueprint/.env` with your settings:
 ```bash
 TELEGRAM_BOT_TOKEN=your_bot_token_here
 OLLAMA_BASE_URL=http://{your-ollama-host}:11434
@@ -101,7 +101,7 @@ psql -h {your-postgres-host} -U agent_first_erp_crm -d agent_first_erp_crm -c "S
 ### Database Connection Error
 - Verify PostgreSQL is running: `docker ps | grep postgres`
 - Check credentials in `.env` match your PostgreSQL setup
-- Ensure the database is migrated (`../scripts/db/verify.sh` answers 37 checks)
+- Ensure the database is migrated (`../../scripts/db/verify.sh` answers 37 checks)
 
 ### Ollama Connection Error
 - Verify Ollama is running: `curl http://{your-ollama-host}:11434/api/tags`
@@ -118,21 +118,21 @@ psql -h {your-postgres-host} -U agent_first_erp_crm -d agent_first_erp_crm -c "S
 > in-code default is the literal placeholder `http://{your-ollama-url}:11434` - unset it and the
 > blueprint cannot reach a model, which is worth knowing before assuming a connection bug). The deployed Go
 > agents do not: they call an OpenAI-compatible **vLLM** endpoint (`LLM_PROVIDER=local`,
-> `VLLM_BASE_URL`, `VLLM_MODEL`) - `../architecture.md` 6.1 has the current values and `curl
+> `VLLM_BASE_URL`, `VLLM_MODEL`) - `../../architecture.md` 6.1 has the current values and `curl
 > localhost:4550/api/health | jq` prints what a running process actually believes. The loop is the same;
 > only the endpoint behind it differs.
 
 ## Next Steps
 
 > This guide stands up the reference bot, which is lineage rather than the runtime
-> ([ADR-006](../ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md)). For the
-> agents that actually deploy, the route is [../QUICKSTART.md](../QUICKSTART.md).
+> ([ADR-006](../../ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md)). For the
+> agents that actually deploy, the route is [../QUICKSTART.md](../../QUICKSTART.md).
 
-1. **Read the loop that ships:** [../agents/customer_service/backend_go/pkg/agent/agent.go](../agents/customer_service/backend_go/pkg/agent/agent.go) — [bot.py](bot.py) is the same pattern in one Python file, for background, not as an on-ramp
-2. **Study the Architecture:** Read [architecture.md](../architecture.md) for system design
+1. **Read the loop that ships:** [../agents/customer_service/backend_go/pkg/agent/agent.go](../../agents/customer_service/backend_go/pkg/agent/agent.go) — [bot.py](bot.py) is the same pattern in one Python file, for background, not as an on-ramp
+2. **Study the Architecture:** Read [architecture.md](../../architecture.md) for system design
 3. **Understand the Blueprint Pattern:** Read [AGENT_SUMMARY.md](AGENT_SUMMARY.md) — with its lineage banner
-4. **Plan New Agents:** Review [PLAN.md](../PLAN.md) for development roadmap
-5. **Database Documentation:** See [docs/database/](../docs/database/) for schema reference
+4. **Plan New Agents:** Review [PLAN.md](../../PLAN.md) for development roadmap
+5. **Database Documentation:** See [docs/database/](../../docs/database/) for schema reference
 6. **Add CAO Validation:** Build the validation layer for agent actions
 
 ---

@@ -9,13 +9,14 @@ Welcome! This guide is designed specifically for AI agents working on the Agent 
 - **[architecture.md](architecture.md)** - System architecture and agent roles
 - **[QUICKSTART.md](QUICKSTART.md)** - Deployment and setup instructions
 - **[PLAN.md](PLAN.md)** - Development roadmap and priorities
+- **[archive/README.md](archive/README.md)** - the frozen lineage: what `archive/blueprint/` is, and why nothing is added to it
 
 ### 🤖 Agent-Specific Guides
 - **[agents/customer_service/README.md](agents/customer_service/README.md)** - **the deployed agent**: Go backend, tools, environment, endpoints
 - **[agents/inventory/README.md](agents/inventory/README.md)** - **the second deployed agent**: same loop, stock tools, and the in-container check timer
 - **[agents/customer_service/backend_go/](agents/customer_service/backend_go/)** - that backend's source
-- **[blueprint/AGENT_SUMMARY.md](blueprint/AGENT_SUMMARY.md)** - the pattern's first statement, in Python - lineage, not a runtime (ADR-006)
-- **[blueprint/tools/README.md](blueprint/tools/README.md)** - Tool development guidelines
+- **[archive/blueprint/AGENT_SUMMARY.md](archive/blueprint/AGENT_SUMMARY.md)** - the pattern's first statement, in Python - lineage, not a runtime (ADR-006)
+- **[archive/blueprint/tools/README.md](archive/blueprint/tools/README.md)** - Tool development guidelines
 - **[docs/agent_requirements/customer_service/customer_service.md](docs/agent_requirements/customer_service/customer_service.md)** - Customer service agent requirements
 - **[docs/agent_requirements/inventory/inventory.md](docs/agent_requirements/inventory/inventory.md)** - Inventory agent requirements
 - **[docs/agent_requirements/agent_test_plan.md](docs/agent_requirements/agent_test_plan.md)** - Acceptance plan for every tool of both deployed agents, and its executable form `scripts/agents/tool_testplan.sh`
@@ -43,7 +44,7 @@ Welcome! This guide is designed specifically for AI agents working on the Agent 
 - **[scripts/db/](scripts/db/)** - `db up`, `verify.sh`, `test-functions.sh`: the harnesses that assert the two above
 - **[scripts/docs/check_agent_docs.sh](scripts/docs/check_agent_docs.sh)** - the check behind `code:agent_docs_match_surface`; it fails when a page describes an agent or a catalog that is not there
 - **[scripts/database/](scripts/database/)** - **superseded**: the pre-0001 SQL copies, listed file by file in [db/README.md](db/README.md)
-- **[blueprint/docs/](blueprint/docs/)** - Agent-friendly SQL documentation
+- **[archive/blueprint/docs/](archive/blueprint/docs/)** - Agent-friendly SQL documentation
 
 ---
 
@@ -59,7 +60,7 @@ Agent First ERP CRM is a database-first AI agent operating system that enables:
   in the current deployment produces the 1536 dimensions the columns declare. Read
   `agents/customer_service/README.md`'s "What is not here" before planning around this one
 - **Telegram integration** - *not in either deployed agent*, which serve HTTP and SSE. The reference
-  implementation in `blueprint/` and the upstream checkout at `/home/justin/agents/dumb_agent` both
+  implementation in `archive/blueprint/` and the upstream checkout at `/home/justin/agents/dumb_agent` both
   have working adapters; the transport is a `main.go` change and the loop does not care which is attached
 
 ---
@@ -72,7 +73,7 @@ Agent First ERP CRM is a database-first AI agent operating system that enables:
 - **Deployed, the stock half**: `agents/inventory/` - the same loop as a sibling fork, with `pkg/inventory`
   replacing `pkg/crm` and an in-container timer added. It is the evidence for the claim that the loop is
   reusable: one domain package, four identity strings, one working second agent.
-- **Reference**: `blueprint/bot.py` (~215 lines) - the same loop in one Python file, with LangChain and
+- **Reference**: `archive/blueprint/bot.py` (~215 lines) - the same loop in one Python file, with LangChain and
   Telegram. The pattern's shortest statement, and **deprecated as a runtime**: it opens a plaintext
   connection per tool call, checkpoints memory in process, and runs one polling worker. New agents
   fork `agents/customer_service/`; [ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md)
@@ -122,9 +123,9 @@ Follow [QUICKSTART.md](QUICKSTART.md) for Docker-based deployment.
   ADR-003 boundary in practice — a parameterised answer has a door, and 0022 is what made that argument
   mean what it says
 - Both obey one rule the blueprint did not always: **a write calls a database function and never composes its own INSERT.** `code:cs_writes_through_doors` watches that, and its comment says what the grep had to grow to catch it
-- The same eight tools exist in Python in **[blueprint/tools/](blueprint/tools/)** — read them, and **[blueprint/tools/README.md](blueprint/tools/README.md)**, for the shape of a tool; wire a new one through the Go package above. The blueprint is lineage, not a starting point ([ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md))
+- The same eight tools exist in Python in **[archive/blueprint/tools/](archive/blueprint/tools/)** — read them, and **[archive/blueprint/tools/README.md](archive/blueprint/tools/README.md)**, for the shape of a tool; wire a new one through the Go package above. The blueprint is lineage, not a starting point ([ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md))
 - Study **[docs/agent_requirements/customer_service/customer_service.md](docs/agent_requirements/customer_service/customer_service.md)** for domain requirements
-- Lineage examples, one part each, in `blueprint/tools/`:
+- Lineage examples, one part each, in `archive/blueprint/tools/`:
   - `customer_lookup.py` - Customer information retrieval
   - `add_customer.py` - Add new customers
   - `update_customer.py` - Update customer information
@@ -159,7 +160,7 @@ Follow [QUICKSTART.md](QUICKSTART.md) for Docker-based deployment.
 6. Add a probe to `db/tests/` that fails the day the function stops meaning what the tool says
 
 ### Creating a New Agent
-1. Fork `agents/customer_service/`. [blueprint/bot.py](blueprint/bot.py) shows the whole pattern in one
+1. Fork `agents/customer_service/`. [archive/blueprint/bot.py](archive/blueprint/bot.py) shows the whole pattern in one
    file as background — it is lineage, not an on-ramp, and ADR-006 records why
 2. Define agent-specific tools, in the order above: the function first, then the tool that calls it
 3. Keep the trajectory writer and the memory store. An agent that cannot be read back cannot be fixed,
@@ -193,7 +194,7 @@ Five things can be wrong independently, and each has its own harness:
 3. `go test ./...` in `agents/customer_service/backend_go` - the loop, the tool wiring and the
    derivations, against fakes and with no database. See the note on the one failing test in that
    package's README section
-4. `pytest blueprint/tests/ -v` - **read this before running it.** These are the reference
+4. `pytest archive/blueprint/tests/ -v` - **read this before running it.** These are the reference
    implementation's scripts, and they describe the Python shape rather than the deployed one; the reason
    to be careful is narrower and measurable. Two of the five (`test_create_functions.py`,
    `test_update_function.py`) connect at import - `POSTGRES_DB` defaults to **`agent_first_erp_crm`, the
@@ -207,7 +208,7 @@ Five things can be wrong independently, and each has its own harness:
    hand-run SQL that pass fewer arguments break, while the Go tools (which send all 15) keep working,
    which is the worst shape a corruption can have: most of the surface looks fine. pytest imports every
    module it collects, so all of this happens before any assertion runs. Run them only against a scratch
-   database (`createdb afpc_scratch && POSTGRES_DB=afpc_scratch python3 blueprint/tests/test_functions.py`),
+   database (`createdb afpc_scratch && POSTGRES_DB=afpc_scratch python3 archive/blueprint/tests/test_functions.py`),
    and see `PLAN.md`'s item on guarding or deleting them
 5. `./scripts/agents/tool_testplan.sh` - the only harness that tests what a human gets: it prompts
    both deployed agents through `POST /api/chat` once per registered tool and verifies each turn
@@ -283,12 +284,13 @@ agent_first/
 │   ├── database/                   # the review's companions + generated listings; agent_first_erp_crm_schema.sql is superseded
 │   └── history/                    # MISALIGNMENT_FIXES.md, STABILITY_IMPROVEMENTS.md - dated records
 │
-└── blueprint/                      # THE LINEAGE: the pattern in one Python file - not a runtime (ADR-006)
-    ├── bot.py                      # ~215 lines: loop, tools, memory, PostgreSQL
-    ├── tools/                      # the eight tools bot.py registers, in Python, plus the trajectory helpers
-    ├── docs/                       # agent-friendly SQL docs; views.md's lists are checked against the catalog
-    ├── tests/                      # import-time scripts, NOT collected tests - two of them write DDL; read the README before running
-    └── *.sql                       # superseded copies, kept so the fork is legible - see db/README.md
+└── archive/                        # frozen lineage: nothing here runs, nothing is added here (ADR-006)
+    └── blueprint/                  # the pattern in one Python file - moved out of the root on 2026-11-05
+        ├── bot.py                  # ~215 lines: loop, tools, memory, PostgreSQL
+        ├── tools/                  # the eight tools bot.py registers, in Python, plus the trajectory helpers
+        ├── docs/                   # agent-friendly SQL docs; views.md's lists are checked against the catalog
+        ├── tests/                  # import-time scripts, NOT collected tests - two of them write DDL; read the README before running
+        └── *.sql                   # superseded copies, kept so the fork is legible - see db/README.md
 ```
 
 The tree was last walked by hand in the 2026-11-05 documentation sweep. `T4`'s checker covers the
@@ -415,7 +417,7 @@ Secrets live in the environment, never in a committed file:
 | `vw_primary_contact_communications` | Primary contact interactions |
 | `vw_communication_thread` | Communication threading hierarchy |
 | `vw_agent_activity_summary` | Agent activity summary |
-| `vw_entity_contact_details` | Complete entity and contact details — **not in the schema**: defined only in the superseded `blueprint/08_create_views.sql` (T4) |
+| `vw_entity_contact_details` | Complete entity and contact details — **not in the schema**: defined only in the superseded `archive/blueprint/08_create_views.sql` (T4) |
 | `vw_communication_timeline` | Chronological communication view — **not in the schema**: same superseded file (T4) |
 | `vw_recent_interactions` | Every interaction the caller's row security reaches — order and limit belong to the caller, because a `LIMIT` inside a view runs before your filter |
 | `vw_failed_interactions` | Error analysis — which **runs** failed, never which tool |
@@ -433,7 +435,7 @@ Secrets live in the environment, never in a committed file:
 | `vw_item_movement_summary` | 30-day item movement patterns. `total_inbound`/`total_outbound` exclude `RESERVATION` rows — a commitment makes stock unavailable, it moves nothing — while `net_quantity` still counts them |
 | `vw_low_stock_alerts` | Items below reorder point |
 
-See [blueprint/docs/views.md](blueprint/docs/views.md) for complete view reference.
+See [archive/blueprint/docs/views.md](archive/blueprint/docs/views.md) for complete view reference.
 
 ### Database Naming Conventions
 - **SQL Tables**: snake_case (e.g., `entities`, `communications`) — note `entities`, not `customers`:
@@ -460,7 +462,7 @@ make docs-schema            # = scripts/docs/gen_schema_docs.sh
 
 Their "Do not edit" header carries the generation date, and a stale generated file is a real failure mode:
 nothing checks them. The list-vs-catalog check (`code:agent_docs_match_surface`, step 3b of
-`scripts/docs/check_agent_docs.sh`) watches the **column lists in `blueprint/docs/views.md`**, not these
+`scripts/docs/check_agent_docs.sh`) watches the **column lists in `archive/blueprint/docs/views.md`**, not these
 three pages — so a migration that renames a column fails there, and silently leaves `tables.md` behind
 until someone runs the target. Re-run it with the migration, not after it.
 Everything else in `docs/database/` is prose the review wrote, and
@@ -468,7 +470,7 @@ Everything else in `docs/database/` is prose the review wrote, and
 
 **`pgschema` is not installed here and `docs/schema/` does not exist.** The `pip install pgschema` /
 `pgschema dump` recipe this section used to carry was inherited from the pre-0001 layout, and the
-`blueprint/docs/schema_reference.md` header naming "pgschema 1.12.0" and PostgreSQL 16.14 is a stamp from
+`archive/blueprint/docs/schema_reference.md` header naming "pgschema 1.12.0" and PostgreSQL 16.14 is a stamp from
 that generator's run, not a claim about this server — which runs PostgreSQL 17. Use the harness and the
 catalog:
 

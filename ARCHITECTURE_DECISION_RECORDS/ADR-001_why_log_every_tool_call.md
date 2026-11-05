@@ -86,7 +86,7 @@ This data will be stored in the `agent_interactions` table with full JSONB field
 
 - [Interaction Logging Documentation](../docs/INTERACTION_LOGGING.md)
 - [Agent Interactions Table Schema](../scripts/database/11_interaction_logging.sql)
-- [blueprint/docs/interaction_logging.md](../blueprint/docs/interaction_logging.md)
+- [archive/blueprint/docs/interaction_logging.md](../archive/blueprint/docs/interaction_logging.md)
 
 ---
 

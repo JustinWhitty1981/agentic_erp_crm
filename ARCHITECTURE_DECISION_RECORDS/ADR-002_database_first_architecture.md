@@ -76,7 +76,7 @@ We will use **PostgreSQL as the single source of truth** for all agent state, kn
 
 - [Database Mental Model](../docs/database/agent_first_erp_crm_mental_model.md)
 - [Schema Reference](../docs/database/agent_schema_reference.md)
-- [blueprint/docs/schema_reference.md](../blueprint/docs/schema_reference.md)
+- [archive/blueprint/docs/schema_reference.md](../archive/blueprint/docs/schema_reference.md)
 
 ---
 

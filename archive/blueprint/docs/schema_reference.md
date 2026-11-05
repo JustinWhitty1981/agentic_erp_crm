@@ -6,10 +6,10 @@
 > every tenant-coded table afterwards - and why it names objects (`tickets`, `products`, ivfflat
 > embedding indexes) that the canonical schema does not contain. `pgschema` is not installed here and
 > `docs/schema/` has never existed; the generated pages that *are* current are
-> [../../docs/database/tables.md](../../docs/database/tables.md),
-> [views.md](../../docs/database/views.md) and [indexes.md](../../docs/database/indexes.md), rebuilt
+> [../../docs/database/tables.md](../../../docs/database/tables.md),
+> [views.md](../../../docs/database/views.md) and [indexes.md](../../../docs/database/indexes.md), rebuilt
 > from the live catalog by `make docs-schema`. The single source of truth is
-> [../../db/README.md](../../db/README.md).
+> [../../db/README.md](../../../db/README.md).
 >
 > Six specific things to un-learn from this page, each measured against the running catalog:
 >

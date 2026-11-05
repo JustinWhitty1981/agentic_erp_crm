@@ -26,7 +26,7 @@ Three databases were built to separate the questions:
 | DB | Loaded from | Objects created |
 | --- | --- | --- |
 | `erp` | `docs/database/agent_first_erp_crm_schema.sql` (1947 lines) | 18 tables, 12 views, 0 errors |
-| `erp2` | `blueprint/agent_swarm_schema.sql` (1417 lines) + `10_audit_log` + `11_interaction_logging` + `09_add_update_customer_functions` + `08_create_views` | 18 tables, 15 views, 0 errors |
+| `erp2` | `archive/blueprint/agent_swarm_schema.sql` (1417 lines) + `10_audit_log` + `11_interaction_logging` + `09_add_update_customer_functions` + `08_create_views` | 18 tables, 15 views, 0 errors |
 | `mftest2` | the **documented** `make db-migrate` sequence, replayed verbatim | **1 table** |
 
 ### 1.2 What was executed vs. read
@@ -134,7 +134,7 @@ entity_relationships |      9      |      9
 ```
 
 **All 9 blueprint tools hardcode the vestigial prefix** (`grep -rl 'agent_first_erp_crm\.'
-blueprint/tools/*.py` → 9 files; `tool_logger.py` alone → 5 refs). Reference counts:
+archive/blueprint/tools/*.py` → 9 files; `tool_logger.py` alone → 5 refs). Reference counts:
 
 ```
 7  agent_first_erp_crm.communications
@@ -191,7 +191,7 @@ it (§3.3).
 
 ### 3.3 No migration tooling; three forked sources of truth
 
-`blueprint/agent_swarm_schema.sql` and `scripts/database/agent_swarm_schema.sql` are
+`archive/blueprint/agent_swarm_schema.sql` and `scripts/database/agent_swarm_schema.sql` are
 byte-identical (checksum `22848d5158cf9377…`, 1417 lines) and are an **older** variant of
 `docs/database/agent_first_erp_crm_schema.sql` (1947 lines) — missing `agent_interactions`.
 5 of 8 migration files exist identically in three directories.
@@ -207,7 +207,7 @@ views in erp2 (bp)    : 15  (+ vw_failed_interactions, vw_recent_interactions,
 
 `vw_customers` also differs **semantically** by source:
 `WHERE e.entity_type = 'customer'` (docs) vs `WHERE e.entity_type IN ('customer','prospect')`
-(`blueprint/08_create_views.sql:25`) — same name, different population.
+(`archive/blueprint/08_create_views.sql:25`) — same name, different population.
 
 ---
 ## 4. Findings — High (proven by execution)
@@ -309,7 +309,7 @@ p_organization_name, p_address_type, p_is_primary                               
 
 ### 4.5 Tools and schema disagree on name, arity, and location
 
-`blueprint/tools/add_customer.py:136-143` issues:
+`archive/blueprint/tools/add_customer.py:136-143` issues:
 
 ```sql
 SELECT * FROM agent_first_erp_crm.add_customer(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
@@ -453,7 +453,7 @@ Three independent reasons none of this works as a control:
 
 1. `relforcerowsecurity = false` → the **table owner bypasses RLS entirely**.
 2. 16 of 18 business tables have no policies at all.
-3. **No code anywhere sets the GUC.** `grep -rn "current_agent" blueprint/ scripts/` matches
+3. **No code anywhere sets the GUC.** `grep -rn "current_agent" archive/blueprint/ scripts/` matches
    only the two `CREATE POLICY` lines (`agent_swarm_schema.sql:710,847`).
    `current_setting(..., true)` returns NULL, so `performed_by = NULL` is never true: an
    honest non-owner role **cannot insert any movement**, while the owner path is unrestricted.

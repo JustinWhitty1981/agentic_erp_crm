@@ -6,7 +6,7 @@ For AI agents working on this project, see:
 - **[AGENTS.md](AGENTS.md)** - Complete navigation guide for AI agents
 - **[README.md](README.md)** - Project overview
 - **[agents/customer_service/README.md](agents/customer_service/README.md)** and **[agents/inventory/README.md](agents/inventory/README.md)** - the two deployed agents
-- **[blueprint/AGENT_SUMMARY.md](blueprint/AGENT_SUMMARY.md)** - the pattern's first statement (lineage; the runtime is Go — [ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md))
+- **[archive/blueprint/AGENT_SUMMARY.md](archive/blueprint/AGENT_SUMMARY.md)** - the pattern's first statement (lineage; the runtime is Go — [ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md))
 - **[ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md)** - why the deployed half is Go
 - **[db/README.md](db/README.md)** - the schema, in the order it is applied
 
@@ -29,7 +29,7 @@ same loop in Go with a tool surface, a trajectory writer, and a second role reus
 
 | | The reference | The deployments |
 |---|---|---|
-| Where | `blueprint/` | `agents/customer_service/`, `agents/inventory/` |
+| Where | `archive/blueprint/` | `agents/customer_service/`, `agents/inventory/` |
 | Shape | `bot.py`, ~215 lines, Python + LangChain | Go backend (module `jada-backend`) + React UI, one process each |
 | Transport | Telegram bot | HTTP `POST /api/chat`, SSE `POST /api/chat/stream`, bundled UI |
 | Memory | LangChain checkpointer + in-process state | `agent_memories` (0023) plus history rehydrated from `agent_interactions` on a cold thread |
@@ -53,7 +53,7 @@ one polling worker — is measured in
 - **Telegram Interface:** direct bot integration
 - **Tools registered (8):** `get_customer_info`, `get_customer_communications`, `get_entity_stats`,
   `current_time`, `add_communication`, `add_customer_tool`, `update_customer_tool`,
-  `get_followup_customers_tool` — each in its own module under [blueprint/tools/](blueprint/tools/)
+  `get_followup_customers_tool` — each in its own module under [archive/blueprint/tools/](archive/blueprint/tools/)
 
 ### 2.2 The deployed loop (`agents/*/backend_go/pkg/`)
 ```
@@ -234,7 +234,7 @@ thread history read back out of `agent_interactions`.
 ## 9. Development Workflow
 
 ### 9.1 Adding a New Agent
-1. **Read the loop that ships:** `agents/customer_service/backend_go/pkg/agent/agent.go` — dispatch, the trajectory `defer`, rehydration. [blueprint/bot.py](blueprint/bot.py) is the same pattern in 215 Python lines and is background reading, not an on-ramp ([ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md)).
+1. **Read the loop that ships:** `agents/customer_service/backend_go/pkg/agent/agent.go` — dispatch, the trajectory `defer`, rehydration. [archive/blueprint/bot.py](archive/blueprint/bot.py) is the same pattern in 215 Python lines and is background reading, not an on-ramp ([ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md)).
 2. **Write the requirement first:** `docs/agent_requirements/<role>/<role>.md`, naming the views and functions that exist — a doc that names tables which the schema sweep removed is how an agent gets built against a fiction.
 3. **Fork the deployment, not the blueprint:** `cp -r agents/customer_service agents/<role>`, replace `pkg/crm` with your domain package, keep `pkg/agent`, `pkg/db`, `pkg/memory`, `pkg/logging`, `pkg/turn`.
 4. **Build the write half in SQL first** (`db/migrations/NNNN_*.sql`, next free number — see `db/MIGRATIONS.md` on why numbers cannot be reused), then the tool that calls it, with an idempotency key (ADR-005).
@@ -245,7 +245,7 @@ thread history read back out of `agent_interactions`.
 ### 9.2 Testing
 Five things can be wrong independently, and each has its own harness — `verify.sh` (structure),
 `test-functions.sh` (behaviour, one probe per finding), `go test` (the loop against fakes), `pytest
-blueprint/tests/` (the reference, against a test database), and `scripts/agents/tool_testplan.sh`
+archive/blueprint/tests/` (the reference, against a test database), and `scripts/agents/tool_testplan.sh`
 (a real prompt through a real model, verified against the database). `AGENTS.md` has the commands.
 
 ---

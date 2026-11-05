@@ -4,7 +4,7 @@
 - **Role:** First-line support for customer inquiries.
 - **Interface:** HTTP and SSE in the deployed agent - `POST /api/chat` and `POST /api/chat/stream`,
   with the React UI over the same origin. Telegram is the reference implementation's transport only
-  (`blueprint/`); neither deployed binary has an adapter for it, and the loop does not care which is
+  (`archive/blueprint/`); neither deployed binary has an adapter for it, and the loop does not care which is
   attached. See also line 113, which already said this - the page contradicted itself, and this is the
   corrected half.
 - **Database Access:** Reads through the `vw_*` views the schema publishes (`vw_customers`,
@@ -18,7 +18,7 @@
   claim ladder exist in one place, so a caller that bypasses the door does not gain access it lacks, it
   loses the rules. That is what `code:cs_writes_through_doors` watches, and why the rule is checked in
   code rather than granted in SQL.
-- **Implementation:** `agents/customer_service/backend_go` — the blueprint pattern (`blueprint/bot.py`)
+- **Implementation:** `agents/customer_service/backend_go` — the blueprint pattern (`archive/blueprint/bot.py`)
   in a Go runtime. Why the runtime is not the Python reference:
   [ADR-006](../../../ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md).
 
@@ -79,7 +79,7 @@ Two implementations exist, and they share the requirements and the rules:
 
 - **Deployed**: `agents/customer_service/` - Go backend, HTTP and SSE, React UI. The reference for what
   this agent actually does.
-- **Reference**: `blueprint/` - the same surface in Python and LangChain, on Telegram, and deprecated
+- **Reference**: `archive/blueprint/` - the same surface in Python and LangChain, on Telegram, and deprecated
   as a runtime ([ADR-006](../../../ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md)).
   The other deployed agent, `agents/inventory/`, is this loop with a different tool layer and a timer.
   Read the blueprint for the pattern; do not deploy it and expect this schema.
@@ -112,7 +112,7 @@ Two implementations exist, and they share the requirements and the rules:
 | 5 | Log new interactions | Done through the door | `add_communication` (`0021`). Three things a caller-side `INSERT` could not promise: an ambiguous name is refused **with the candidates listed** rather than filed against whichever row the scan reached first; the six vocabularies are the CHECKs' own; and `thread_root_id` gets a writer, so a reply to a reply lands on the thread the first message started. **It creates no `followups` row** - that table has no writer anywhere in the schema, and 0021 §5 says so rather than deciding it here |
 | 6 | Follow-up customers | Done, with two caveats stated by the tool | `0022` made the threshold real and made the third reason branch reachable at all; staleness is measured on the interaction, not on the row's write time. Caveats: results are unordered, and **the function returns no status column, so a blacklisted account appears in the follow-up list** - the tool says this in its own description, because a model that is not told will present the list as "customers to call" |
 | 7 | Escalation | Detection only | Sentiment, `escalated` outcomes and `get_entity_stats` are all reachable. There is no CAO agent to route one to, so the format the requirement specifies has never been sent anywhere |
-| 8 | Agent logging | Done | One row per run in `agent_interactions`, written by `pkg/logging` (Go) or `blueprint/interaction_logger.py` (Python), with the per-call grain in `actions_taken` / `tool_observations` and `vw_tool_calls` to read it one call at a time. The requirement names `tool_logger.py`, and that file now accumulates in process memory and hands the run to the trajectory writer; it used to `CREATE TABLE` at runtime into a table that was never in the schema, which is why nothing noticed it was logging nothing |
+| 8 | Agent logging | Done | One row per run in `agent_interactions`, written by `pkg/logging` (Go) or `archive/blueprint/interaction_logger.py` (Python), with the per-call grain in `actions_taken` / `tool_observations` and `vw_tool_calls` to read it one call at a time. The requirement names `tool_logger.py`, and that file now accumulates in process memory and hands the run to the trajectory writer; it used to `CREATE TABLE` at runtime into a table that was never in the schema, which is why nothing noticed it was logging nothing |
 
 ### System Prompt Highlights
 - Proactively offers to log communications when a user mentions real-world interactions.
@@ -125,7 +125,7 @@ Two implementations exist, and they share the requirements and the rules:
 
 ### Deployment
 
-- **Run:** `docker compose up --build -d` in `agents/customer_service/` (publishes `:4550`); `python bot.py` in `blueprint/` runs the reference, which is not deployed on this server ([ADR-006](../../../ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md))
+- **Run:** `docker compose up --build -d` in `agents/customer_service/` (publishes `:4550`); `python bot.py` in `archive/blueprint/` runs the reference, which is not deployed on this server ([ADR-006](../../../ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md))
 - **Model:** `LLM_PROVIDER=local` against an OpenAI-compatible endpoint (`VLLM_BASE_URL`), or `azure_gcc_high`
 - **Database:** PostgreSQL at `AFPC_PG_HOST:AFPC_PG_PORT`, database `agent_first_erp_crm`, and every object in **`public`**. The environment table in `agents/customer_service/README.md` explains why the host has to be an IP address
 - **Tenant:** `AFPC_TENANT_ID`, required. It is resolved once at startup and set on every pooled connection, so a per-request tenant is not something this process can be asked to fake

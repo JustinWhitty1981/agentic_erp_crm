@@ -6,7 +6,7 @@
 > conversation memory that dies with the process, and no trajectory row — correct pattern, wrong
 > substrate. The runtimes are `agents/customer_service/backend_go` and
 > `agents/inventory/backend_go`; the four measurements behind the switch are in
-> [ADR-006](../ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md).
+> [ADR-006](../../ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md).
 
 A simple, single-file customer service bot built with LangChain v1, Ollama, and PostgreSQL.
 
@@ -88,7 +88,7 @@ The bot uses these custom functions (the doors listed in [docs/customer_function
 | `update_customer()` | Update customer information |
 | `get_followup_customers()` | Get customers requiring follow-up |
 
-The audit log functionality is `db/migrations/0013_audit_log.sql`: triggers writing `audit_log` in `public`, chained per tenant and month, and `audit_chain_verify()` reading the chain back. `blueprint/10_audit_log.sql` is the superseded copy, and it created `agent_first_erp_crm.audit_log` - a schema no migration makes, which is finding 3.1.
+The audit log functionality is `db/migrations/0013_audit_log.sql`: triggers writing `audit_log` in `public`, chained per tenant and month, and `audit_chain_verify()` reading the chain back. `archive/blueprint/10_audit_log.sql` is the superseded copy, and it created `agent_first_erp_crm.audit_log` - a schema no migration makes, which is finding 3.1.
 
 ## Architecture
 
@@ -142,7 +142,7 @@ docker exec -it cs-bot sh
 ## Project Structure
 
 ```
-blueprint/
+archive/blueprint/
 ├── bot.py                 # The whole pattern in one file - lineage, not the runtime (see the banner above)
 ├── Dockerfile             # Container configuration
 ├── docker-compose.yml     # Docker orchestration

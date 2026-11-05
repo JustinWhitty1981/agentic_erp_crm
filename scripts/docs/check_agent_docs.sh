@@ -175,7 +175,7 @@ say "3 views: every advertised vw_* exists"
 #     vw_communication_timeline with "not in the schema" on the same row, because T4's finding was that
 #     a reader could not otherwise tell a live view from a superseded one. Demanding those names exist
 #     would ask the docs to stop explaining themselves.
-#   - anything inside a fenced code block. blueprint/docs/views.md ends with a worked example of
+#   - anything inside a fenced code block. archive/blueprint/docs/views.md ends with a worked example of
 #     writing your own view, CREATE OR REPLACE VIEW ... vw_my_custom_view; the name there is a
 #     placeholder in a how-to, not a promise about the catalog.
 #
@@ -188,7 +188,7 @@ say "3 views: every advertised vw_* exists"
 # printing "9 views" for a file whose table has twenty. The count line below is what makes an empty
 # scan visible instead of green.
 declared=$(mktemp); trap 'rm -f "$set_keys" "$got_keys" "$doc_keys" "$declared" ' EXIT
-for f in "$ROOT/AGENTS.md" "$ROOT/blueprint/docs/views.md" "$ROOT/db/README.md"; do
+for f in "$ROOT/AGENTS.md" "$ROOT/archive/blueprint/docs/views.md" "$ROOT/db/README.md"; do
     [ -f "$f" ] || continue
     awk '
         /^```/ { infence = !infence; next }
@@ -211,7 +211,7 @@ sort -u -o "$declared" "$declared"
 # that says "not in the schema" about a view some migration added later is stale in the other
 # direction. Counted, not failed.
 caveated=$(mktemp)
-for f in "$ROOT/AGENTS.md" "$ROOT/blueprint/docs/views.md" "$ROOT/db/README.md"; do
+for f in "$ROOT/AGENTS.md" "$ROOT/archive/blueprint/docs/views.md" "$ROOT/db/README.md"; do
     [ -f "$f" ] || continue
     grep -hoE '\bvw_[a-z0-9_]+' "$f" | sort -u >> "$caveated" || true
 done
@@ -248,7 +248,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 3b. Columns: the lists blueprint/docs/views.md publishes
+# 3b. Columns: the lists archive/blueprint/docs/views.md publishes
 # ---------------------------------------------------------------------------
 # Existence is all a grep can see, and T4's remaining half is not existence. The page's own header
 # says its column lists were written against superseded SQL rather than the catalog, and 0017 measured
@@ -260,7 +260,7 @@ fi
 # its SELECT says and a doc that lists alphabetically is not wrong.
 say "3b columns: the published lists against pg_attribute"
 
-page="$ROOT/blueprint/docs/views.md"
+page="$ROOT/archive/blueprint/docs/views.md"
 if [ ! -f "$page" ]; then
     skip "no $page"
 elif ! command -v docker >/dev/null 2>&1 && [ -z "${PSQL:-}" ]; then

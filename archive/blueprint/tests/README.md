@@ -13,9 +13,9 @@ them write to the database they connect to.
 | `test_functions.py`, `verify_functions.py` | connect and `SELECT`; safe to read, not safe to trust as a check |
 | `test_agent.py` | builds a LangChain agent against Ollama (`OLLAMA_MODEL`, default `ornith:35b`) - which is not what this project's agents use; they call vLLM (`VLLM_BASE_URL`). It will hang or refuse on this server |
 
-Because `pytest` **imports** every module it collects, `pytest blueprint/tests/` performs the DDL above
+Because `pytest` **imports** every module it collects, `pytest archive/blueprint/tests/` performs the DDL above
 before evaluating a single assertion, in whichever database the environment names. The commands
-this page used to publish - `pytest blueprint/tests/ -v`, and building a test database out of
+this page used to publish - `pytest archive/blueprint/tests/ -v`, and building a test database out of
 `scripts/database/*.sql`, which are the superseded pre-`0001` copies - are both withdrawn.
 
 **To run one deliberately**, against a scratch database:
@@ -23,10 +23,10 @@ this page used to publish - `pytest blueprint/tests/ -v`, and building a test da
 ```bash
 docker exec -it afpc-pg createdb -U postgres afpc_scratch
 docker exec -i afpc-pg psql -U postgres -d afpc_scratch -f /dev/stdin < <(cat db/migrations/*.sql)   # the real schema
-POSTGRES_DB=afpc_scratch POSTGRES_HOST=<pg-host> POSTGRES_USER=postgres python3 blueprint/tests/test_functions.py
+POSTGRES_DB=afpc_scratch POSTGRES_HOST=<pg-host> POSTGRES_USER=postgres python3 archive/blueprint/tests/test_functions.py
 ```
 
-**What actually checks this system** is the harness list in [`../../AGENTS.md`](../../AGENTS.md)
+**What actually checks this system** is the harness list in [`../../AGENTS.md`](../../../AGENTS.md)
 - `scripts/db/verify.sh`, `scripts/db/test-functions.sh` (which runs each probe against a *copy* with a
 row-count residue check around it, the property these scripts lack), `go test ./...` in each deployed
 agent, and `scripts/agents/tool_testplan.sh`. `PLAN.md` carries the fix for this directory: guard the
@@ -130,7 +130,7 @@ python verify_functions.py
 ### Prerequisites
 
 1. PostgreSQL database with Agent First ERP CRM schema
-2. Environment variables configured (there is no `.env.example` in `blueprint/`; the keys these scripts read are `POSTGRES_HOST/PORT/DB/USER/PASSWORD`, and `test_agent.py` adds `OLLAMA_MODEL`/`OLLAMA_BASE_URL`)
+2. Environment variables configured (there is no `.env.example` in `archive/blueprint/`; the keys these scripts read are `POSTGRES_HOST/PORT/DB/USER/PASSWORD`, and `test_agent.py` adds `OLLAMA_MODEL`/`OLLAMA_BASE_URL`)
 3. Python dependencies installed:
    ```bash
    pip install -r requirements.txt
@@ -140,13 +140,13 @@ python verify_functions.py
 
 ```bash
 # Using pytest
-pytest blueprint/tests/ -v
+pytest archive/blueprint/tests/ -v
 
 # Run specific test file
-pytest blueprint/tests/test_functions.py -v
+pytest archive/blueprint/tests/test_functions.py -v
 
 # Run with coverage
-pytest blueprint/tests/ --cov=blueprint
+pytest archive/blueprint/tests/ --cov=blueprint
 ```
 
 ### Run Tests with Environment Variables
@@ -158,7 +158,7 @@ export POSTGRES_DB=agent_first_erp_crm
 export POSTGRES_USER=postgres
 export POSTGRES_PASSWORD=your_password
 
-python blueprint/tests/test_functions.py
+python archive/blueprint/tests/test_functions.py
 ```
 
 ---
@@ -202,7 +202,7 @@ CREATE DATABASE agent_first_erp_crm_test;
 ## Test Structure
 
 ```
-blueprint/tests/
+archive/blueprint/tests/
 ├── README.md              # This file
 ├── test_functions.py      # SQL function tests
 ├── test_create_functions.py  # Function creation tests
@@ -291,7 +291,7 @@ jobs:
           python-version: '3.11'
       - name: Install dependencies
         run: |
-          pip install -r blueprint/requirements.txt
+          pip install -r archive/blueprint/requirements.txt
       - name: Run tests
         env:
           POSTGRES_HOST: localhost
@@ -300,7 +300,7 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: test
         run: |
-          pytest blueprint/tests/ -v
+          pytest archive/blueprint/tests/ -v
 ```
 
 ---
@@ -348,7 +348,7 @@ createdb agent_first_erp_crm_test
 ## Coverage Report
 
 ```bash
-pytest blueprint/tests/ --cov=blueprint --cov-report=html
+pytest archive/blueprint/tests/ --cov=blueprint --cov-report=html
 ```
 
 Open `htmlcov/index.html` in a browser to view coverage.

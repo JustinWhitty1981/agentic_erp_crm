@@ -96,7 +96,7 @@ log_id = log_agent_trajectory(
 ### In the Telegram Bot
 
 **The blueprint's `bot.py` does not log any turn it serves.** `grep -c log_agent_trajectory
-bot.py` answers 0: the writer (`blueprint/interaction_logger.py`) exists, is correct, and is not
+bot.py` answers 0: the writer (`archive/blueprint/interaction_logger.py`) exists, is correct, and is not
 imported by the loop, so a reference-implementation run files no `agent_interactions` row. The
 deployed Go agents are the opposite case - the record is written in the loop's `defer`, so a run
 that panics or is cancelled still lands its row, and `scripts/agents/tool_testplan.sh` reads that
@@ -223,7 +223,7 @@ SELECT human_input, agent_thoughts, actions_taken, tool_observations, final_outp
 
 Four views over `agent_interactions`, created by `db/migrations/0017_interaction_readpath.sql`.
 They were documented here long before they existed in the schema - `0001` ported the table out of
-`blueprint/11_interaction_logging.sql` and left that file's views behind, so this page's
+`archive/blueprint/11_interaction_logging.sql` and left that file's views behind, so this page's
 instructions raised `42P01` for fifteen migrations. They also carry the two grain distinctions the
 legacy definitions got wrong, so read the column names, not the habit:
 
@@ -378,7 +378,7 @@ is the tail of the turn's latency. If you notice slowdowns: If you notice slowdo
 ## Related Documentation
 
 - [db/README.md](../db/README.md) - the schema's source of truth. (`scripts/database/` is the superseded pre-0001 copies; its README opens with why nothing in it should be run.)
-- [Blueprint Documentation](../blueprint/README.md)
+- [Blueprint Documentation](../archive/blueprint/README.md)
 - [Agent Requirements](../docs/agent_requirements/)
 
 ## In the deployed agents

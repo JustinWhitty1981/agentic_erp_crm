@@ -94,7 +94,7 @@ CREATE INDEX idx_user ON agent_interactions (user_id);
 ### Basic Usage
 
 ```python
-from interaction_logger import log_agent_trajectory   # blueprint/interaction_logger.py - a module bot.py does not import
+from interaction_logger import log_agent_trajectory   # archive/blueprint/interaction_logger.py - a module bot.py does not import
 
 log_id = log_agent_trajectory(
     conversation_id="uuid-here",
@@ -114,9 +114,9 @@ log_id = log_agent_trajectory(
 
 **Not in the reference implementation, and this is the page's most important correction:**
 `bot.py` never imports `interaction_logger` and never calls `log_agent_trajectory`, so a blueprint
-run files **no** `agent_interactions` row - `grep -c log_agent_trajectory blueprint/bot.py` answers 0.
+run files **no** `agent_interactions` row - `grep -c log_agent_trajectory archive/blueprint/bot.py` answers 0.
 The writer exists and is correct; it is simply not wired. The deployed Go agents do wire it, in the
-loop's `defer` (`../agents/customer_service/backend_go/pkg/agent/agent.go` -> `pkg/logging`), which is
+loop's `defer` (`../../../agents/customer_service/backend_go/pkg/agent/agent.go` -> `pkg/logging`), which is
 where the trajectory rows `scripts/agents/tool_testplan.sh` asserts against come from. Wiring, from
 the module that does work, looks like this:
 

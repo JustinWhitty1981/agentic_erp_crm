@@ -13,7 +13,7 @@ Before starting work, AI agents should review:
 
 ## Current Status
 
-✅ **Blueprint complete** - `blueprint/bot.py`, the pattern in one Python file — lineage since
+✅ **Blueprint complete** - `archive/blueprint/bot.py`, the pattern in one Python file — lineage since
    [ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md) made the Go
    backends the runtime
 ✅ **Two agents deployed** - `agents/customer_service/` (`:4550`, 14 tools) and `agents/inventory/` (`:4560`, 11 tools plus a 30-minute check timer)
@@ -36,18 +36,18 @@ Before starting work, AI agents should review:
 
 ## Now, item 3: the two test directories that write to the database they test
 
-`blueprint/tests/` and `scripts/tests/` hold the same five ad-hoc scripts, and two of them
+`archive/blueprint/tests/` and `scripts/tests/` hold the same five ad-hoc scripts, and two of them
 (`test_create_functions.py`, `test_update_function.py`) connect at import with `POSTGRES_DB` defaulting
 to **`agent_first_erp_crm`** and run, on the success path, `DROP FUNCTION IF EXISTS
 add_customer(...)` / `update_customer(...)` then a stub `CREATE FUNCTION` returning `TRUE, 1, 1,
-'Test'` — committed. `pytest blueprint/tests/` imports every module it collects, so the command this
+'Test'` — committed. `pytest archive/blueprint/tests/` imports every module it collects, so the command this
 repository's own `AGENTS.md` listed as harness four does that without running a single assertion first.
 
 - [ ] Guard the module bodies with `if __name__ == "__main__":` or delete the two files (they recreate
       pre-`0016`/pre-`0021` bodies of doors the migrations own — there is nothing left for them to check)
 - [ ] Default `POSTGRES_DB` to a name that cannot be the live database, so a mistake fails loudly
 - [ ] Then re-point `AGENTS.md`'s harness list at whatever survives, and say in `scripts/tests/README.md`
-      and `blueprint/tests/README.md` what the run costs
+      and `archive/blueprint/tests/README.md` what the run costs
 
 Found by this sweep, not by a failure: the docs said "run these", and the code said what running them does.
 

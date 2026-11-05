@@ -91,7 +91,7 @@ Example views:
 
 ## References
 
-- [Views Documentation](../blueprint/docs/views.md)
+- [Views Documentation](../archive/blueprint/docs/views.md)
 - [View Creation Script](../scripts/database/08_create_views.sql)
 
 ---

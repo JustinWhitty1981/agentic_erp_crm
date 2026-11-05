@@ -8,7 +8,7 @@ Three things can be "started" in this repository, and they are different exercis
 | **The customer service agent** | A deployed agent: Go backend, React UI, HTTP and SSE | `agents/customer_service/` |
 | **The inventory agent** | The same loop with stock tools and an in-container check timer | `agents/inventory/` |
 
-`blueprint/` is the reference implementation the other two descend from — a single-file Python
+`archive/blueprint/` is the reference implementation the other two descend from — a single-file Python
 LangChain agent on Telegram. It is lineage: read it for the pattern, deploy from `agents/`. The two
 Go backends are the runtime, and
 [ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md) carries the
@@ -41,7 +41,7 @@ for f in db/migrations/*.sql; do psql "$TARGET" -f "$f"; done
 > repository assumes that, including the tools: a database with the second schema in it is a database
 > where `SELECT * FROM vw_customers` works and `SELECT * FROM agent_first_erp_crm.vw_customers` does
 > not, which is the symptom to recognise rather than a problem to fix in the caller. The same rule
-> covers `scripts/database/` and the `.sql` files sitting in `blueprint/` and `docs/database/`: they
+> covers `scripts/database/` and the `.sql` files sitting in `archive/blueprint/` and `docs/database/`: they
 > are the superseded copies the schema came from, listed file by file in `db/README.md`.
 
 Want the demo data the agents' acceptance plan was measured against? `scripts/db/db seed` applies every
@@ -210,7 +210,7 @@ container, so no gap means the process was down; check `docker ps` and
 
 ## Next steps
 
-1. **Read the loop that ships:** `agents/customer_service/backend_go/pkg/agent/agent.go` — the dispatch, the trajectory `defer`, rehydration. `blueprint/bot.py` is the same pattern in one Python file (lineage — [ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md)).
+1. **Read the loop that ships:** `agents/customer_service/backend_go/pkg/agent/agent.go` — the dispatch, the trajectory `defer`, rehydration. `archive/blueprint/bot.py` is the same pattern in one Python file (lineage — [ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md)).
 2. **Read the deployments:** `agents/customer_service/README.md` and `agents/inventory/README.md` —
    tools, environment, endpoints.
 3. **Read the design:** `architecture.md`, then `docs/database/agent_first_erp_crm_mental_model.md`.

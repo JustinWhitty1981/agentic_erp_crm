@@ -2,7 +2,7 @@
 
 **Purpose:** Comprehensive audit trail for all human-bot interactions.
 
-> **Superseded page for a live table.** The DDL below is what `blueprint/10_audit_log.sql` and
+> **Superseded page for a live table.** The DDL below is what `archive/blueprint/10_audit_log.sql` and
 > `scripts/database/10_audit_log.sql` contain, and both create `agent_first_erp_crm.audit_log` -
 > the twin schema no migration makes. The table the database actually has is **`public.audit_log`**,
 > built by `db/migrations/0013_audit_log.sql`: `row_pk` is **jsonb** (`{"id": 15}`, because one

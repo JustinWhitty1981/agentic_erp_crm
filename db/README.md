@@ -5,7 +5,7 @@ hold copies of the same DDL are superseded:
 
 | Superseded | Was | Now |
 |---|---|---|
-| `blueprint/agent_swarm_schema.sql` | 1417-line older variant, byte-identical twin in `scripts/database/` | `0001_baseline_canonical_port.sql` |
+| `archive/blueprint/agent_swarm_schema.sql` | 1417-line older variant, byte-identical twin in `scripts/database/` | `0001_baseline_canonical_port.sql` |
 | `scripts/database/agent_swarm_schema.sql` | same file, second copy | same as above |
 | `docs/database/agent_first_erp_crm_schema.sql` | canonical 1947-line dump, referenced by a Makefile target that pointed at a path where it does not exist | `0001_baseline_canonical_port.sql` |
 | `*/08_create_views.sql` (3 copies) | prefixed views; `vw_customers` filtered differently from the canonical one | views live in `0001` (see also 0009 for the `vw_customers` filter decision) |

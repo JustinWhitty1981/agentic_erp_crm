@@ -46,7 +46,7 @@ Thank you for your interest in contributing to Agent First ERP CRM! This documen
    ```bash
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
-   pip install -r blueprint/requirements.txt
+   pip install -r archive/blueprint/requirements.txt
    ```
 
 4. **Bring up the database** - one command, and it is the only route that produces the schema the
@@ -61,7 +61,7 @@ Thank you for your interest in contributing to Agent First ERP CRM! This documen
    `AFPC_PG_HOST` line into each `agents/*/.env`, because the address the server certificate lists is a
    fact about your machine and not about this repository.
 
-   **Do not apply `scripts/database/*.sql`, `blueprint/*.sql`, or
+   **Do not apply `scripts/database/*.sql`, `archive/blueprint/*.sql`, or
    `docs/database/agent_first_erp_crm_schema.sql`.** They are the pre-`0001` copies the schema was
    ported *from* - `db/README.md` lists each one against the migration that superseded it - and several
    of their statements are qualified to `agent_first_erp_crm`, the schema
@@ -71,8 +71,8 @@ Thank you for your interest in contributing to Agent First ERP CRM! This documen
 
 5. **Configure the agents** - the keys each process reads are in its own README:
    [`agents/customer_service/README.md`](agents/customer_service/README.md) and
-   [`agents/inventory/README.md`](agents/inventory/README.md). There is no `blueprint/.env.example` to
-   copy: `blueprint/` is the reference implementation, and it reads the variables its README names.
+   [`agents/inventory/README.md`](agents/inventory/README.md). There is no `archive/blueprint/.env.example` to
+   copy: `archive/blueprint/` is the reference implementation, and it reads the variables its README names.
 
 6. **Run the checks** - five things can be wrong independently, and each has its own harness:
    ```bash
@@ -82,9 +82,9 @@ Thank you for your interest in contributing to Agent First ERP CRM! This documen
    cd agents/customer_service/backend_go && go test ./...
    ./scripts/agents/tool_testplan.sh      # one prompt per registered tool, verified against rows
    ```
-   Do **not** run `pytest blueprint/tests/` to check your work: two of its files commit DDL at import,
+   Do **not** run `pytest archive/blueprint/tests/` to check your work: two of its files commit DDL at import,
    against whichever database `POSTGRES_DB` names - which defaults to the live one. The warning is in
-   [`blueprint/tests/README.md`](blueprint/tests/README.md), and the reason is in `AGENTS.md`'s Testing
+   [`archive/blueprint/tests/README.md`](archive/blueprint/tests/README.md), and the reason is in `AGENTS.md`'s Testing
    section.
 
 ---
@@ -265,7 +265,7 @@ cd agents/inventory/backend_go        && go test ./...
 ./scripts/agents/tool_testplan.sh
 ```
 
-`blueprint/tests/` is not on this list on purpose. Its five files are import-time scripts, `grep -c
+`archive/blueprint/tests/` is not on this list on purpose. Its five files are import-time scripts, `grep -c
 'def test_'` answers 0 for all of them, and two commit `CREATE FUNCTION` stubs over the customer doors.
 The reference implementation's behaviour is asserted instead by `db/tests/` probes against the SQL those
 tools call, and by `go test` against the loop that replaced them.
@@ -280,12 +280,12 @@ tools call, and by `go test` against the loop that replaced them.
 - **architecture.md** - System architecture and agent roles (lower-case; on a case-sensitive filesystem
   `ARCHITECTURE.md` is a broken link, which is what this page said until someone tried to click it)
 - **AGENTS.md** - the route map for an agent working in this repository, including the five harnesses
-- **blueprint/docs/** - Agent-friendly SQL documentation
+- **archive/blueprint/docs/** - Agent-friendly SQL documentation
 - **docs/database/** - Database schema and reference documentation
 - **docs/agent_requirements/** - what each role is specified to do, plus `agent_test_plan.md`, the
   acceptance plan every registered tool is proven by
 - **agents/customer_service/** and **agents/inventory/** - the two **deployed** agents (Go backend,
-  React UI, `:4550` and `:4560`). `blueprint/` is the pattern they descend from, in one Python file
+  React UI, `:4550` and `:4560`). `archive/blueprint/` is the pattern they descend from, in one Python file
 
 ### Documentation Guidelines
 

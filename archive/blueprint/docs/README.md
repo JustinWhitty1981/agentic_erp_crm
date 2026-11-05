@@ -30,9 +30,9 @@
 
 ## Related Documentation
 
-- [docs/database/](../../docs/database/) - Main database documentation
-- [docs/INTERACTION_LOGGING.md](../../docs/INTERACTION_LOGGING.md) - Interaction logging guide
-- [db/migrations/](../../db/migrations/) — the schema; `scripts/database/` is the superseded copies - SQL migration scripts
+- [docs/database/](../../../docs/database/) - Main database documentation
+- [docs/INTERACTION_LOGGING.md](../../../docs/INTERACTION_LOGGING.md) - Interaction logging guide
+- [db/migrations/](../../../db/migrations/) — the schema; `scripts/database/` is the superseded copies - SQL migration scripts
 
 ---
 

@@ -88,7 +88,7 @@ Agent: "Sales are up 15% compared to last month."
 
 ## References
 
-- [Blueprint Pattern](../blueprint/AGENT_SUMMARY.md)
+- [Blueprint Pattern](../archive/blueprint/AGENT_SUMMARY.md)
 - [Agent Requirements](../docs/agent_requirements/)
 
 ---
