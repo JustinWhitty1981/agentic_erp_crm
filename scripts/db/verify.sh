@@ -123,7 +123,8 @@ check "B1 5.8  tenant_id everywhere" "0003_tenant_foundation" \
         ('locations'),('item_categories'),('inventory_items'),('inventory_movements'),
         ('inventory_on_hand'),('inventory_reservations'),('human_sessions'),('bot_actions'),
         ('audit_summary'),('agent_interactions'),('agent_memories'),('suppliers'),
-        ('orders'),('order_items'),('document_counters')) AS t(tbl)
+        ('orders'),('order_items'),('document_counters'),
+        ('work_centres'),('work_order_operations')) AS t(tbl)
       WHERE NOT EXISTS (
         SELECT 1 FROM information_schema.columns c
          WHERE c.table_schema='public' AND c.table_name=t.tbl
@@ -147,7 +148,7 @@ check "B1 5.8  tenant_id everywhere" "0003_tenant_foundation" \
 check "B1b 5.8 natural keys tenant-scoped" "0003_tenant_foundation" \
     "SELECT count(*) FROM (VALUES ('warehouses'),('item_categories'),('inventory_items'),
         ('locations'),('entity_relationships'),('audit_summary'),('suppliers'),
-        ('orders'),('order_items')) AS t(tbl)
+        ('orders'),('order_items'),('work_centres'),('work_order_operations')) AS t(tbl)
       WHERE NOT EXISTS (SELECT 1 FROM pg_index i
           JOIN pg_attribute a ON a.attrelid=i.indrelid AND a.attnum=i.indkey[0]
           JOIN pg_class c ON c.oid=i.indrelid
