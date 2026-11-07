@@ -603,10 +603,10 @@ SELECT order_number, order_type, status, customer_name, open_amount
 **Columns:** (in declared order, read from `pg_attribute`, like every other list on this page;
 `code:agent_docs_match_surface` re-checks them, so a rename fails here rather than in production)
 - `tenant_id` - Whose row this is. Every tenant-coded view exposes it last (0009), which is what makes an agent's and an auditor's result sets differ without two views
-- `order_id` - The WORK order this plan belongs to
-- `order_type` - The header's type. A line's own `line_type` says what it is; this says what document it belongs to
-- `order_number` - The header's number, joined so a line listing does not need a second read
-- `status` - PENDING, IN_PROGRESS or COMPLETED. The operation's own state, not the order's, and the two can disagree only for the reason `start`'s door refuses
+- `order_id` - The `orders` primary key. `inventory_reservations.order_id` names this value for the document a commitment is held against, and `inventory_movements.reference_id` names it for the document a movement was made on behalf of - which is the whole reason the three document types share one header table
+- `order_type` - SALES, PURCHASE or WORK - the three the business names, and the axis that decides which counterparty column may be filled, what a line's `line_type` is allowed to say, and which direction stock moves. It is half of the key into `order_lifecycle`, so the status beside it is legal for THIS type only
+- `order_number` - The document's own number: SO-, PO- or WO- plus a per-type counter, unique per tenant, and issued by `create_order` rather than composed by a caller. The two words mean different things on two of the types - see the table's COMMENT
+- `status` - Where the document is, in its type's lifecycle. The (type, status) pair is a key into the GLOBAL `order_lifecycle` rather than a two-column CHECK, which is what lets `vw_domain_vocabulary` see the constraint at all (`cardinality(conkey)=1`)
 - `origin` - MANUAL, IMPORT, or RESERVATION_BACKFILL - the last one marks a document 0030 raised to explain stock that was already committed, and it is the only way a SALES order may have no customer
 - `lifecycle_position` - The status's place in its type's lifecycle, joined from `order_lifecycle`. NULL means the installed register has no row for this (type, status) pair, which probe C counts
 - `is_terminal` - Whether this status is a lifecycle's last word, so a forward-only rule can be stated without listing statuses in code
@@ -616,11 +616,11 @@ SELECT order_number, order_type, status, customer_name, open_amount
 - `vendor_id` - The `suppliers` row on the selling end, which is not the same kind of key as `customer_id` - one is a party id, the other a supplier row id, and the CHECK makes them mutually exclusive
 - `vendor_code` - The supplier's own code
 - `vendor_name` - The supplier's party name, resolved through `suppliers.entity_id`
-- `warehouse_id` - Which warehouse it is inside, with the tenant in the same key - a bench cannot name somebody else's building
-- `warehouse_name` - And its name
-- `currency_code` - The currency this supplier is paid in, defaulted to the party's and CHECKed against the master
+- `warehouse_id` - The document's default warehouse: a line that names none is issued out of or received into this one, which is why the fulfilment doors take an optional override. The edge carries `tenant_id` in the key, like every edge 0027 onward added
+- `warehouse_name` - That warehouse's name, joined
+- `currency_code` - The currency every line price on this document is in, an FK to `currencies`. Per-document rather than per-line because a mixed-currency order needs FX and nothing here does it (0018). `total_amount`, `fulfilled_amount` and `open_amount` are LABELLED by this column and never converted by it
 - `ordered_date` - The agreement's date. Not `created_at`, which is when the row was written
-- `required_date` - The line's need-by date
+- `required_date` - The date the document is needed by, which an individual line may override. It is not `created_at`, and 0030's release selector drains on it (FEFO) after priority
 - `closed_at` - When a terminal status was reached; NULL while the document is open
 - `priority` - 1 highest to 4 lowest, and the allocation order 0030's release selector uses after the date
 - `notes` - Free text on the row
@@ -628,7 +628,7 @@ SELECT order_number, order_type, status, customer_name, open_amount
 - `created_by` - The connection that wrote it - `application_name`, which the pool sets and a tool argument cannot
 - `created_at` - When the row was written
 - `updated_at` - When the row last changed, by 0010's touch trigger
-- `version` - Writes to the underlying row, maintained by 0011's trigger - not an optimistic-lock token, and `update_customer`'s p_version is a different mechanism
+- `version` - How many times the row has been written, raised by 0011's `afpc_bump_version` trigger. On `orders` this IS the optimistic-lock token: `transition_order`'s `p_expected_version` is compared against it, and the comparison happens before the direction rules, so a caller working from a stale read is told that and nothing else
 - `line_count` - How many lines the document has, summed in one grouped pass rather than stored
 - `total_amount` - What the document is worth, summed from the lines' generated `line_amount` and expressed in the header's `currency_code`. Derived here rather than stored on the row, because a stored aggregate is a second truth about the rows it summarises
 - `total_quantity` - Units ordered across every line. Different lines are counted in different units, so this is a piece count and not a comparable measure - the same reason `vw_item_movement_summary` does not sum heterogeneous quantities
@@ -654,18 +654,18 @@ SELECT order_number, line_number, line_type, description, quantity_open, line_st
 **Columns:** (in declared order, read from `pg_attribute`, like every other list on this page;
 `code:agent_docs_match_surface` re-checks them, so a rename fails here rather than in production)
 - `tenant_id` - Whose row this is. Every tenant-coded view exposes it last (0009), which is what makes an agent's and an auditor's result sets differ without two views
-- `order_id` - The WORK order this plan belongs to
+- `order_id` - The document this line belongs to, with the header's own type and status joined beside it - which is what makes "what is still open on our purchase orders" one statement
 - `order_number` - The header's number, joined so a line listing does not need a second read
 - `order_type` - The header's type. A line's own `line_type` says what it is; this says what document it belongs to
 - `order_status` - The header's status, in the same one join - which is what makes "what is still open on our purchase orders" one statement
 - `order_line_id` - The `order_items` primary key, and the value `inventory_reservations.order_line_id` names once a commitment is attributed
 - `line_number` - Position within the document, assigned by the door as max+1
-- `line_type` - COMPONENT or PRODUCT - what the line this operation works on does to stock
-- `item_id` - The `inventory_items` row the line is for; NULL on a service line, and a service line's commitments are always 0, which is the honest answer rather than an error
+- `line_type` - STANDARD, COMPONENT or PRODUCT. On a sales or purchase line it is STANDARD; on a work order it is the seam between what the document consumes and what it yields, and `afpc_line_type_matches_document` refuses the mismatch rather than filing a work order's component as a sale
+- `item_id` - The `inventory_items` row, or NULL for a line that is not a catalog item. A blank one is not an unfilled field: `order_items_names_something` requires `description` in its place, which is 0028's answer to a purchase order that procures services
 - `sku` - The item's SKU
-- `item_name` - The item master's name, or the line's own description when there is no item
+- `item_name` - The item master's name, `it.name` - so NULL on a line that has no item. What such a line says about itself is `description`, and a reader who assumed the two were coalesced is reading a sentence the view does not write
 - `item_product_type` - GOODS or SERVICE from the item master - the axis a purchase order procures along. NULL on a line with no item
-- `description` - What the operation is, which the LINE provides; an operation carries no prose of its own, so there is one place to read
+- `description` - The line's own words. Required when `item_id` is NULL, which is what keeps a one-off plumber billable and out of the item master, where he would become an item called MISCELLANEOUS
 - `quantity` - What the line promises, carried from `order_items`
 - `unit_of_measure` - Which unit that quantity is counted in, from the master - so a number cannot be filed in an undefined unit
 - `unit_price` - Price per unit, in the header's currency
@@ -674,15 +674,15 @@ SELECT order_number, line_number, line_type, description, quantity_open, line_st
 - `quantity_cancelled` - What is off the line
 - `quantity_open` - `quantity` minus fulfilled minus cancelled
 - `line_state` - OPEN, PARTIAL, FULFILLED, CANCELLED or UNFULFILLED_CLOSED, named here from the three quantities rather than stored in a fourth column that could disagree with them
-- `warehouse_id` - Which warehouse it is inside, with the tenant in the same key - a bench cannot name somebody else's building
+- `warehouse_id` - Where this line's stock is held, or NULL to mean the document's own - the fulfilment doors read it in that order
 - `warehouse_code` - That warehouse's code
 - `lot_number` - Which lot the line wants, when it wants a particular one; NULL means any lot, and the pick drains FEFO
 - `serial_numbers` - Serials on the line, if it carries any - jsonb because a serial is a list and the schema has no reason to own its shape
-- `required_date` - The line's need-by date
+- `required_date` - This line's need-by date, which overrides the header's for this line alone and is what the release selector drains on
 - `notes` - Free text on the row
 - `created_at` - When the row was written
 - `updated_at` - When the row last changed, by 0010's touch trigger
-- `version` - Writes to the underlying row, maintained by 0011's trigger - not an optimistic-lock token, and `update_customer`'s p_version is a different mechanism
+- `version` - Writes to the line's row, raised by `afpc_bump_version`. The counters 0030's doors raise move it with them, so a line that says it has not changed since you read it has not
 
 **Use Case:** order_lines. The definitions live in `db/migrations/0028_orders.sql`,
 `0029_work_orders.sql` and `0030_order_fulfilment.sql`; the rules they encode are in those files'
@@ -713,12 +713,12 @@ SELECT supplier_code, party_name, payment_terms, lead_time_days
 - `party_type` - The party's own `entity_type` value. Read it rather than inferring "supplier" from it: the CHECK on `entities.entity_type` admits one value per row, which is exactly why this table exists
 - `payment_terms` - How the supplier expects to be paid - free text on purpose, because it belongs to the agreement, not to a vocabulary
 - `lead_time_days` - How long an order to this supplier normally takes, which a replenishment decision reads and 0030's receipt date does not enforce
-- `currency_code` - The currency this supplier is paid in, defaulted to the party's and CHECKed against the master
+- `currency_code` - The currency their invoices come in, an FK to `currencies`. NOT NULL with a column default of `USD`, and `add_supplier` passes `coalesce(p_currency_code, 'USD')` so the door and the column cannot disagree. There is deliberately no party-level currency to inherit: `entities` has no currency column, and a relationship attribute invented for the sake of a default would be a second place to say the same thing
 - `is_active` - false retires the supplier without deleting agreements that name it; 0008's rule for a thing that cannot leave a trail
 - `notes` - Free text on the row
 - `created_at` - When the row was written
 - `updated_at` - When the row last changed, by 0010's touch trigger
-- `version` - Writes to the underlying row, maintained by 0011's trigger - not an optimistic-lock token, and `update_customer`'s p_version is a different mechanism
+- `version` - Writes to the supplier row, raised by `afpc_bump_version`. Retiring one is an UPDATE, so the number moves with `is_active`
 
 **Use Case:** suppliers. The definitions live in `db/migrations/0028_orders.sql`,
 `0029_work_orders.sql` and `0030_order_fulfilment.sql`; the rules they encode are in those files'
@@ -738,18 +738,18 @@ SELECT work_centre_code, warehouse_code, capacity_hours_per_day, open_operations
 **Columns:** (in declared order, read from `pg_attribute`, like every other list on this page;
 `code:agent_docs_match_surface` re-checks them, so a rename fails here rather than in production)
 - `tenant_id` - Whose row this is. Every tenant-coded view exposes it last (0009), which is what makes an agent's and an auditor's result sets differ without two views
-- `work_centre_id` - Where it runs
-- `work_centre_code` - What the plan calls the bench
+- `work_centre_id` - The `work_centres` primary key
+- `work_centre_code` - What a human calls the bench: upper-cased and shaped by `work_centres_code_format`, unique per tenant (`work_centres_code_per_tenant`), and the key a plan resolves a place through
 - `name` - Its name
 - `warehouse_id` - Which warehouse it is inside, with the tenant in the same key - a bench cannot name somebody else's building
 - `warehouse_code` - That warehouse's code
 - `warehouse_name` - And its name
 - `capacity_hours_per_day` - How many hours of work it can absorb a day. Nothing enforces it yet, which is why it is capacity *per day* and not a promise
-- `is_active` - false retires the supplier without deleting agreements that name it; 0008's rule for a thing that cannot leave a trail
+- `is_active` - false retires a centre without deleting the operations that name it - 0008's rule for a thing that cannot leave a trail by disappearing, stated here for a work bench rather than for a supplier
 - `notes` - Free text on the row
 - `created_at` - When the row was written
 - `updated_at` - When the row last changed, by 0010's touch trigger
-- `version` - Writes to the underlying row, maintained by 0011's trigger - not an optimistic-lock token, and `update_customer`'s p_version is a different mechanism
+- `version` - Writes to the centre's row, raised by `afpc_bump_version`
 - `open_operations` - Operations here that are not COMPLETED - the queue a scheduling question starts from
 
 **Use Case:** work_centres. The definitions live in `db/migrations/0028_orders.sql`,
@@ -776,17 +776,17 @@ SELECT order_number, sequence, work_centre_code, planned_hours, actual_hours, st
 - `order_number` - The header's number, joined so a line listing does not need a second read
 - `operation_id` - The `work_order_operations` row
 - `sequence` - Position in the plan, starting at 1; 0030's production door does not read it, and §7 says why
-- `order_line_id` - The `order_items` primary key, and the value `inventory_reservations.order_line_id` names once a commitment is attributed
-- `line_type` - COMPONENT or PRODUCT - what the line this operation works on does to stock
+- `order_line_id` - The line this operation works on, or NULL for a step that acts on the document rather than on a stock line. `book_work_order_production` moves stock through the LINE, so a plan whose operations name nothing cannot be reconciled against it
+- `line_type` - The kind of LINE this operation acts on - COMPONENT means it consumes stock, PRODUCT means it yields it. Joined from `vw_order_lines`, so it is the document's claim and not a second one stored on the operation
 - `line_sku` - The line's item SKU, or NULL for a line with no item
 - `line_item_name` - And its name
-- `description` - What the operation is, which the LINE provides; an operation carries no prose of its own, so there is one place to read
-- `work_centre_id` - Where it runs
-- `work_centre_code` - What the plan calls the bench
+- `description` - What the operation IS, in the planner's words, and it is joined from `work_order_operations` rather than from the line - the two can say different things, so both are worth reading. Nullable: the door stores `NULLIF(btrim(...))`, so an operation with no words is possible and reads as one
+- `work_centre_id` - Where the operation runs, or NULL for a step the plan never placed at a bench
+- `work_centre_code` - The centre's code, joined by the same LEFT JOIN that brings its name - so NULL says either no bench was assigned to this step or the centre is gone, and the two are told apart by `work_centre_id`
 - `work_centre_name` - And its name
 - `planned_hours` - The estimate. NULL is 'not estimated' and is kept distinct from 0, which is 'no time'
 - `actual_hours` - Recorded against real work
-- `hours_variance` - `planned_hours - actual_hours`, NULL when nothing was estimated - because 0 and NULL mean different sentences
+- `hours_variance` - `actual_hours - planned_hours`, so a POSITIVE number means the work took longer than estimated. NULL when either side is NULL, which is the difference between 'not estimated' and 'estimated at zero' - the two are different sentences and this column keeps them apart rather than blending them into 0
 - `quantity_produced` - Output booked against this operation
 - `quantity_scrapped` - Production booked as scrap
 - `status` - PENDING, IN_PROGRESS or COMPLETED. The operation's own state, not the order's, and the two can disagree only for the reason `start`'s door refuses
@@ -794,7 +794,7 @@ SELECT order_number, sequence, work_centre_code, planned_hours, actual_hours, st
 - `completed_at` - When it finished
 - `created_at` - When the row was written
 - `updated_at` - When the row last changed, by 0010's touch trigger
-- `version` - Writes to the underlying row, maintained by 0011's trigger - not an optimistic-lock token, and `update_customer`'s p_version is a different mechanism
+- `version` - Writes to the operation's row, raised by `afpc_bump_version`
 
 **Use Case:** work_order_plan. The definitions live in `db/migrations/0028_orders.sql`,
 `0029_work_orders.sql` and `0030_order_fulfilment.sql`; the rules they encode are in those files'
@@ -815,13 +815,13 @@ SELECT order_number, line_number, quantity, quantity_committed, quantity_shipped
 **Columns:** (in declared order, read from `pg_attribute`, like every other list on this page;
 `code:agent_docs_match_surface` re-checks them, so a rename fails here rather than in production)
 - `tenant_id` - Whose row this is. Every tenant-coded view exposes it last (0009), which is what makes an agent's and an auditor's result sets differ without two views
-- `order_id` - The WORK order this plan belongs to
+- `order_id` - The document the line belongs to, carried so a caller can join the commitment back to the header without a second read
 - `order_number` - The header's number, joined so a line listing does not need a second read
 - `order_type` - The header's type. A line's own `line_type` says what it is; this says what document it belongs to
 - `order_status` - The header's status, in the same one join - which is what makes "what is still open on our purchase orders" one statement
 - `order_line_id` - The `order_items` primary key, and the value `inventory_reservations.order_line_id` names once a commitment is attributed
 - `line_number` - Position within the document, assigned by the door as max+1
-- `line_type` - COMPONENT or PRODUCT - what the line this operation works on does to stock
+- `line_type` - The line's kind, from `order_items`. A COMPONENT or PRODUCT line's commitments are a work order's stock movements; STANDARD is a document's own goods
 - `item_id` - The `inventory_items` row the line is for; NULL on a service line, and a service line's commitments are always 0, which is the honest answer rather than an error
 - `item_name` - The item master's name, or the line's own description when there is no item
 - `quantity` - What the line promises, carried from `order_items`
