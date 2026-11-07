@@ -122,7 +122,8 @@ check "B1 5.8  tenant_id everywhere" "0003_tenant_foundation" \
         ('entity_relationships'),('communications'),('followups'),('warehouses'),
         ('locations'),('item_categories'),('inventory_items'),('inventory_movements'),
         ('inventory_on_hand'),('inventory_reservations'),('human_sessions'),('bot_actions'),
-        ('audit_summary'),('agent_interactions'),('agent_memories'),('suppliers')) AS t(tbl)
+        ('audit_summary'),('agent_interactions'),('agent_memories'),('suppliers'),
+        ('orders'),('order_items'),('document_counters')) AS t(tbl)
       WHERE NOT EXISTS (
         SELECT 1 FROM information_schema.columns c
          WHERE c.table_schema='public' AND c.table_name=t.tbl
@@ -145,7 +146,8 @@ check "B1 5.8  tenant_id everywhere" "0003_tenant_foundation" \
 # tenant can never reuse code MAIN. Asserted by key shape, not by index count.
 check "B1b 5.8 natural keys tenant-scoped" "0003_tenant_foundation" \
     "SELECT count(*) FROM (VALUES ('warehouses'),('item_categories'),('inventory_items'),
-        ('locations'),('entity_relationships'),('audit_summary'),('suppliers')) AS t(tbl)
+        ('locations'),('entity_relationships'),('audit_summary'),('suppliers'),
+        ('orders'),('order_items')) AS t(tbl)
       WHERE NOT EXISTS (SELECT 1 FROM pg_index i
           JOIN pg_attribute a ON a.attrelid=i.indrelid AND a.attnum=i.indkey[0]
           JOIN pg_class c ON c.oid=i.indrelid
@@ -278,7 +280,7 @@ check "B19 5.7 global tables declared" "0009_rls_enforcement" \
                            AND a.attnum>0 AND NOT a.attisdropped)
         AND c.relname NOT IN ('schema_migrations','_schema_graph',
                               'units_of_measure','costing_methods',
-                              'currencies','currency_rates')" \
+                              'currencies','currency_rates','order_lifecycle')" \
     "tables outside the tenant model that nothing has declared global"
 
 # 5.7's third failure was a policy keyed off a setting no code sets. The general form of that
