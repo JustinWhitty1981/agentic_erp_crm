@@ -56,6 +56,8 @@ DO $$
 DECLARE
     v_wh    uuid;
     v_it    uuid;
+    v_party bigint;
+    v_order uuid;
 BEGIN
     SET LOCAL app.tenant_id = '00000000-0000-0000-0000-000000000001';
     INSERT INTO warehouses (warehouse_code, name, warehouse_type)
@@ -64,9 +66,19 @@ BEGIN
         VALUES ('T10-B', '5.10 item B', 'STOCKED') RETURNING item_id INTO v_it;
     INSERT INTO inventory_on_hand (item_id, warehouse_id, quantity_on_hand)
         VALUES (v_it, v_wh, 5);
+    -- The reservation has to name a document that exists: 0030's trigger refuses one that does not,
+    -- and an order id raised by gen_random_uuid() here was the same defect this programme exists to
+    -- close. 5_7 block B carries the longer note, including how both files were found - the harness's
+    -- phrase mapping reported them CLOSED while an ERROR aborted the block, which is a false green
+    -- arrived through a different door than the one 4_8 §8c warns about.
+    INSERT INTO entities (name, entity_type)
+        VALUES ('5.10 block B party', 'customer') RETURNING id INTO v_party;
+    SELECT order_id INTO v_order
+      FROM create_order('SALES', v_party, NULL, NULL, NULL, NULL, NULL,
+                        '5.10 block B fixture', 'MANUAL', NULL);
     INSERT INTO inventory_reservations (item_id, warehouse_id, order_type, order_id,
                                         reserved_quantity)
-        VALUES (v_it, v_wh, 'SALES', gen_random_uuid(), 2);
+        VALUES (v_it, v_wh, 'SALES', v_order, 2);
 
     BEGIN
         DELETE FROM inventory_items WHERE item_id = v_it;

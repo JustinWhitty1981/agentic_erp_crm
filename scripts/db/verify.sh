@@ -541,6 +541,34 @@ check "B29 ADR-002 agent memory is append-only by grant" "0023_agent_memory" \
         AND r.rolname <> 'postgres'" \
     "roles other than the owner who could rewrite or erase the agent's memory"
 
+# 0031's grant, watched structurally, because the alternative is that the retention policy stops being
+# enforced and the only witness is a `42501` inside an agent's own trajectory row. Three facts have to
+# hold together for that grant to mean what 0031's §3 measured, and a later migration, role edit, or
+# "cleanup" can break any one of them while the other two look untouched: the runtime role can call the
+# sweep, the sweep runs as its invoker, and row security still filters the DELETE it performs. Dropping
+# any one turns a tenant-scoped collection into a cluster-wide one, which is 0011's original objection
+# arriving by a different route - so this check is the objection's insurance premium.
+check "B30 6.1  the sweep keeper's grant is the narrow one 0031 argued" "0031_sweep_keeper_grant" \
+    "WITH f AS (SELECT to_regprocedure('idempotency_sweep(timestamptz)') AS oid)
+     SELECT (CASE WHEN f.oid IS NULL THEN 1 ELSE 0 END)
+          + (CASE WHEN f.oid IS NOT NULL
+                    AND NOT has_function_privilege('afpc_app', f.oid, 'EXECUTE')
+                  THEN 1 ELSE 0 END)
+          + (CASE WHEN f.oid IS NOT NULL
+                    AND EXISTS (SELECT 1 FROM aclexplode((SELECT proacl FROM pg_proc WHERE oid = f.oid)) x
+                                 WHERE x.grantee = 0 AND x.privilege_type = 'EXECUTE')
+                  THEN 1 ELSE 0 END)
+          + (CASE WHEN f.oid IS NOT NULL
+                    AND (SELECT prosecdef FROM pg_proc WHERE oid = f.oid)
+                  THEN 1 ELSE 0 END)
+          + (CASE WHEN (SELECT rolbypassrls FROM pg_roles WHERE rolname = 'afpc_app')
+                  THEN 1 ELSE 0 END)
+          + (CASE WHEN NOT (SELECT relrowsecurity AND relforcerowsecurity
+                              FROM pg_class WHERE oid = 'idempotency_keys'::regclass)
+                  THEN 1 ELSE 0 END)
+       FROM f" \
+    "afpc_app cannot sweep, or the sweep is no longer the tenant-scoped INVOKER call 0031's §3 measured"
+
 # ---------- C. live inventory ----------------------------------------------------
 # Domain objects only. Extension-owned functions/views would swamp the signal: 194
 # of the 204 functions in public belong to pgvector, and the counts below are the

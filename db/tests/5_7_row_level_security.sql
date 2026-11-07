@@ -77,15 +77,30 @@ DECLARE
     v_it     uuid;
     v_tenant uuid := '00000000-0000-0000-0000-000000000001';
     v_seen   int;
+    v_party  bigint;
+    v_order  uuid;
 BEGIN
     INSERT INTO warehouses (tenant_id, warehouse_code, name, warehouse_type)
         VALUES (v_tenant, 'T7-B', '5.7 block B', 'PRIMARY') RETURNING warehouse_id INTO v_wh;
     INSERT INTO inventory_items (tenant_id, sku, name, product_type)
         VALUES (v_tenant, 'T7-B', '5.7 item B', 'STOCKED') RETURNING item_id INTO v_it;
+    -- A real document to hold the stock against, raised through 0028's door. The probe used to pass
+    -- gen_random_uuid() here, which was the exact shape 0015 left thirteen units stuck in and which
+    -- 0030's enforcement now refuses - so keeping it would have made this file the one writer of the
+    -- defect the orders programme exists to close, and the refusal would have looked like a failure of
+    -- row security rather than of the fixture. Both files that did this were found the same way: the
+    -- harness's phrase mapping reported them CLOSED while an ERROR aborted the block, which is the
+    -- false green 4_8 §8c's comment warns about, arrived through a different door.
+    INSERT INTO entities (tenant_id, name, entity_type)
+        VALUES (v_tenant, '5.7 block B party', 'customer') RETURNING id INTO v_party;
+    SELECT order_id INTO v_order
+      FROM create_order('SALES', v_party, NULL, NULL, NULL, NULL, NULL,
+                        '5.7 block B fixture', 'MANUAL', NULL);
+
     -- Written as the owner, so RLS cannot filter the row on the way in.
     INSERT INTO inventory_reservations (tenant_id, item_id, warehouse_id, order_type, order_id,
                                         reserved_quantity, reserved_by)
-        VALUES (v_tenant, v_it, v_wh, 'SALES', gen_random_uuid(), 2, 'someone-else');
+        VALUES (v_tenant, v_it, v_wh, 'SALES', v_order, 2, 'someone-else');
 
     BEGIN
         EXECUTE 'SET LOCAL ROLE afpc_app';
