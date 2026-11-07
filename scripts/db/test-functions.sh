@@ -264,6 +264,35 @@ CASES=(
 "4_8_inventory_agent_surface|parameter positions are not what|4.3|0015_reservation_locking"
 "4_8_inventory_agent_surface|the reservation door answers|4.3|0015_reservation_locking"
 "4_7_cs_agent_surface|normalisation is not agreed|ADR-002|0023_agent_memory"
+# 7_1 is the orders programme's surface (agents/sales), and its rows are the pair 4_7's are: a
+# phrase for the state a database before 0027-0030 reproduces, and a phrase for the mechanism
+# existing and being broken. The pre-0028 guard phrases cannot fire after the migrations and the
+# failure branches cannot fire before them, so each pair reads CLOSED on a current database,
+# KNOWN-OPEN on an old one, and REGRESSION on the day a door stops meaning what its tool says.
+# 1h's census and 1g's position phrase are the forward-looking kind 4_8 §8c/§8b established: they
+# credit no past finding, and on the day one fires the row to edit names whatever migration moved.
+"7_1_orders|there is no orders table at all|orders|0028_orders"
+"7_1_orders|the counterparty rule is not a constraint|orders|0028_orders"
+"7_1_orders|naming a customer was accepted|orders|0028_orders"
+"7_1_orders|legal counterparty shapes now fails|orders|0028_orders"
+"7_1_orders|no lifecycle register|orders|0028_orders"
+"7_1_orders|wrote a stock-moving status|orders|0028_orders"
+"7_1_orders|accepted expected_version 1|orders|0028_orders"
+"7_1_orders|there is no order detail table|orders|0028_orders"
+"7_1_orders|neither an item nor a description was accepted|orders|0028_orders"
+"7_1_orders|accepted a COMPONENT line|orders|0029_work_orders"
+"7_1_orders|none of the fulfilment doors are installed|orders|0030_order_fulfilment"
+"7_1_orders|the write seat cannot execute|orders|0030_order_fulfilment"
+"7_1_orders|change state with no claim attached|orders|0030_order_fulfilment"
+"7_1_orders|there is no reconciliation view|orders|0030_order_fulfilment"
+"7_1_orders|commitment of 4 reads as committed|orders|0030_order_fulfilment"
+"7_1_orders|is still unresolved, which is the|orders|0030_order_fulfilment"
+"7_1_orders|nothing enforces that a commitment names a document|orders|0030_order_fulfilment"
+"7_1_orders|a STOCK hold naming no document is refused|orders|0030_order_fulfilment"
+"7_1_orders|naming no document answered|orders|0030_order_fulfilment"
+"7_1_orders|positions are not what pkg/orders calls them|orders|0030_order_fulfilment"
+"7_1_orders|the read surface and the code disagree|orders|0030_order_fulfilment"
+
 "4_7_cs_agent_surface|append-only is a comment, not a wall|ADR-002|0023_agent_memory"
 "4_7_cs_agent_surface|attaches by census is missing|ADR-002|0023_agent_memory"
 )

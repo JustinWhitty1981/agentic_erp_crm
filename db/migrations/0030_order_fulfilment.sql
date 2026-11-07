@@ -299,7 +299,8 @@ $$;
 -- STOCK and TRANSFER holds are left alone, and that is not an oversight: 0015's CASE files a
 -- TRANSFER hold's document id as 'TRANSFER' and a STOCK hold's as NULL, and there is no transfers
 -- table for either to point at. Requiring a pointer to a nonexistent table would be 0029's objection
--- to an anticipatory column, applied to a trigger.
+-- to an anticipatory column, applied to a trigger. What §4 supplies is the half that made this
+-- sentence only theoretically true: a type allowed to name no document has to be ABLE to.
 CREATE OR REPLACE FUNCTION afpc_reservation_names_a_document()
 RETURNS trigger
 LANGUAGE plpgsql AS $$
@@ -362,6 +363,44 @@ COMMENT ON TRIGGER afpc_reservation_names_a_document ON inventory_reservations I
 -- ---------------------------------------------------------------------------
 -- 4. And the same for the line column, in DDL where DDL can do it
 -- ---------------------------------------------------------------------------
+-- First, the pointer's own nullability, which this file's §3b comment asserts and the column denied.
+-- 0015's ledger CASE files a STOCK hold's reference as NULL with the note "an internal hold names no
+-- document", and §3b's trigger lets STOCK and TRANSFER through for the same reason - but `order_id`
+-- has been NOT NULL since 0001, so the type DEFINED by naming no document could not be written at all:
+-- a STOCK reservation answered 23502, and the door's own message would have concatenated to NULL if it
+-- had not. Dropping the NOT NULL is the whole change. The CHECK under it keeps the two columns from
+-- disagreeing about which types have documents, and that half is true within one row, so it is DDL's
+-- and not the trigger's.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_attribute
+                WHERE attrelid = 'inventory_reservations'::regclass
+                  AND attname = 'order_id' AND attnotnull) THEN
+        ALTER TABLE inventory_reservations ALTER COLUMN order_id DROP NOT NULL;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                    WHERE conname = 'inventory_reservations_document_type_names_one') THEN
+        ALTER TABLE inventory_reservations
+            ADD CONSTRAINT inventory_reservations_document_type_names_one
+            CHECK (order_id IS NOT NULL
+                   OR order_type NOT IN ('SALES', 'PURCHASE', 'WORK')) NOT VALID;
+        -- NOT VALID then VALIDATE, in that order, because the existing rows are the point: a
+        -- document-typed commitment with no document would mean §3's backfill missed one, which is a
+        -- failure to stop the migration on rather than one to leave for a report to find.
+        ALTER TABLE inventory_reservations
+            VALIDATE CONSTRAINT inventory_reservations_document_type_names_one;
+    END IF;
+END
+$$;
+
+COMMENT ON CONSTRAINT inventory_reservations_document_type_names_one ON inventory_reservations IS
+    'A commitment whose type is a document names a document; one whose type is not may name none. This '
+    'is the half of the pair that is true within the row. The other half - that a named document '
+    'exists and is of that type - has to read another table, so it is §3b''s trigger. Two mechanisms, '
+    'one per kind of rule, which is 0007''s line drawn on a reservation. Built by 0030, after its own '
+    'probe found that a STOCK hold was impossible to make.';
+
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -1603,7 +1642,13 @@ DECLARE
         ['(p_item_id, p_warehouse_id, p_location_id, p_order_type, p_order_id,
              p_quantity, p_reserved_by, 1)',
          '(p_item_id, p_warehouse_id, p_location_id, p_order_type, p_order_id,
-             p_quantity, p_reserved_by, 1, p_order_line_id)']
+             p_quantity, p_reserved_by, 1, p_order_line_id)'],
+        -- And the sentence the door answers with. `|| p_order_id` is a NULL on an internal hold, and
+        -- concatenating it made the whole message NULL - a SUCCESS with nothing to say, which the
+        -- trajectory then records as an empty string. §4 is what made this row reachable, so §4's own
+        -- consequence is fixed here rather than in a later file that would have to explain it.
+        [''' order '' || p_order_id',
+         'coalesce('' order '' || p_order_id, '' as an internal hold'')']
     ];
     i int;
 BEGIN
@@ -1626,7 +1671,7 @@ BEGIN
     -- same reservation of the same stock — where returning the first answer is the correct answer and
     -- not a stale one.
     v_orig := v_src;
-    FOR i IN SELECT unnest(ARRAY[1,2,3]) LOOP
+    FOR i IN SELECT unnest(ARRAY[1,2,3,4]) LOOP
         v_n := length(v_src) - length(replace(v_src, v_pair[i][1], ''));
         IF v_n <> length(v_pair[i][1]) THEN
             RAISE EXCEPTION '5.5 failed: needle % occurs % time(s) in the installed body, expected '
@@ -1638,7 +1683,7 @@ BEGIN
         v_src := replace(v_src, v_pair[i][1], v_pair[i][2]);
     END LOOP;
     IF v_src = v_orig THEN
-        RAISE EXCEPTION '5.5 failed: all three needles matched and nothing changed';
+        RAISE EXCEPTION '5.5 failed: all four needles matched and nothing changed';
     END IF;
 
     EXECUTE format('DROP FUNCTION %s', v_sig);
@@ -2560,6 +2605,57 @@ BEGIN
     v_n := v_n + 1;
 
     ------------------------------------------------------------------
+    -- O. the hold that names no document, which the column made impossible until §4 dropped the NOT
+    --    NULL, and the direction that must not have loosened with it. Both halves matter: an internal
+    --    hold is a real business fact that this schema could not express, and a SALES commitment that
+    --    names no document is the exact leak §3 exists to close - so the probe that proves the first
+    --    is worth nothing unless it also proves the second.
+    ------------------------------------------------------------------
+    v_res := 'not-run';
+    BEGIN
+        SELECT reservation_id, message INTO v_rid, v_msg
+          FROM reserve_inventory_for_order(v_item, v_wh, 2, 'STOCK', NULL, '0030-probe');
+        IF v_rid IS NULL THEN
+            v_res := 'a STOCK hold with no document answered no reservation_id'; RAISE EXCEPTION 'stop';
+        END IF;
+        IF v_msg IS NULL THEN
+            v_res := 'the door answered a SUCCESS with a NULL sentence - || on a NULL order_id '
+                     'poisons the whole concatenation, and §4 is what made that branch reachable';
+            RAISE EXCEPTION 'stop';
+        END IF;
+        IF (SELECT order_id FROM inventory_reservations WHERE reservation_id = v_rid) IS NOT NULL THEN
+            v_res := 'a STOCK hold was stored with a document id, which is the meaningless pointer '
+                     'this file was written to remove, arriving by a different route';
+            RAISE EXCEPTION 'stop';
+        END IF;
+        v_res := 'pass';
+        RAISE EXCEPTION 'discard' USING ERRCODE = 'P0002';
+    EXCEPTION WHEN OTHERS THEN
+        IF SQLERRM NOT IN ('discard','stop') THEN
+            v_res := 'raised ' || SQLSTATE || ': ' || left(SQLERRM, 140);
+        END IF;
+    END;
+    IF v_res <> 'pass' THEN RAISE EXCEPTION 'O failed: %', v_res; END IF;
+
+    v_res := 'not-run';
+    BEGIN
+        SELECT reservation_id INTO v_rid
+          FROM reserve_inventory_for_order(v_item, v_wh, 1, 'SALES', NULL, '0030-probe');
+        v_res := 'a SALES commitment naming no document was accepted, so §4 CHECKed the wrong way '
+                 'and relaxed the rule §3b depends on';
+        RAISE EXCEPTION 'stop';
+    EXCEPTION WHEN OTHERS THEN
+        IF SQLERRM = 'stop' THEN NULL;
+        ELSIF SQLSTATE IN ('23502','23503','23514') THEN v_res := 'pass';
+        ELSE v_res := 'refused with ' || SQLSTATE || ': ' || left(SQLERRM, 120) ||
+                      ' - a refusal, but not the one the wall is';
+        END IF;
+    END;
+    IF v_res = 'not-run' THEN v_res := 'the call reached no assertion at all'; END IF;
+    IF v_res <> 'pass' THEN RAISE EXCEPTION 'O failed: %', v_res; END IF;
+    v_n := v_n + 1;
+
+    ------------------------------------------------------------------
     -- Cleanup. The subtransaction pattern above means almost nothing here needs deleting; what does
     -- is probe J's second tenant and probe C's leftovers if a discard ever stopped early. Scoped by
     -- tenant and by marker, deepest child first — the ordering 0028 argues for and 0029 broke.
@@ -2634,13 +2730,14 @@ BEGIN
             (SELECT count(*) FROM vw_order_commitments WHERE ledger_agreement = 'DISAGREES');
     END IF;
 
-    IF v_n <> 14 THEN
-        RAISE EXCEPTION 'expected 14 behavioural verifications, completed %', v_n;
+    IF v_n <> 15 THEN
+        RAISE EXCEPTION 'expected 15 behavioural verifications, completed %', v_n;
     END IF;
     RAISE NOTICE '0030: % checks passed - the four commitments that named nothing now name documents '
                  'and lines, a commitment cannot be made against a document that does not exist, the '
                  'thirteen units held since 0015 can be released by a door, the door that makes a new '
-                 'commitment can name the line it holds stock for, a shipped line''s counter '
+                 'commitment can name the line it holds stock for, an internal hold can be made at '
+                 'all and a document-typed one still cannot name nothing, a shipped line''s counter '
                  'reconciles against the ledger that made it, and the claim backlog 0011''s policy '
                  'promised to collect is collected', v_n;
 END
