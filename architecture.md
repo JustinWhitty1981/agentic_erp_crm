@@ -132,10 +132,13 @@ What the two agents read and write:
 - `audit_log` - one row per row-change on every tenant-coded table except itself and `idempotency_keys`, chained per tenant and month
 - `idempotency_keys` - ADR-005 claims: one row per (tenant, operation, key) with the cached answer and a lease
 - `inventory_items`, `inventory_on_hand`, `inventory_movements`, `inventory_reservations`, `warehouses`, `item_categories`, `units_of_measure`, `costing_methods`, `currencies`, `currency_rates` - the stock side, which is what makes the second agent possible
+- `orders`, `order_items`, `order_lifecycle`, `suppliers`, `work_centres`, `work_order_operations` - the documents, one header and one detail pair carrying SALES, PURCHASE and WORK (`0027`-`0030`). Built and watched, and read by **no agent yet**: the sales/procurement agent that would drive them is the next one, which is the honest way to say that a schema can be finished before the loop that uses it is
 - `followups` - exists, read by `vw_pending_followups`, and has **no writer** in the schema; `add_communication` sets the follow-up flags on the interaction and stops there (0021 §5 hands the decision over)
 - `schema_migrations` - what has been applied, and the reason a file cannot be renumbered
 
-**Not in the schema:** `orders`, `products`, `tickets`, `agents`. The first two are still planned.
+**Not in the schema:** `products`, `tickets`, `agents`. Orders *are* now - see the list above - and
+`products` remains `inventory_items`, which is the difference between reading `db/migrations/` and
+reading the July documentation.
 `tickets` was in the vestigial schema and is referenced by nothing in the canonical one - follow-ups
 are `followups`, and 0017 removed the tables that competed with it. `agents` is not a table because
 the agent registry is a process's environment (`AGENT_ROLE`) and a column on every row it writes.

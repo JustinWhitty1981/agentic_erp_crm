@@ -148,9 +148,9 @@ Follow [QUICKSTART.md](QUICKSTART.md) for Docker-based deployment.
    `db/migrations/NNNN_*.sql` function, so start there and not in the Go file (ADR-002)
 2. Give the migration the next free number. `migrate.sh` rejects a file numbered at or below the highest
    applied, which is why the two planned ones became 0024 and 0025 - see db/MIGRATIONS.md. The highest
-   applied today is **0026** (the reservation ledger-order fix, which took 0026 rather than the 0024 that
-   was free because a bug fix and a planned feature are not the same queue), so a new file here is
-   `0027_*` unless one of the planned two has landed first
+   applied today is **0030** (the fourth file of the orders programme; 0026 before it took its number
+   rather than the free 0024 because a bug fix and a planned feature are not the same queue), so a new
+   file here is `0031_*` unless one of the planned two lands first
 3. Wire the tool in `agents/customer_service/backend_go/pkg/crm/tools.go`: read a `vw_*` view or call the
    function, send an idempotency key if it writes (ADR-005), and record what it touched with `turn.Source`
 4. Write the description for a reader that cannot see the schema: what it answers, what it refuses, and
@@ -263,7 +263,7 @@ agent_first/
 ├── db/                             # THE SCHEMA, and the harness that asserts it
 │   ├── README.md                   # single source of truth: which SQL files are superseded
 │   ├── MIGRATIONS.md               # finding to migration, the marker table, and the tracked tasks
-│   ├── migrations/                 # 0000-0018, 0021-0023, 0026 applied in filename order; 0024/0025 planned
+│   ├── migrations/                 # 0000-0018, 0021-0023, 0026-0030 applied in filename order; 0024/0025 planned
 │   ├── tests/                      # N_N_<finding>.sql, one probe per block, VERDICT lines
 │   └── seeds/                      # 01_demo_customers.sql, 02_demo_inventory.sql - data, idempotent, never DDL
 │
@@ -379,7 +379,17 @@ Secrets live in the environment, never in a committed file:
    `inventory_reservations`, plus the master data (`item_categories`, `units_of_measure`,
    `costing_methods`). **There is no `products` table** - items are `inventory_items`, which is the
    difference between reading `db/migrations/` and reading the July documentation
-5. **Support** - Follow-ups (`followups`). Tickets were part of the vestigial schema and are
+5. **Orders** - `orders` + `order_items` (`0028`: SALES, PURCHASE and WORK in one discriminated pair,
+   because `inventory_reservations.order_id` has to resolve and a three-way OR cannot be a foreign key),
+   `order_lifecycle` (global: which statuses each type may hold, with `stock_moving` marking the ones
+   that are consequences of stock and therefore not writable by hand), `suppliers` (`0027`, extending
+   the party root so one party can be customer and supplier at once), and `work_centres` +
+   `work_order_operations` (`0029`). Every reference edge these four added carries `tenant_id` in the
+   key, because a foreign key does not consult row security and 0027 measured a single-column one
+   satisfied by another tenant's row. **There are no `sales_orders` or `purchase_orders` tables**, and
+   `0030`'s doors (`ship_sales_order`, `receive_purchase_order`, `book_work_order_production`,
+   `cancel_inventory_reservation`) are what a reservation has always lacked: a way to be undone
+6. **Support** - Follow-ups (`followups`). Tickets were part of the vestigial schema and are
    referenced by nothing in the canonical one - see `db/migrations/0017_interaction_readpath.sql`.
    `followups` has no writer either, so `vw_pending_followups` is empty by construction and the live
    follow-up answer comes from `get_followup_customers(days)`
@@ -395,6 +405,11 @@ Secrets live in the environment, never in a committed file:
 | `human_sessions` | Vestigial: a human-agent login trail with no login screen behind it. Zero rows |
 | `bot_actions` | Vestigial: an action log the loop does not write. Zero rows |
 | `agent_interactions` | Complete trajectory logging, one row per run, written by the loop |
+| `orders`, `order_items` | The three document types in one header/detail pair; totals and line state are derived in the views, not stored (`0028`) |
+| `order_lifecycle` | Which status each order type may hold and in what order; global master data, declared in B19 rather than given tenant policies (`0028`) |
+| `suppliers` | The party an order buys from, keyed to `entities` with the tenant in the same key (`0027`) |
+| `work_centres`, `work_order_operations` | Where a work order's operations run and the plan they run in (`0029`) |
+| `inventory_reservations` | Stock held for a document. `order_line_id` (`0030`) says which line it is held *for*, which is what makes the reconciliation a query; `updated_at` arrived with the first writer the table ever had |
 | `audit_summary` | Daily aggregation, maintained by `audit_summary_refresh()` - which nothing on this server schedules, so it has zero rows. Same class of gap as `idempotency_sweep`: a policy with no keeper |
 | `followups` | Support tasks - exists, read by `vw_pending_followups`, and has no writer |
 | `tenants`, `locations`, `schema_migrations` | The tenant root (1 row), bin-level storage inside a warehouse (declared, unused: 0 rows, and the stock views work at warehouse grain), and the apply ledger |
@@ -434,6 +449,12 @@ Secrets live in the environment, never in a committed file:
 | `vw_item_availability` | Stock levels across warehouses |
 | `vw_item_movement_summary` | 30-day item movement patterns. `total_inbound`/`total_outbound` exclude `RESERVATION` rows — a commitment makes stock unavailable, it moves nothing — while `net_quantity` still counts them |
 | `vw_low_stock_alerts` | Items below reorder point |
+| `vw_orders` | One row per document of any type, counterparty resolved, totals summed from the lines |
+| `vw_order_lines` | One row per line, its state named from three quantities rather than stored as a fourth |
+| `vw_suppliers` | Supplier facts beside the party they describe (`0027`) |
+| `vw_work_centres` | Where operations run, and how many are queued at each |
+| `vw_work_order_plan` | A work order's planned operations, with the line and centre resolved (`0029`) |
+| `vw_order_commitments` | One row per order line against the stock held for it - attributed and unattributed counted apart, with a verdict on whether the line's counter and the ledger agree (`0030`) |
 
 See [archive/blueprint/docs/views.md](archive/blueprint/docs/views.md) for complete view reference.
 

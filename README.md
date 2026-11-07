@@ -18,12 +18,21 @@ A **Database-First, Agent-Native** business operating system.
   an inventory control agent (`agents/inventory/`, `:4560`). Both are Go backends with a React UI, HTTP
   and SSE transports, and the same agent loop — the second is a sibling fork of the first with the tool
   layer replaced and a check timer added.
-- **A schema that enforces what the documentation claims**: 23 applied migrations (`0000`-`0018`,
-  `0021`-`0023`, `0026`), row-level security `FORCED` on all 21 tenant-coded tables while the six
-  exceptions are declared with their reasons rather than forgotten (five global by decision, one build
-  ledger — `vw_rls_status` publishes every predicate verbatim and gives a verdict), a tamper-evident row
-  trail chained per tenant and month (`audit_log`, `audit_chain_verify()`), and idempotency claims for
-  retryable writes (`vw_idempotency_status` says which functions are guarded and which are not).
+- **A schema that enforces what the documentation claims**: 27 applied migrations (`0000`-`0018`,
+  `0021`-`0023`, `0026`-`0030`), row-level security `FORCED` on all 27 tenant-coded tables while the
+  seven exceptions are declared with their reasons rather than forgotten (five global master-data
+  tables, one build ledger, one legacy graph nothing writes — `vw_rls_status` publishes every predicate
+  verbatim and gives a verdict), a tamper-evident row trail chained per tenant and month (`audit_log`,
+  `audit_chain_verify()`), and idempotency claims for retryable writes (`vw_idempotency_status` says
+  which functions are guarded and which are not).
+- **Orders of all three kinds, in one shape**: `orders` + `order_items` carry SALES, PURCHASE and WORK
+  documents (`0027`–`0030`), each line either a catalog item or a described one, with four doors that
+  finish them — `ship_sales_order`, `receive_purchase_order`, `book_work_order_production`,
+  `cancel_inventory_reservation` — and `vw_order_commitments` reconciling what a line promises against
+  what stock is actually held for it. The schema is built and watched; **the sales/procurement agent
+  that would drive it is the next thing**, so "what did we order from this supplier" is a query today
+  and not yet a tool.
+
 - **A blueprint** for how specialized agents can run operations through conversation — the loop
   that ships: `agents/customer_service/backend_go/pkg/agent/agent.go`, one package deep, with the
   connection pool, the memory store and the trajectory writer beside it. Its ancestor proved the

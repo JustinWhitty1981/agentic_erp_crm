@@ -36,6 +36,13 @@ files in this directory must never contain DDL.
   `0024`/`0025`. If a planned migration is referenced in the prose of an applied one - `0013`
   names `0019` four times as the partitioning decision - the reference is to the decision, and
   `db/MIGRATIONS.md` says which file now carries it.
+- **A foreign key into a tenant-coded table carries `tenant_id` in the key.** Not hygiene: referential
+  integrity does not consult row security, so a single-column edge is satisfied by another tenant's
+  row and nothing reports it (0027 measured `INSERT 0 1` for exactly that, and the same statement
+  through a composite edge answered 23503). The pre-0027 edges are listed as a count in 0028 §11 and
+  probe K keeps the count honest; every edge added since is composite, including the ones to uuid
+  tables whose keys are not enumerable, because a rule whose shape depends on which table is
+  referenced is a rule nobody applies consistently.
 - Wrap in a transaction by default. A file may opt out with a `migrate:no-transaction`
   line in its first 30 statements, which `CREATE INDEX CONCURRENTLY` requires.
 - Roles are cluster-level and do not belong here: see `scripts/db/roles.sql`.

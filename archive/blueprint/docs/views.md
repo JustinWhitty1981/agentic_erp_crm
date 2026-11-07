@@ -589,6 +589,261 @@ in both directions - names the view never had, and columns 0009 added to every t
 
 ---
 
+### vw_orders
+
+One row per document, of any of the three types, with its counterparty resolved and its totals summed from its lines.
+
+```sql
+SELECT order_number, order_type, status, customer_name, open_amount
+  FROM vw_orders
+ WHERE NOT is_terminal
+ ORDER BY priority DESC, required_date;
+```
+
+**Columns:** (in declared order, read from `pg_attribute`, like every other list on this page;
+`code:agent_docs_match_surface` re-checks them, so a rename fails here rather than in production)
+- `tenant_id` - Whose row this is. Every tenant-coded view exposes it last (0009), which is what makes an agent's and an auditor's result sets differ without two views
+- `order_id` - The WORK order this plan belongs to
+- `order_type` - The header's type. A line's own `line_type` says what it is; this says what document it belongs to
+- `order_number` - The header's number, joined so a line listing does not need a second read
+- `status` - PENDING, IN_PROGRESS or COMPLETED. The operation's own state, not the order's, and the two can disagree only for the reason `start`'s door refuses
+- `origin` - MANUAL, IMPORT, or RESERVATION_BACKFILL - the last one marks a document 0030 raised to explain stock that was already committed, and it is the only way a SALES order may have no customer
+- `lifecycle_position` - The status's place in its type's lifecycle, joined from `order_lifecycle`. NULL means the installed register has no row for this (type, status) pair, which probe C counts
+- `is_terminal` - Whether this status is a lifecycle's last word, so a forward-only rule can be stated without listing statuses in code
+- `reports_a_movement` - True when this status is a consequence of stock moving (SHIPPED, RECEIVED, COMPLETED). `transition_order` refuses to write one by hand, which is the column's whole purpose
+- `customer_id` - The `entities` row on the buying end. NULL on a purchase or work order, and required on a sales order that was not backfilled
+- `customer_name` - That party's name, joined from `entities`
+- `vendor_id` - The `suppliers` row on the selling end, which is not the same kind of key as `customer_id` - one is a party id, the other a supplier row id, and the CHECK makes them mutually exclusive
+- `vendor_code` - The supplier's own code
+- `vendor_name` - The supplier's party name, resolved through `suppliers.entity_id`
+- `warehouse_id` - Which warehouse it is inside, with the tenant in the same key - a bench cannot name somebody else's building
+- `warehouse_name` - And its name
+- `currency_code` - The currency this supplier is paid in, defaulted to the party's and CHECKed against the master
+- `ordered_date` - The agreement's date. Not `created_at`, which is when the row was written
+- `required_date` - The line's need-by date
+- `closed_at` - When a terminal status was reached; NULL while the document is open
+- `priority` - 1 highest to 4 lowest, and the allocation order 0030's release selector uses after the date
+- `notes` - Free text on the row
+- `status_reason` - Whoever changed the status last, in their own words. Not the audit trail, which is `audit_log`
+- `created_by` - The connection that wrote it - `application_name`, which the pool sets and a tool argument cannot
+- `created_at` - When the row was written
+- `updated_at` - When the row last changed, by 0010's touch trigger
+- `version` - Writes to the underlying row, maintained by 0011's trigger - not an optimistic-lock token, and `update_customer`'s p_version is a different mechanism
+- `line_count` - How many lines the document has, summed in one grouped pass rather than stored
+- `total_amount` - What the document is worth, summed from the lines' generated `line_amount` and expressed in the header's `currency_code`. Derived here rather than stored on the row, because a stored aggregate is a second truth about the rows it summarises
+- `total_quantity` - Units ordered across every line. Different lines are counted in different units, so this is a piece count and not a comparable measure - the same reason `vw_item_movement_summary` does not sum heterogeneous quantities
+- `fulfilled_amount` - Value of the part already fulfilled, pro-rating each line by `quantity_fulfilled / quantity`
+- `open_amount` - Value still to move, by the same pro-rating
+
+**Use Case:** orders. The definitions live in `db/migrations/0028_orders.sql`,
+`0029_work_orders.sql` and `0030_order_fulfilment.sql`; the rules they encode are in those files'
+headers, and the behavioural probes that keep them true run inside the same files.
+
+---
+
+### vw_order_lines
+
+One row per line, with its document's type and status beside it and its state named from its three quantities.
+
+```sql
+SELECT order_number, line_number, line_type, description, quantity_open, line_state
+  FROM vw_order_lines
+ WHERE order_type = 'PURCHASE' AND line_state = 'OPEN';
+```
+
+**Columns:** (in declared order, read from `pg_attribute`, like every other list on this page;
+`code:agent_docs_match_surface` re-checks them, so a rename fails here rather than in production)
+- `tenant_id` - Whose row this is. Every tenant-coded view exposes it last (0009), which is what makes an agent's and an auditor's result sets differ without two views
+- `order_id` - The WORK order this plan belongs to
+- `order_number` - The header's number, joined so a line listing does not need a second read
+- `order_type` - The header's type. A line's own `line_type` says what it is; this says what document it belongs to
+- `order_status` - The header's status, in the same one join - which is what makes "what is still open on our purchase orders" one statement
+- `order_line_id` - The `order_items` primary key, and the value `inventory_reservations.order_line_id` names once a commitment is attributed
+- `line_number` - Position within the document, assigned by the door as max+1
+- `line_type` - COMPONENT or PRODUCT - what the line this operation works on does to stock
+- `item_id` - The `inventory_items` row the line is for; NULL on a service line, and a service line's commitments are always 0, which is the honest answer rather than an error
+- `sku` - The item's SKU
+- `item_name` - The item master's name, or the line's own description when there is no item
+- `item_product_type` - GOODS or SERVICE from the item master - the axis a purchase order procures along. NULL on a line with no item
+- `description` - What the operation is, which the LINE provides; an operation carries no prose of its own, so there is one place to read
+- `quantity` - What the line promises, carried from `order_items`
+- `unit_of_measure` - Which unit that quantity is counted in, from the master - so a number cannot be filed in an undefined unit
+- `unit_price` - Price per unit, in the header's currency
+- `line_amount` - `quantity * unit_price`, GENERATED - a pure function of two columns on the same row, so it is the one derived value that can live in the table without being a second truth, and the width PostgreSQL infers from the multiplication is the width that needs (0018's overflow was a human guessing it). `order_items.updated_at` exists because a generated column depends on it
+- `quantity_fulfilled` - What has moved for it. The counter 0030's doors raise, and the one this view's verdict is compared against
+- `quantity_cancelled` - What is off the line
+- `quantity_open` - `quantity` minus fulfilled minus cancelled
+- `line_state` - OPEN, PARTIAL, FULFILLED, CANCELLED or UNFULFILLED_CLOSED, named here from the three quantities rather than stored in a fourth column that could disagree with them
+- `warehouse_id` - Which warehouse it is inside, with the tenant in the same key - a bench cannot name somebody else's building
+- `warehouse_code` - That warehouse's code
+- `lot_number` - Which lot the line wants, when it wants a particular one; NULL means any lot, and the pick drains FEFO
+- `serial_numbers` - Serials on the line, if it carries any - jsonb because a serial is a list and the schema has no reason to own its shape
+- `required_date` - The line's need-by date
+- `notes` - Free text on the row
+- `created_at` - When the row was written
+- `updated_at` - When the row last changed, by 0010's touch trigger
+- `version` - Writes to the underlying row, maintained by 0011's trigger - not an optimistic-lock token, and `update_customer`'s p_version is a different mechanism
+
+**Use Case:** order_lines. The definitions live in `db/migrations/0028_orders.sql`,
+`0029_work_orders.sql` and `0030_order_fulfilment.sql`; the rules they encode are in those files'
+headers, and the behavioural probes that keep them true run inside the same files.
+
+---
+
+### vw_suppliers
+
+One row per supplier, carrying the party it is beside the terms it buys on.
+
+```sql
+SELECT supplier_code, party_name, payment_terms, lead_time_days
+  FROM vw_suppliers
+ WHERE is_active
+ ORDER BY supplier_code;
+```
+
+**Columns:** (in declared order, read from `pg_attribute`, like every other list on this page;
+`code:agent_docs_match_surface` re-checks them, so a rename fails here rather than in production)
+- `tenant_id` - Whose row this is. Every tenant-coded view exposes it last (0009), which is what makes an agent's and an auditor's result sets differ without two views
+- `supplier_id` - The `suppliers` primary key. `orders.vendor_id` points here, not at `entity_id`, so a purchase order names the relationship rather than the company
+- `supplier_code` - What the supplier is called on paper. `add_order_line`'s SUPPLIER:<code> external reference resolves through this column, which is why the exclusion constraint that stops a catalog line and a supplier line repeating is keyed on it and not on `party_name`
+- `entity_id` - The party this supplier IS - `entities.id`, with `tenant_id` in the same key because a foreign key does not respect row security (0027 measured it)
+- `party_name` - The party's name, joined from `entities`
+- `legal_name` - The registered name, where it differs from the trading name
+- `tax_id` - Tax reference, on the party
+- `party_type` - The party's own `entity_type` value. Read it rather than inferring "supplier" from it: the CHECK on `entities.entity_type` admits one value per row, which is exactly why this table exists
+- `payment_terms` - How the supplier expects to be paid - free text on purpose, because it belongs to the agreement, not to a vocabulary
+- `lead_time_days` - How long an order to this supplier normally takes, which a replenishment decision reads and 0030's receipt date does not enforce
+- `currency_code` - The currency this supplier is paid in, defaulted to the party's and CHECKed against the master
+- `is_active` - false retires the supplier without deleting agreements that name it; 0008's rule for a thing that cannot leave a trail
+- `notes` - Free text on the row
+- `created_at` - When the row was written
+- `updated_at` - When the row last changed, by 0010's touch trigger
+- `version` - Writes to the underlying row, maintained by 0011's trigger - not an optimistic-lock token, and `update_customer`'s p_version is a different mechanism
+
+**Use Case:** suppliers. The definitions live in `db/migrations/0028_orders.sql`,
+`0029_work_orders.sql` and `0030_order_fulfilment.sql`; the rules they encode are in those files'
+headers, and the behavioural probes that keep them true run inside the same files.
+
+---
+
+### vw_work_centres
+
+Where operations run, what they run in, and how many operations are still waiting for one.
+
+```sql
+SELECT work_centre_code, warehouse_code, capacity_hours_per_day, open_operations
+  FROM vw_work_centres;
+```
+
+**Columns:** (in declared order, read from `pg_attribute`, like every other list on this page;
+`code:agent_docs_match_surface` re-checks them, so a rename fails here rather than in production)
+- `tenant_id` - Whose row this is. Every tenant-coded view exposes it last (0009), which is what makes an agent's and an auditor's result sets differ without two views
+- `work_centre_id` - Where it runs
+- `work_centre_code` - What the plan calls the bench
+- `name` - Its name
+- `warehouse_id` - Which warehouse it is inside, with the tenant in the same key - a bench cannot name somebody else's building
+- `warehouse_code` - That warehouse's code
+- `warehouse_name` - And its name
+- `capacity_hours_per_day` - How many hours of work it can absorb a day. Nothing enforces it yet, which is why it is capacity *per day* and not a promise
+- `is_active` - false retires the supplier without deleting agreements that name it; 0008's rule for a thing that cannot leave a trail
+- `notes` - Free text on the row
+- `created_at` - When the row was written
+- `updated_at` - When the row last changed, by 0010's touch trigger
+- `version` - Writes to the underlying row, maintained by 0011's trigger - not an optimistic-lock token, and `update_customer`'s p_version is a different mechanism
+- `open_operations` - Operations here that are not COMPLETED - the queue a scheduling question starts from
+
+**Use Case:** work_centres. The definitions live in `db/migrations/0028_orders.sql`,
+`0029_work_orders.sql` and `0030_order_fulfilment.sql`; the rules they encode are in those files'
+headers, and the behavioural probes that keep them true run inside the same files.
+
+---
+
+### vw_work_order_plan
+
+One row per planned operation on a WORK order, with the line it works on and the centre it runs in resolved.
+
+```sql
+SELECT order_number, sequence, work_centre_code, planned_hours, actual_hours, status
+  FROM vw_work_order_plan
+ WHERE order_id = '01a1a9...'::uuid
+ ORDER BY sequence;
+```
+
+**Columns:** (in declared order, read from `pg_attribute`, like every other list on this page;
+`code:agent_docs_match_surface` re-checks them, so a rename fails here rather than in production)
+- `tenant_id` - Whose row this is. Every tenant-coded view exposes it last (0009), which is what makes an agent's and an auditor's result sets differ without two views
+- `order_id` - The WORK order this plan belongs to
+- `order_number` - The header's number, joined so a line listing does not need a second read
+- `operation_id` - The `work_order_operations` row
+- `sequence` - Position in the plan, starting at 1; 0030's production door does not read it, and §7 says why
+- `order_line_id` - The `order_items` primary key, and the value `inventory_reservations.order_line_id` names once a commitment is attributed
+- `line_type` - COMPONENT or PRODUCT - what the line this operation works on does to stock
+- `line_sku` - The line's item SKU, or NULL for a line with no item
+- `line_item_name` - And its name
+- `description` - What the operation is, which the LINE provides; an operation carries no prose of its own, so there is one place to read
+- `work_centre_id` - Where it runs
+- `work_centre_code` - What the plan calls the bench
+- `work_centre_name` - And its name
+- `planned_hours` - The estimate. NULL is 'not estimated' and is kept distinct from 0, which is 'no time'
+- `actual_hours` - Recorded against real work
+- `hours_variance` - `planned_hours - actual_hours`, NULL when nothing was estimated - because 0 and NULL mean different sentences
+- `quantity_produced` - Output booked against this operation
+- `quantity_scrapped` - Production booked as scrap
+- `status` - PENDING, IN_PROGRESS or COMPLETED. The operation's own state, not the order's, and the two can disagree only for the reason `start`'s door refuses
+- `started_at` - When it began
+- `completed_at` - When it finished
+- `created_at` - When the row was written
+- `updated_at` - When the row last changed, by 0010's touch trigger
+- `version` - Writes to the underlying row, maintained by 0011's trigger - not an optimistic-lock token, and `update_customer`'s p_version is a different mechanism
+
+**Use Case:** work_order_plan. The definitions live in `db/migrations/0028_orders.sql`,
+`0029_work_orders.sql` and `0030_order_fulfilment.sql`; the rules they encode are in those files'
+headers, and the behavioural probes that keep them true run inside the same files.
+
+---
+
+### vw_order_commitments
+
+One row per order line: what it promises, what stock is committed against it, what the ledger has moved, and whether the two agree.
+
+```sql
+SELECT order_number, line_number, quantity, quantity_committed, quantity_shipped, ledger_agreement
+  FROM vw_order_commitments
+ WHERE quantity_committed > 0 AND ledger_agreement <> 'nothing moved yet';
+```
+
+**Columns:** (in declared order, read from `pg_attribute`, like every other list on this page;
+`code:agent_docs_match_surface` re-checks them, so a rename fails here rather than in production)
+- `tenant_id` - Whose row this is. Every tenant-coded view exposes it last (0009), which is what makes an agent's and an auditor's result sets differ without two views
+- `order_id` - The WORK order this plan belongs to
+- `order_number` - The header's number, joined so a line listing does not need a second read
+- `order_type` - The header's type. A line's own `line_type` says what it is; this says what document it belongs to
+- `order_status` - The header's status, in the same one join - which is what makes "what is still open on our purchase orders" one statement
+- `order_line_id` - The `order_items` primary key, and the value `inventory_reservations.order_line_id` names once a commitment is attributed
+- `line_number` - Position within the document, assigned by the door as max+1
+- `line_type` - COMPONENT or PRODUCT - what the line this operation works on does to stock
+- `item_id` - The `inventory_items` row the line is for; NULL on a service line, and a service line's commitments are always 0, which is the honest answer rather than an error
+- `item_name` - The item master's name, or the line's own description when there is no item
+- `quantity` - What the line promises, carried from `order_items`
+- `quantity_fulfilled` - What has moved for it. The counter 0030's doors raise, and the one this view's verdict is compared against
+- `quantity_cancelled` - What is off the line
+- `quantity_open` - `quantity` minus fulfilled minus cancelled
+- `quantity_committed` - Units held live against THIS line, attributed by `inventory_reservations.order_line_id` - the join 0030 added, because a commitment that names only the document cannot be reconciled line by line
+- `quantity_released` - Of the units committed to this line, how many have settled - shipped or cancelled, summed from the reservation row's own counters
+- `quantity_unresolved` - `reserved_quantity` minus shipped minus cancelled: what is still held. This is 0015's `held_quantity`, and 13 of these units sat here forever until 0030 gave them a door
+- `quantity_committed_unlinked` - Units held against this document AND this item whose reservation names no line. Reported separately and never folded into `quantity_committed`: joining on the line alone makes them invisible, and '0 committed' where the truth is 'committed, not attributed' is the one number in this view that is unsafe to act on
+- `ledger_rows` - How many `inventory_movements` rows name this line, RESERVATION rows excluded
+- `ledger_quantity` - What the ledger says actually moved for this line and item, signed and absolute-summed. The RESERVATION rows are excluded for 0015's reason - a commitment makes stock unavailable, it moves nothing - and `vw_item_movement_summary`'s two direction columns apply the same rule
+- `ledger_agreement` - The verdict, in the register's own register: 'nothing moved yet', 'fulfilled without a movement (non-stock line)', 'agrees', or 'DISAGREES'. A line with no movements is not a disagreement, which is what keeps the column usable as an alarm rather than a nuisance
+- `required_date` - The line's need-by date
+- `line_updated_at` - When the line last changed. Named so it cannot be confused with the order header's `updated_at`, which is what a reader of 'this row' would otherwise assume
+
+**Use Case:** order_commitments. The definitions live in `db/migrations/0028_orders.sql`,
+`0029_work_orders.sql` and `0030_order_fulfilment.sql`; the rules they encode are in those files'
+headers, and the behavioural probes that keep them true run inside the same files.
+
+---
+
 ## Usage Examples
 
 Every statement below was run against this server's database before it was written into this page, and

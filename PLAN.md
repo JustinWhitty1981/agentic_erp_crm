@@ -17,9 +17,10 @@ Before starting work, AI agents should review:
    [ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md) made the Go
    backends the runtime
 ✅ **Two agents deployed** - `agents/customer_service/` (`:4550`, 14 tools) and `agents/inventory/` (`:4560`, 11 tools plus a 30-minute check timer)
-✅ **Schema enforced, not documented-only** - 23 applied migrations; `./scripts/db/verify.sh` reports 37 structural checks green, `./scripts/db/test-functions.sh` runs one probe per review finding
+✅ **Schema enforced, not documented-only** - 27 applied migrations; `./scripts/db/verify.sh` reports 37 structural checks green, `./scripts/db/test-functions.sh` runs 89 mapped cases against one probe per review finding, no residue
+✅ **Orders in the schema, of all three kinds** - `0027`-`0030` landed 2026-11-07: `orders`/`order_items` for SALES, PURCHASE and WORK, suppliers as a party extension, a work order's operation plan, and the four fulfilment doors that finally release what `0015` started holding. 49 behavioural probes inside those four files, `verify.sh` 37/0, `test-functions.sh` 88 closed and no residue, and a clean from-zero lineage rebuilt twice to prove the order of it. **No agent drives them yet** - which is item 4 below
 ✅ **A method that catches itself** - `scripts/agents/tool_testplan.sh` prompts every registered tool of both agents through the real endpoint and verifies the answer against the database (25 verdicts green, 2026-11-04); `scripts/docs/check_agent_docs.sh` fails when a README describes a tool or a view that is not there
-⚠️ **`_schema_graph` exists** and is a knowledge graph of the schema; the documentation sweep of 2026-11-04/05 was the thing that actually caught drift, so treat the graph as an index, not as the source
+⚠️ **`_schema_graph` exists and holds zero rows** - measured, not inferred. The older prose in this repository calls it "a knowledge graph of the entire schema for AI agent understanding", which describes the superseded loader that would have filled it and not this database. The graph an agent can actually query is the `vw_*` set plus `vw_domain_vocabulary`, `vw_rls_status`, `vw_audit_coverage` and `vw_idempotency_status`, all four derived from the catalog rather than maintained by hand. The documentation sweep of 2026-11-04/05 is what found the claim, which is the argument for the checks over the graph
 
 ## Now: the two known-open defects on the deployed surface
 
@@ -33,6 +34,28 @@ Before starting work, AI agents should review:
 - [ ] Something must call it: a container's timer (the inventory agent's `RunCheck` is the working pattern), a cron entry, or the deployment's housekeeping phase
 - [ ] Assert it in `db/tests/`: today the retention policy is a promise, and probe `6_1`'s §F already discovered the difference the hard way - it now sweeps to a baseline first, because an uncollected field makes an honest count into a false alarm
 - Cheapest item on this page, and the one that keeps ADR-005's garbage-collection clause from being paper.
+
+## Now, item 4: the third agent, which is what the orders schema is for
+
+The documents exist, are enforced, and are watched. Nothing in `agents/` can create one, so the
+capability is reachable by SQL and not by conversation, which is the half this repository has always
+treated as the point.
+
+- [ ] `docs/agent_requirements/sales/sales.md` first - the requirements page names the views and the
+      doors before any Go is written, the way `inventory.md` does, because the second agent proved the
+      cost of the opposite order
+- [ ] Fork `agents/customer_service/` to `agents/sales/` (`:4570`, `AGENT_ROLE=sales`, its own `.env`
+      and compose project), replace `pkg/crm` with `pkg/orders`, and keep the trajectory writer and the
+      memory store - the two things that made the inventory fork a third of the work rather than half
+- [ ] Tools for the surface that exists: read `vw_orders`, `vw_order_lines`, `vw_suppliers` and
+      `vw_order_commitments`; write through `create_order`, `add_order_line`, `transition_order`,
+      `ship_sales_order`, `receive_purchase_order`, `book_work_order_production` and
+      `cancel_inventory_reservation`. Each one claims a key (ADR-005) and records what it touched
+- [ ] `db/tests/7_1_orders.sql` with a probe per tool, CASES rows in `test-functions.sh`, cases in
+      `docs/agent_requirements/agent_test_plan.md`, and `scripts/docs/check_agent_docs.sh` green - a
+      tool in code and not in a README is a failing build here, deliberately
+- [ ] The `idempotency_sweep` keeper, which is item 2's debt and this agent's timer: one Go ticker,
+      `runInventoryCheck` as the pattern, so a sweep that ran is a row and not a log line
 
 ## Now, item 3: the two test directories that write to the database they test
 
