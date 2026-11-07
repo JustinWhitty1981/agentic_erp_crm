@@ -109,19 +109,20 @@ check "A7 auditor sees everything" "0002_access_grants" \
 # because a nullable tenant_id with no constraint satisfies the review's wording and
 # defeats its purpose.
 #
-# The list has grown twice since the review counted 18: 0011's idempotency_keys and 0013's
-# audit_log/audit_summary are tenancy tables the review had never seen, and 0023's
-# agent_memories is a table no finding asked for. They are here because they carry the column,
-# not because a document mentioned them - the same reason 0010's scope grew. A tenant-coded
-# table that is absent from this list is a table whose tenancy nobody checks, and B7/B26 would
-# still see it, so the honest reading of "not listed" is "not checked by B1" rather than
-# "not tenanted".
+# The list has grown three times since the review counted 18: 0011's idempotency_keys and 0013's
+# audit_log/audit_summary are tenancy tables the review had never seen, 0023's agent_memories is a
+# table no finding asked for, and 0027's suppliers is a table no finding asked for either — the
+# orders programme needed a supplier and the review predates both. They are here because they carry
+# the column, not because a document mentioned them - the same reason 0010's scope grew. A
+# tenant-coded table that is absent from this list is a table whose tenancy nobody checks, and
+# B7/B26 would still see it, so the honest reading of "not listed" is "not checked by B1" rather
+# than "not tenanted".
 check "B1 5.8  tenant_id everywhere" "0003_tenant_foundation" \
     "SELECT count(*) FROM (VALUES ('entities'),('contacts'),('addresses'),
         ('entity_relationships'),('communications'),('followups'),('warehouses'),
         ('locations'),('item_categories'),('inventory_items'),('inventory_movements'),
         ('inventory_on_hand'),('inventory_reservations'),('human_sessions'),('bot_actions'),
-        ('audit_summary'),('agent_interactions'),('agent_memories')) AS t(tbl)
+        ('audit_summary'),('agent_interactions'),('agent_memories'),('suppliers')) AS t(tbl)
       WHERE NOT EXISTS (
         SELECT 1 FROM information_schema.columns c
          WHERE c.table_schema='public' AND c.table_name=t.tbl
@@ -144,7 +145,7 @@ check "B1 5.8  tenant_id everywhere" "0003_tenant_foundation" \
 # tenant can never reuse code MAIN. Asserted by key shape, not by index count.
 check "B1b 5.8 natural keys tenant-scoped" "0003_tenant_foundation" \
     "SELECT count(*) FROM (VALUES ('warehouses'),('item_categories'),('inventory_items'),
-        ('locations'),('entity_relationships'),('audit_summary')) AS t(tbl)
+        ('locations'),('entity_relationships'),('audit_summary'),('suppliers')) AS t(tbl)
       WHERE NOT EXISTS (SELECT 1 FROM pg_index i
           JOIN pg_attribute a ON a.attrelid=i.indrelid AND a.attnum=i.indkey[0]
           JOIN pg_class c ON c.oid=i.indrelid
