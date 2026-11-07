@@ -91,6 +91,8 @@ DECLARE
     v_item    uuid;
     v_list    text;
     v_fixed   boolean;
+    v_party   bigint;
+    v_order   uuid;
 BEGIN
     SELECT EXISTS (SELECT 1 FROM pg_proc p, unnest(p.proargnames) AS a
                     WHERE p.proname = 'reserve_inventory_for_order'
@@ -109,6 +111,12 @@ BEGIN
     -- One success, one refusal, and an error path that must not be a row.
     PERFORM execute_inventory_movement('RECEIPT', v_item, NULL, v_wh, 50, 2,
              'afpc_harness', 'PO', NULL, 'stock for the status probe');
+    -- The document both calls name. This block is a separate DO from the one above, so it needs its
+    -- own, and since 0030's enforcement a SALES commitment without one is a 23503 rather than a row.
+    INSERT INTO entities (name, entity_type)
+        VALUES ('AFPC-TEST-3B party', 'customer') RETURNING id INTO v_party;
+    SELECT order_id INTO v_order
+      FROM create_order('SALES', v_party, NULL, NULL, NULL, NULL, NULL, NULL, 'MANUAL', NULL);
     SELECT string_agg(DISTINCT s, ',' ORDER BY s) INTO v_list FROM (
         SELECT max(status) AS s FROM reserve_inventory_for_order(
                    v_item, v_wh, 5, 'SALES', v_order, 'afpc_harness')

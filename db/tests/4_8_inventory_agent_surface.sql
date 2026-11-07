@@ -96,23 +96,34 @@ DO $$
 DECLARE
     v_names text[];
     v_outs  text;
+    v_defs  int;
 BEGIN
     -- INPUT parameters only, in order: proargnames carries the TABLE(...) OUT columns too, and
     -- a check that counted them would report 11 for a door with eight arguments - the probe
     -- failing its own signature reading rather than the tool's claim.
-    SELECT array_agg(g.a ORDER BY g.n) INTO v_names
-      FROM (SELECT p.proargnames, p.proargmodes FROM pg_proc p
+    SELECT array_agg(g.a ORDER BY g.n), max(s.pronargdefaults) INTO v_names, v_defs
+      FROM (SELECT p.proargnames, p.proargmodes, p.pronargdefaults FROM pg_proc p
              WHERE p.proname = 'reserve_inventory_for_order') s,
            unnest(s.proargnames, s.proargmodes) WITH ORDINALITY AS g(a, mode, n)
      WHERE mode IS NULL OR mode::text IN ('i', 'b');
-    IF v_names IS NULL OR array_length(v_names, 1) <> 8
-       OR v_names[8] <> 'p_idempotency_key' OR v_names[7] <> 'p_location_id' THEN
+    -- Positions 7 and 8 are what the tool sends there, and anything the tool does NOT send has to be
+    -- past the end AND defaulted. The first half is 4.3's contract; the second is 0030's, which grew
+    -- the door to nine parameters by appending a defaulted line reference — the only shape in which a
+    -- positional caller of eight survives a signature change. An argument inserted before the claim
+    -- key would land the key in a column and be answered by 22023 or, worse, by a reservation whose
+    -- idempotency key is a location.
+    IF v_names IS NULL OR array_length(v_names, 1) < 8
+       OR v_names[8] <> 'p_idempotency_key' OR v_names[7] <> 'p_location_id'
+       OR array_length(v_names, 1) - 8 > coalesce(v_defs, 0) THEN
         RAISE NOTICE 'VERDICT ERR 4.3 | the reservation door''s parameter positions are not what '
-                     'reserve_inventory calls them as: % - the tool sends eight positional '
-                     'arguments and the claim last', coalesce(v_names::text, 'no signature');
+                     'reserve_inventory calls them as: % (defaults on the last % of them) - the '
+                     'tool sends eight positional arguments and the claim last, so anything past '
+                     'position 8 has to be defaulted and appended',
+                     coalesce(v_names::text, 'no signature'), coalesce(v_defs, 0);
     ELSE
-        RAISE NOTICE 'VERDICT OK 8b the door takes the location then the claim, which is the '
-                     'order the tool''s Call array is built in';
+        RAISE NOTICE 'VERDICT OK 8b the door takes the location then the claim, and every argument '
+                     'beyond the eight the tool sends is defaulted - the order its Call array is '
+                     'built in, and the shape that lets it grow';
     END IF;
 
     SELECT pg_get_function_result(p.oid) INTO v_outs

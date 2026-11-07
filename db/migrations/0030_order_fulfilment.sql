@@ -1474,6 +1474,11 @@ SELECT i.tenant_id,
        coalesce(c.committed, 0)  AS quantity_committed,
        coalesce(c.released, 0)   AS quantity_released,
        coalesce(c.resolved, 0)   AS quantity_unresolved,
+       -- A commitment naming this document and item but no line. It could have been left out — a
+       -- join on order_line_id makes it invisible, and the view would then read "0 committed" where
+       -- the truth is "committed, not attributed". Those are different sentences and only one of
+       -- them is safe to act on, so the number is published rather than omitted.
+       coalesce(u.unlinked, 0)   AS quantity_committed_unlinked,
        coalesce(l.ledger_rows, 0) AS ledger_rows,
        l.ledger_quantity,
        -- The verdict, in the register's own register. A line with no movements is not a disagreement:
@@ -1500,6 +1505,13 @@ SELECT i.tenant_id,
           FROM inventory_reservations r
          WHERE r.order_line_id = i.order_line_id
        ) c ON true
+  LEFT JOIN LATERAL (
+        SELECT sum(r2.reserved_quantity - coalesce(r2.shipped_quantity, 0)
+                   - coalesce(r2.cancelled_quantity, 0)) AS unlinked
+          FROM inventory_reservations r2
+         WHERE r2.order_id = i.order_id AND r2.item_id = i.item_id
+           AND r2.order_line_id IS NULL
+       ) u ON true
   LEFT JOIN LATERAL (
         -- "Fulfilled", not "signed": the rows that moved THIS line forward.
         --
@@ -1532,8 +1544,9 @@ ALTER VIEW vw_order_commitments SET (security_invoker = true);
 GRANT SELECT ON vw_order_commitments TO afpc_readonly, afpc_auditor;
 
 COMMENT ON VIEW vw_order_commitments IS
-    'One row per order line: what it promises, what stock is committed against it, what the ledger '
-    'has actually moved, and whether the two agree. This is the check 0028 promised when it made '
+    'One row per order line: what it promises, what stock is committed against it — attributed to '
+    'this line, plus a separate figure for commitments on the same document and item that name no '
+    'line — what the ledger has actually moved, and whether the two agree. This is the check 0028 promised when it made '
     'line progress a stored counter — quantity_fulfilled is maintained in the same transaction by '
     'the doors in §5, and ledger_agreement compares it against sum of the movement rows that name '
     'the line, so a door that forgets one half fails here rather than at an audit. '
@@ -1557,6 +1570,95 @@ GRANT  EXECUTE ON FUNCTION receive_purchase_order(uuid, uuid, text, uuid) TO afp
 GRANT  EXECUTE ON FUNCTION book_work_order_production(uuid, numeric, text, uuid, uuid) TO afpc_app;
 GRANT  EXECUTE ON FUNCTION afpc_settle_commitments(uuid, uuid, uuid, numeric, text) TO afpc_app;
 GRANT  EXECUTE ON FUNCTION afpc_release_bins(uuid, uuid, uuid, numeric) TO afpc_app;
+
+-- ---------------------------------------------------------------------------
+-- 5.5 The reservation door learns to name the line it holds stock for
+-- ---------------------------------------------------------------------------
+-- §3 gives order_line_id a writer for the rows that already existed, and §4 lets the database refuse
+-- a wrong one. Without this, the column would be true of the migration and false of everything made
+-- after it: reserve_inventory_for_order takes an item, a warehouse and a document, and a commitment
+-- that names an order but no line is one step short of the thing §1's reconciliation needs. So the
+-- door that makes commitments learns the argument the fact has always had.
+--
+-- Appended as the NINTH parameter, defaulted, because p_idempotency_key is eighth and a positional
+-- caller that sends eight arguments must not find its claim key landing in a line column. The
+-- inventory agent's tool sends exactly eight, and TestClaimsAreLast in that package keeps the key
+-- last when the tool grows the ninth. Same reason 0014 appended its two additions rather than
+-- inserting them, and the same reason 0016 drops by full signature first: CREATE OR REPLACE with a
+-- changed parameter list OVERLOADS, and an overload makes every call to the name ambiguous.
+DO $$
+DECLARE
+    v_src  text;
+    v_orig text;
+    v_new  text;
+    v_sig  text;
+    v_n    int;
+    v_pair text[][] := ARRAY[
+        ['p_idempotency_key uuid DEFAULT NULL::uuid)',
+         'p_idempotency_key uuid DEFAULT NULL::uuid, p_order_line_id uuid DEFAULT NULL::uuid)'],
+        ['(item_id, warehouse_id, location_id, order_type, order_id,
+             reserved_quantity, reserved_by, priority)',
+         '(item_id, warehouse_id, location_id, order_type, order_id,
+             reserved_quantity, reserved_by, priority, order_line_id)'],
+        ['(p_item_id, p_warehouse_id, p_location_id, p_order_type, p_order_id,
+             p_quantity, p_reserved_by, 1)',
+         '(p_item_id, p_warehouse_id, p_location_id, p_order_type, p_order_id,
+             p_quantity, p_reserved_by, 1, p_order_line_id)']
+    ];
+    i int;
+BEGIN
+    SELECT pg_get_functiondef(p.oid),
+           format('%s.%I(%s)', n.nspname, p.proname,
+                  pg_get_function_identity_arguments(p.oid))
+      INTO v_src, v_sig
+      FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'public' AND p.proname = 'reserve_inventory_for_order';
+    IF v_src IS NULL THEN
+        RAISE EXCEPTION '5.5 failed: reserve_inventory_for_order is not installed';
+    END IF;
+
+    -- Three needles. The fourth this transform first carried — adding a 'line' key to the idempotency
+    -- fingerprint — is deliberately not in it, for two reasons worth keeping together. The fingerprint
+    -- is checked against the one stored when a claim was FIRST made, so changing what goes into it
+    -- makes every in-flight claim look like a payload mismatch for as long as it can be retried (24h
+    -- here). And the case it would guard is already guarded: the key, the item, the warehouse, the
+    -- quantity and the document are in it, and a retry that added only a line reference describes the
+    -- same reservation of the same stock — where returning the first answer is the correct answer and
+    -- not a stale one.
+    v_orig := v_src;
+    FOR i IN SELECT unnest(ARRAY[1,2,3]) LOOP
+        v_n := length(v_src) - length(replace(v_src, v_pair[i][1], ''));
+        IF v_n <> length(v_pair[i][1]) THEN
+            RAISE EXCEPTION '5.5 failed: needle % occurs % time(s) in the installed body, expected '
+                            'exactly once — the door has moved since this transform was written, and '
+                            'a partial replace would produce a function whose INSERT and its argument '
+                            'list disagree',
+                i, CASE WHEN v_n = 0 THEN 0 ELSE v_n / length(v_pair[i][1]) END;
+        END IF;
+        v_src := replace(v_src, v_pair[i][1], v_pair[i][2]);
+    END LOOP;
+    IF v_src = v_orig THEN
+        RAISE EXCEPTION '5.5 failed: all three needles matched and nothing changed';
+    END IF;
+
+    EXECUTE format('DROP FUNCTION %s', v_sig);
+    EXECUTE v_src;
+
+    SELECT format('%s.%I(%s)', n2.nspname, p2.proname,
+                  pg_get_function_identity_arguments(p2.oid)) INTO v_sig
+      FROM pg_proc p2 JOIN pg_namespace n2 ON n2.oid = p2.pronamespace
+     WHERE n2.nspname = 'public' AND p2.proname = 'reserve_inventory_for_order';
+    EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM PUBLIC', v_sig);
+    EXECUTE format('GRANT  EXECUTE ON FUNCTION %s TO afpc_app', v_sig);
+
+    SELECT count(*) INTO v_n FROM pg_proc WHERE proname = 'reserve_inventory_for_order';
+    IF v_n <> 1 THEN
+        RAISE EXCEPTION '5.5 failed: % heads of reserve_inventory_for_order — 4.4 in this schema''s '
+                        'own history, and the reason every one of these transforms drops before it '
+                        'creates', v_n;
+    END IF;
+END
+$$;
 
 -- ---------------------------------------------------------------------------
 -- 8. Verify by behaving
@@ -2364,6 +2466,100 @@ BEGIN
     v_n := v_n + 1;
 
     ------------------------------------------------------------------
+    -- N. the door records the link, and the view distinguishes an attributed commitment from one it
+    --    could not attribute. Both halves matter: the first is §5.5 working, the second is the case
+    --    §5.5 cannot eliminate (a caller that names no line), which must show up as a number rather
+    --    than as an absence.
+    ------------------------------------------------------------------
+    v_res := 'not-run';
+    BEGIN
+        SELECT order_id INTO v_ord FROM create_order('SALES', v_ent, NULL, v_wh, NULL, NULL, NULL,
+                                                     '0030 linked', 'MANUAL', NULL);
+        SELECT order_line_id INTO v_line
+          FROM add_order_line(v_ord, v_item, NULL, 3, 4, NULL, 'STANDARD', v_wh, NULL, NULL, NULL, NULL);
+        SELECT reservation_id INTO v_rid
+          FROM reserve_inventory_for_order(v_item, v_wh, 3, 'SALES', v_ord, '0030-probe', NULL,
+                                          NULL, v_line);
+        SELECT order_line_id INTO v_line2 FROM inventory_reservations WHERE reservation_id = v_rid;
+        IF v_line2 IS DISTINCT FROM v_line THEN
+            v_res := 'the door was handed the line and did not keep it'; RAISE EXCEPTION 'stop';
+        END IF;
+        IF (SELECT quantity_committed FROM vw_order_commitments
+             WHERE order_line_id = v_line) <> 3
+           OR (SELECT quantity_committed_unlinked FROM vw_order_commitments
+                WHERE order_line_id = v_line) <> 0 THEN
+            v_res := format('an attributed commitment reads as committed=%s unlinked=%s',
+                (SELECT quantity_committed FROM vw_order_commitments WHERE order_line_id = v_line),
+                (SELECT quantity_committed_unlinked FROM vw_order_commitments
+                  WHERE order_line_id = v_line));
+            RAISE EXCEPTION 'stop';
+        END IF;
+
+        -- The same fact, unattributed: still a number, on a document of its own so the two cases
+        -- cannot sum into each other.
+        SELECT order_id INTO v_ord2 FROM create_order('SALES', v_ent, NULL, v_wh, NULL, NULL, NULL,
+                                                      '0030 unlinked', 'MANUAL', NULL);
+        SELECT order_line_id INTO v_line2
+          FROM add_order_line(v_ord2, v_item, NULL, 3, 4, NULL, 'STANDARD', v_wh, NULL, NULL,
+                              NULL, NULL);
+        SELECT reservation_id INTO v_rid
+          FROM reserve_inventory_for_order(v_item, v_wh, 3, 'SALES', v_ord2, '0030-probe', NULL,
+                                          NULL, NULL);
+        IF (SELECT quantity_committed FROM vw_order_commitments
+             WHERE order_line_id = v_line2) <> 0
+           OR (SELECT quantity_committed_unlinked FROM vw_order_commitments
+                WHERE order_line_id = v_line2) <> 3 THEN
+            v_res := format('an unattributed commitment reads as committed=%s unlinked=%s — the '
+                            'second number is the one that keeps a held commitment from reading as '
+                            'no commitment',
+                (SELECT quantity_committed FROM vw_order_commitments WHERE order_line_id = v_line2),
+                (SELECT quantity_committed_unlinked FROM vw_order_commitments
+                  WHERE order_line_id = v_line2));
+            RAISE EXCEPTION 'stop';
+        END IF;
+        v_res := 'pass';
+        RAISE EXCEPTION 'discard' USING ERRCODE = 'P0002';
+    EXCEPTION WHEN OTHERS THEN
+        IF SQLERRM NOT IN ('discard','stop') AND v_res = 'not-run' THEN
+            v_res := 'raised ' || SQLSTATE || ': ' || left(SQLERRM, 140);
+        END IF;
+    END;
+    IF v_res <> 'pass' THEN RAISE EXCEPTION 'N failed: %', v_res; END IF;
+    -- Nine parameters, one head, and the eight-argument shape the agent still sends.
+    IF (SELECT count(*) FROM pg_proc p, unnest(p.proargnames) AS a
+         WHERE p.proname = 'reserve_inventory_for_order' AND a = 'p_order_line_id') <> 1 THEN
+        RAISE EXCEPTION 'N failed: the reservation door has no p_order_line_id parameter';
+    END IF;
+    -- And the older shape still works: eight positional arguments, which is what the inventory agent
+    -- sends today. Its own document, created OUTSIDE the discard, because the orders the two blocks
+    -- above made were rolled back with them, and 3b's enforcement is right to refuse a commitment
+    -- against a document that does not exist — the 23503 that this probe first produced was the
+    -- trigger catching the probe, not the door losing a shape.
+    v_err := NULL;
+    BEGIN
+        SELECT order_id INTO v_ord2
+          FROM create_order('SALES', v_ent, NULL, v_wh, NULL, NULL, NULL,
+                            '0030 eight-argument shape', 'MANUAL', NULL);
+        SELECT reservation_id INTO v_rid
+          FROM reserve_inventory_for_order(v_item, v_wh, 1, 'SALES', v_ord2, '0030-probe', NULL, NULL);
+        IF v_rid IS NULL THEN
+            v_err := 'answered no reservation_id'; RAISE EXCEPTION 'stop';
+        END IF;
+        IF v_ord2 IS NULL THEN
+            v_err := 'the order it reserved against was never made'; RAISE EXCEPTION 'stop';
+        END IF;
+        RAISE EXCEPTION 'discard' USING ERRCODE = 'P0002';
+    EXCEPTION WHEN OTHERS THEN
+        IF SQLERRM NOT IN ('discard','stop') THEN v_err := SQLSTATE || ': ' || left(SQLERRM, 90); END IF;
+    END;
+    IF v_err IS NOT NULL THEN
+        RAISE EXCEPTION 'N failed: an eight-argument call — the shape agents/inventory''s tool sends '
+                        'today — now answers %; a defaulted parameter has to be APPENDED, not '
+                        'inserted', v_err;
+    END IF;
+    v_n := v_n + 1;
+
+    ------------------------------------------------------------------
     -- Cleanup. The subtransaction pattern above means almost nothing here needs deleting; what does
     -- is probe J's second tenant and probe C's leftovers if a discard ever stopped early. Scoped by
     -- tenant and by marker, deepest child first — the ordering 0028 argues for and 0029 broke.
@@ -2438,12 +2634,13 @@ BEGIN
             (SELECT count(*) FROM vw_order_commitments WHERE ledger_agreement = 'DISAGREES');
     END IF;
 
-    IF v_n <> 13 THEN
-        RAISE EXCEPTION 'expected 13 behavioural verifications, completed %', v_n;
+    IF v_n <> 14 THEN
+        RAISE EXCEPTION 'expected 14 behavioural verifications, completed %', v_n;
     END IF;
     RAISE NOTICE '0030: % checks passed - the four commitments that named nothing now name documents '
                  'and lines, a commitment cannot be made against a document that does not exist, the '
-                 'thirteen units held since 0015 can be released by a door, a shipped line''s counter '
+                 'thirteen units held since 0015 can be released by a door, the door that makes a new '
+                 'commitment can name the line it holds stock for, a shipped line''s counter '
                  'reconciles against the ledger that made it, and the claim backlog 0011''s policy '
                  'promised to collect is collected', v_n;
 END
@@ -2484,3 +2681,4 @@ $$;
 --   order leaves the order CONFIRMED, because whether the ORDER is cancelled is a decision about the
 --   customer agreement and not a consequence of a bin release; transition_order is the door for it,
 --   and it will refuse CANCELLED only for a stock-moving status, which CANCELLED is not.
+

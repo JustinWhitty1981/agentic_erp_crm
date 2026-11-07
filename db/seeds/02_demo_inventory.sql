@@ -95,6 +95,7 @@ DECLARE
     v_east  uuid;
     v_item  uuid;
     v_ord   uuid;   -- the order 0030's enforcement now requires a commitment to name
+    v_line  uuid;   -- ... and the line 0030's view needs for the commitment to say something
     r       record;
 BEGIN
     IF EXISTS (SELECT 1 FROM inventory_movements
@@ -177,10 +178,15 @@ BEGIN
                             (SELECT id FROM vw_customers WHERE name = 'Delta Manufacturing Co'),
                             NULL, v_main, NULL, NULL, NULL,
                             'seed: a customer order awaiting shipment', 'MANUAL', NULL);
-        PERFORM * FROM add_order_line(v_ord, v_item, NULL, 5, 40, NULL, 'STANDARD', v_main,
-                                      NULL, NULL, NULL, NULL);
+        SELECT order_line_id INTO v_line
+          FROM add_order_line(v_ord, v_item, NULL, 5, 40, NULL, 'STANDARD', v_main,
+                              NULL, NULL, NULL, NULL);
+        -- The line is passed so the commitment is ATTRIBUTED and not merely addressed: 0030's
+        -- vw_order_commitments can then show these 5 units against the line they hold, which is the
+        -- difference between a demo database that exercises the read path and one that merely
+        -- contains the rows.
         PERFORM * FROM reserve_inventory_for_order(
-            v_item, v_main, 5, 'SALES', v_ord, 'seed:02_demo_inventory');
+            v_item, v_main, 5, 'SALES', v_ord, 'seed:02_demo_inventory', NULL, NULL, v_line);
     END IF;
 
     RAISE NOTICE 'inventory seed: stock history created through the doors';
