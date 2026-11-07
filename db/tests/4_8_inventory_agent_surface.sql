@@ -48,7 +48,14 @@ BEGIN
     PERFORM execute_inventory_movement('RECEIPT', v_item, NULL, v_wh, 10, 2,
              'afpc_harness', 'PO', NULL, NULL, 'EACH');
 
-    v_order := afpc_uuid_v7();
+    -- 0030 makes a commitment name a document, so the harness raises one. An invented uuid is no
+    -- longer a value this door accepts, which is the finding rather than an obstacle: the surface
+    -- probe that checks the reservation door works must itself hold a real order.
+    INSERT INTO entities (name, entity_type)
+        VALUES ('AFPC-TEST-8 party', 'customer');
+    SELECT order_id INTO v_order
+      FROM create_order('SALES', (SELECT id FROM entities WHERE name = 'AFPC-TEST-8 party'),
+                        NULL, NULL, NULL, NULL, NULL, NULL, 'MANUAL', NULL);
     BEGIN
         SELECT max(status) INTO v_status
           FROM reserve_inventory_for_order(v_item, v_wh, 3, 'SALES', v_order, 'afpc_harness');

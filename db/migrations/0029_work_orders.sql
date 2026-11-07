@@ -602,6 +602,8 @@ DECLARE
     v_ok       boolean;
     v_found    bigint;
     v_td       uuid;
+    v_wh_fixture uuid;   -- set only when 0029 had to create the row; see the fixture note above
+    v_item_fixture uuid;
     v_t2       uuid;
     v_key      uuid;
     v_val      text;
@@ -665,15 +667,32 @@ BEGIN
     SELECT tenant_id INTO v_td FROM tenants WHERE slug = 'default';
     INSERT INTO tenants (name, slug) VALUES ('0029 second tenant', 'afpc-0029-t2')
      RETURNING tenant_id INTO v_t2;
+    -- Master data, created rather than assumed. This block first read the demo seed's warehouse and
+    -- item, which passed on this server and failed on a from-zero database — scripts/db/db migrates
+    -- and only then seeds, so depending on db/seeds/ makes a migration impossible to review on a
+    -- clean machine. 0028 says the same thing at more length. Both fixture rows are deleted at the
+    -- bottom of this file, and only if this file made them.
     SELECT warehouse_id INTO v_wh FROM warehouses WHERE tenant_id = v_td
-     ORDER BY warehouse_code LIMIT 1;
+     ORDER BY default_warehouse DESC NULLS LAST, warehouse_code LIMIT 1;
+    IF v_wh IS NULL THEN
+        INSERT INTO warehouses (tenant_id, warehouse_code, name, warehouse_type, is_active)
+        VALUES (v_td, '0029PROBE', '0029 probe store', 'PRIMARY', true)
+        RETURNING warehouses.warehouse_id INTO v_wh;
+        v_wh_fixture := v_wh;
+    END IF;
     -- An item for the lines probe D adds. v_item was only assigned inside probe E on the first draft,
     -- so D's line arrived with a NULL item, no unit to resolve from it, and died on NOT NULL before
     -- any of the rules D means to test could speak.
     SELECT item_id INTO v_item FROM inventory_items WHERE tenant_id = v_td
      ORDER BY sku LIMIT 1;
     IF v_item IS NULL THEN
-        SELECT item_id INTO v_item FROM inventory_items ORDER BY sku LIMIT 1;
+        INSERT INTO inventory_items (tenant_id, sku, name, description, product_type,
+                                     base_unit_of_measure, cost_method, currency_code, reorder_point)
+        VALUES (v_td, '0029-PROBE-STOCK', '0029 probe part',
+                'Created by 0029''s own fixtures, and deleted by them', 'STOCKED', 'EACH',
+                'AVERAGE', 'USD', 4)
+        RETURNING inventory_items.item_id INTO v_item;
+        v_item_fixture := v_item;
     END IF;
     INSERT INTO warehouses (tenant_id, warehouse_code, name, warehouse_type)
     VALUES (v_t2, '0029T2WH', 'Tenant Two Store', 'PRIMARY') RETURNING warehouse_id INTO v_wh2;
@@ -857,9 +876,13 @@ BEGIN
     BEGIN
         -- One row, both columns. Two separate queries could each pick a different item's pair and
         -- the reservation would then be asked of an item that is not in that warehouse at all.
-        SELECT a.item_id, a.warehouse_id INTO v_item, v_wh
-          FROM vw_item_availability a WHERE a.quantity_available >= 5
-         ORDER BY a.tenant_id, a.item_id LIMIT 1;
+        -- The fixture item and warehouse, with stock received FOR THE PROBE inside the same
+        -- subtransaction. The first draft searched vw_item_availability for something already
+        -- available, which is a probe that passes or fails depending on what the demo seed happened
+        -- to leave behind — and on a from-zero database it found nothing and reported that as a
+        -- mapping failure, the worst possible reading of an empty table.
+        PERFORM execute_inventory_movement('RECEIPT', v_item, NULL, v_wh, 10, 1,
+                                          '0029-probe', 'PO', gen_random_uuid(), NULL, 'EACH');
         -- The order id is captured, not generated inline: the ledger row's reference_id is the
         -- DOCUMENT, and a probe that matches it against the reservation id finds nothing and reports
         -- that as an empty verdict. 0015's own INSERT says so two lines after the CASE being tested.
@@ -1056,6 +1079,8 @@ BEGIN
                                                      'create_order','add_order_line');
     DELETE FROM work_centres WHERE tenant_id IN (v_td, v_t2);
     DELETE FROM warehouses WHERE tenant_id = v_t2;
+    DELETE FROM inventory_items WHERE item_id = v_item_fixture;
+    DELETE FROM warehouses WHERE warehouse_id = v_wh_fixture;
     DELETE FROM suppliers WHERE entity_id IN (SELECT id FROM entities WHERE name LIKE '002_ %');
     DELETE FROM addresses WHERE entity_id IN (SELECT id FROM entities WHERE name LIKE '002_ %');
     DELETE FROM entity_relationships

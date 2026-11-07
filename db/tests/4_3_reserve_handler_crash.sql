@@ -26,11 +26,24 @@ DECLARE
     v_rows    int;
     v_status  text;
     v_fixed   boolean;
+    v_party   bigint;
+    v_order   uuid;
 BEGIN
     INSERT INTO warehouses (warehouse_code, name)
         VALUES ('AFPC-TEST-3', 'harness warehouse') RETURNING warehouse_id INTO v_wh;
     INSERT INTO inventory_items (sku, name)
         VALUES ('AFPC-TEST-3', 'harness item') RETURNING item_id INTO v_item;
+
+    -- A real document, raised through 0028's door, because 0030's enforcement refuses a SALES
+    -- commitment that names nothing. The probe used to hand the door gen_random_uuid(), which was
+    -- exactly the shape that left 13 units committed forever; keeping that shape here would have made
+    -- the harness the one writer of the defect the programme exists to close. Both DO blocks sit
+    -- inside this file's BEGIN...ROLLBACK, so the order, its line and the counter row it allocates are
+    -- residue-free by construction.
+    INSERT INTO entities (name, entity_type)
+        VALUES ('AFPC-TEST-3 party', 'customer') RETURNING id INTO v_party;
+    SELECT order_id INTO v_order
+      FROM create_order('SALES', v_party, NULL, NULL, NULL, NULL, NULL, NULL, 'MANUAL', NULL);
 
     SELECT EXISTS (SELECT 1 FROM pg_proc p, unnest(p.proargnames) AS a
                     WHERE p.proname = 'reserve_inventory_for_order'
@@ -41,7 +54,7 @@ BEGIN
     BEGIN
         SELECT count(*), max(status) INTO v_rows, v_status
           FROM reserve_inventory_for_order(v_item, v_wh, 5, 'SALES',
-                                          gen_random_uuid(), 'afpc_harness');
+                                          v_order, 'afpc_harness');
         IF v_fixed THEN
             IF v_rows = 1 AND v_status = 'INSUFFICIENT_STOCK' THEN
                 RAISE NOTICE 'VERDICT OK a refusal is a row the caller can branch on, not an '
@@ -98,10 +111,10 @@ BEGIN
              'afpc_harness', 'PO', NULL, 'stock for the status probe');
     SELECT string_agg(DISTINCT s, ',' ORDER BY s) INTO v_list FROM (
         SELECT max(status) AS s FROM reserve_inventory_for_order(
-                   v_item, v_wh, 5, 'SALES', gen_random_uuid(), 'afpc_harness')
+                   v_item, v_wh, 5, 'SALES', v_order, 'afpc_harness')
         UNION ALL
         SELECT max(status) FROM reserve_inventory_for_order(
-                   v_item, v_wh, 99999, 'SALES', gen_random_uuid(), 'afpc_harness')
+                   v_item, v_wh, 99999, 'SALES', v_order, 'afpc_harness')
     ) x;
     IF v_list = 'INSUFFICIENT_STOCK,SUCCESS' THEN
         RAISE NOTICE 'VERDICT OK the door publishes exactly the two documented statuses';

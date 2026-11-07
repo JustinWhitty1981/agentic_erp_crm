@@ -94,6 +94,7 @@ DECLARE
     v_main  uuid;
     v_east  uuid;
     v_item  uuid;
+    v_ord   uuid;   -- the order 0030's enforcement now requires a commitment to name
     r       record;
 BEGIN
     IF EXISTS (SELECT 1 FROM inventory_movements
@@ -160,11 +161,26 @@ BEGIN
 
     -- One live commitment, through the reservation door, so quantity_available
     -- and quantity_on_hand differ somewhere and the agent has to know why.
+    --
+    -- Raised through create_order and add_order_line first, and that is 0030's enforcement talking
+    -- and not decoration: reserve_inventory_for_order now refuses a document type whose order_id
+    -- names nothing, and this block used to hand it afpc_uuid_v7() out of thin air. The seed is the
+    -- one writer that runs on a from-zero database after every migration, so a commitment that
+    -- resolves is the only shape this file can take. Before 0030 the id it invented became one of
+    -- the four dangling rows 0030 §3 had to backfill, which is the whole story of the leak in one
+    -- line of seed.
     IF NOT EXISTS (SELECT 1 FROM inventory_reservations
                     WHERE reserved_by = 'seed:02_demo_inventory') THEN
         SELECT item_id INTO v_item FROM inventory_items WHERE sku = 'IN-1003';
+        SELECT order_id INTO v_ord
+          FROM create_order('SALES',
+                            (SELECT id FROM vw_customers WHERE name = 'Delta Manufacturing Co'),
+                            NULL, v_main, NULL, NULL, NULL,
+                            'seed: a customer order awaiting shipment', 'MANUAL', NULL);
+        PERFORM * FROM add_order_line(v_ord, v_item, NULL, 5, 40, NULL, 'STANDARD', v_main,
+                                      NULL, NULL, NULL, NULL);
         PERFORM * FROM reserve_inventory_for_order(
-            v_item, v_main, 5, 'SALES', afpc_uuid_v7(), 'seed:02_demo_inventory');
+            v_item, v_main, 5, 'SALES', v_ord, 'seed:02_demo_inventory');
     END IF;
 
     RAISE NOTICE 'inventory seed: stock history created through the doors';

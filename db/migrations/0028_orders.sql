@@ -1250,6 +1250,10 @@ DECLARE
     v_wh       uuid;
     v_item     uuid;
     v_item2    uuid;
+    v_wh_fixture     uuid;   -- set only when 0028 had to make the row itself, so the cleanup below
+    v_item_fixture   uuid;   -- deletes exactly what this file created and nothing that the seed or a
+    v_item2_fixture  uuid;   -- previous migration made — a migration that prunes a catalog it did
+                             -- not add is a data-losing migration
     v_ok       boolean;
     v_msg      text;
     v_status   text;
@@ -1366,19 +1370,42 @@ BEGIN
     -- published vocabulary admits: 'work' is not, which this line discovered by failing.
     SELECT supplier_id INTO v_sup
       FROM add_supplier('0028-SUP', v_ent, NULL, NULL, 'Net 30', NULL, NULL, NULL, true, NULL);
+    -- Master data, created rather than assumed. The first draft read these out of the demo seed and
+    -- raised when they were missing, which passed on this server and failed on a from-zero database:
+    -- scripts/db/db applies migrations and only then seeds, so a migration that depends on db/seeds/
+    -- is a migration that cannot be reviewed on a clean machine — the exact condition 4.6's harness
+    -- note calls out for the probes. A migration's fixtures belong to the migration. The fixture rows
+    -- are deleted in the cleanup below, so a database that already has a catalog is left exactly as
+    -- it was found.
     SELECT warehouse_id INTO v_wh FROM warehouses ORDER BY default_warehouse DESC NULLS LAST,
                                                           warehouse_code LIMIT 1;
+    IF v_wh IS NULL THEN
+        INSERT INTO warehouses (tenant_id, warehouse_code, name, warehouse_type, is_active)
+        VALUES (v_td, '0028PROBE', '0028 probe store', 'PRIMARY', true)
+        RETURNING warehouses.warehouse_id INTO v_wh;
+        v_wh_fixture := v_wh;
+    END IF;
     -- Two items: one stocked, one a SERVICE. The pair that lets probe F assert both a catalog line
     -- and a one-off, which is the distinction the nullable item_id exists to make.
     SELECT item_id INTO v_item  FROM inventory_items
      WHERE product_type IN ('STOCKED','ASSEMBLY') ORDER BY sku LIMIT 1;
+    IF v_item IS NULL THEN
+        INSERT INTO inventory_items (tenant_id, sku, name, description, product_type,
+                                     base_unit_of_measure, cost_method, currency_code, reorder_point)
+        VALUES (v_td, '0028-PROBE-STOCK', '0028 probe part', 'Created by 0028''s own fixtures',
+                'STOCKED', 'EACH', 'AVERAGE', 'USD', 4)
+        RETURNING inventory_items.item_id INTO v_item;
+        v_item_fixture := v_item;
+    END IF;
     SELECT item_id INTO v_item2 FROM inventory_items WHERE product_type = 'SERVICE'
      ORDER BY sku LIMIT 1;
-    IF v_item IS NULL OR v_item2 IS NULL THEN
-        RAISE EXCEPTION 'fixtures failed: the item master holds no stocked row (%) and no SERVICE '
-                        'row (%), and the SERVICE value in product_type is what makes a non-goods '
-                        'line a catalog line rather than a free-text excuse',
-            coalesce(v_item::text,'none'), coalesce(v_item2::text,'none');
+    IF v_item2 IS NULL THEN
+        INSERT INTO inventory_items (tenant_id, sku, name, description, product_type,
+                                     base_unit_of_measure, cost_method, currency_code)
+        VALUES (v_td, '0028-PROBE-SVC', '0028 probe service', 'A categorised service, which is what '
+                'makes item_id nullable rather than optional', 'SERVICE', 'HR', 'AVERAGE', 'USD')
+        RETURNING inventory_items.item_id INTO v_item2;
+        v_item2_fixture := v_item2;
     END IF;
 
     ------------------------------------------------------------------
@@ -2101,6 +2128,8 @@ BEGIN
                                          't2orders0028@afpc.example.invalid');
     DELETE FROM inventory_items WHERE tenant_id = v_t2;
     DELETE FROM warehouses WHERE tenant_id = v_t2;
+    DELETE FROM inventory_items WHERE item_id IN (v_item_fixture, v_item2_fixture);
+    DELETE FROM warehouses WHERE warehouse_id = v_wh_fixture;
     DELETE FROM entities WHERE name LIKE '0028 %' OR tenant_id = v_t2;
     DELETE FROM tenants WHERE slug = 'afpc-0028-t2';
 
