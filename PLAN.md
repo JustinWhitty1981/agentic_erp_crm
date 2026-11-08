@@ -5,7 +5,7 @@
 Before starting work, AI agents should review:
 - **[AGENTS.md](AGENTS.md)** - Complete guide for navigating this project
 - **[README.md](README.md)** - Project overview
-- **[architecture.md](architecture.md)** - System architecture, and what the two deployed agents are
+- **[architecture.md](architecture.md)** - System architecture, and what the three deployed agents are
 - **[db/MIGRATIONS.md](db/MIGRATIONS.md)** - the ledger of what the schema review found and which migration closed it
 - **[docs/agent_requirements/agent_test_plan.md](docs/agent_requirements/agent_test_plan.md)** - how a tool is proven, which is how "done" is defined here
 
@@ -16,13 +16,26 @@ Before starting work, AI agents should review:
 ✅ **Blueprint complete** - `archive/blueprint/bot.py`, the pattern in one Python file — lineage since
    [ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md) made the Go
    backends the runtime
-✅ **Two agents deployed** - `agents/customer_service/` (`:4550`, 14 tools) and `agents/inventory/` (`:4560`, 11 tools plus a 30-minute check timer)
-✅ **Schema enforced, not documented-only** - 27 applied migrations; `./scripts/db/verify.sh` reports 37 structural checks green, `./scripts/db/test-functions.sh` runs 89 mapped cases against one probe per review finding, no residue
-✅ **Orders in the schema, of all three kinds** - `0027`-`0030` landed 2026-11-07: `orders`/`order_items` for SALES, PURCHASE and WORK, suppliers as a party extension, a work order's operation plan, and the four fulfilment doors that finally release what `0015` started holding. 49 behavioural probes inside those four files, `verify.sh` 37/0, `test-functions.sh` 88 closed and no residue, and a clean from-zero lineage rebuilt twice to prove the order of it. **No agent drives them yet** - which is item 4 below
-✅ **A method that catches itself** - `scripts/agents/tool_testplan.sh` prompts every registered tool of both agents through the real endpoint and verifies the answer against the database (25 verdicts green, 2026-11-04); `scripts/docs/check_agent_docs.sh` fails when a README describes a tool or a view that is not there
+✅ **Three agents deployed** - `agents/customer_service/` (`:4550`, 14 tools), `agents/inventory/` (`:4560`, 11 tools and a 30-minute check timer), `agents/sales/` (`:4570`, 18 tools and an hourly keeper)
+✅ **Schema enforced, not documented-only** - 28 applied migrations; `./scripts/db/verify.sh` reports 38 structural checks green, `./scripts/db/test-functions.sh` runs 89 mapped cases against one probe per review finding, no residue
+✅ **Orders in the schema, of all three kinds, and driven by an agent** - `0027`-`0031` landed 2026-11-07: `orders`/`order_items` for SALES, PURCHASE and WORK, suppliers as a party extension, a work order's operation plan, the four fulfilment doors that finally release what `0015` started holding, and the one grant that let the keeper keep. Behavioural probes inside those files, `verify.sh` 37/0, `test-functions.sh` closed with no residue, and a clean from-zero lineage rebuilt twice to prove the order of it. `agents/sales/` registers twelve of the surface, declines two doors with reasons in its README, and its first hour of ticks is what found 0031
+✅ **The backends read a row as the database means it** - fixed 2026-11-07, in all three forks, and the
+   fix was found only by an agent's own sentence disagreeing with a view. Two shapes: pgx hands a
+   `numeric` column to Go as `pgtype.Numeric`, a struct that `encoding/json` renders perfectly and `%v`
+   renders as `{300000 -4 false finite true}`, so a *sum* of one is zero - which is how the sales tick
+   filed "0 units held unresolved" beside `vw_order_commitments`' 13 and how the inventory check printed
+   struct fields in a line meant for a human; and `integer` is an **int32**, which `intArg` did not
+   handle, so a claim sweep's own count printed 0 whatever it collected. Both are `json.Number` and full
+   integer coverage now, with `TestTheTickAddsUpWhatTheViewAddsUpTo`,
+   `TestIntArgReadsEveryIntegerTheDriverSends` and `TestNormaliseMakesNumericColumnsReadable` holding
+   the three forks to it. Alongside them: a WHERE clause with nothing to bind must contribute no
+   argument, or Postgres refuses the whole query (`42P18`) - `get_suppliers` failed 20 of its 28 calls
+   on its **default** path, which is the reason one acceptance case could not find a supplier the
+   previous case had registered.
+✅ **A method that catches itself** - `scripts/agents/tool_testplan.sh` prompts every registered tool of all three agents through the real endpoint and verifies the answer against the database (25 verdicts green 2026-11-04, 40 since the third agent landed); `scripts/docs/check_agent_docs.sh` fails when a README describes a tool or a view that is not there
 ⚠️ **`_schema_graph` exists and holds zero rows** - measured, not inferred. The older prose in this repository calls it "a knowledge graph of the entire schema for AI agent understanding", which describes the superseded loader that would have filled it and not this database. The graph an agent can actually query is the `vw_*` set plus `vw_domain_vocabulary`, `vw_rls_status`, `vw_audit_coverage` and `vw_idempotency_status`, all four derived from the catalog rather than maintained by hand. The documentation sweep of 2026-11-04/05 is what found the claim, which is the argument for the checks over the graph
 
-## Now: the two known-open defects on the deployed surface
+## Now: the known-open defect on the deployed surface, and one that closed today
 
 ### 1. Semantic search is indexes without vectors
 - [ ] Choose or build an embedder that emits the 1536 dimensions `communications.embedding` and `contacts.embedding` declare (measured: the local models answer 1024 and 4096) — or change the columns, which is a migration with a reindex in it
@@ -30,32 +43,38 @@ Before starting work, AI agents should review:
 - [ ] Add the tool that reads them, and its case in `docs/agent_requirements/agent_test_plan.md`
 - Blocked on: a model choice, not a code change. Requirement 1's "find customers who complained about shipping last week" stays unimplemented until then.
 
-### 2. `idempotency_sweep` has no keeper
-- [ ] Something must call it: a container's timer (the inventory agent's `RunCheck` is the working pattern), a cron entry, or the deployment's housekeeping phase
-- [ ] Assert it in `db/tests/`: today the retention policy is a promise, and probe `6_1`'s §F already discovered the difference the hard way - it now sweeps to a baseline first, because an uncollected field makes an honest count into a false alarm
-- Cheapest item on this page, and the one that keeps ADR-005's garbage-collection clause from being paper.
+### 2. `idempotency_sweep`'s keeper — **closed 2026-11-07**, and it paid a toll
+- [x] Called by a container's timer: `agents/sales`' `runHousekeeping`, `runInventoryCheck`'s shape, hourly, every tick a trajectory row.
+- [x] The privilege it needed: 0011 had revoked `EXECUTE` from `afpc_app` on purpose ("collection is an operator action"), so the keeper's first tick filed a clean-looking `0 expired collected` beside a `42501`. **0031** is the grant, and it grants on a measurement rather than on a paragraph: two tenants, one expired claim each, one `in_flight` claim, `afpc_app` sweeping its own tenant and leaving the other two rows alone.
+- [x] Asserted in `db/tests/`? It is asserted in `verify.sh`, which is where a grant belongs: **B30** requires `afpc_app` to be able to execute the sweep, `PUBLIC` not to be able to, the function still to be SECURITY INVOKER, `afpc_app` still to have no BYPASSRLS, and `idempotency_keys` still to be RLS-FORCED. Any one of those five going false is the grant changing meaning, and the last two are the premise 0031's §3 measured rather than argued.
+- The lesson is not "add a timer". It is that **a policy with a keeper but no grant is still unkept**, and the two halves land in different files.
 
-## Now, item 4: the third agent, which is what the orders schema is for
+## Done: the third agent, which is what the orders schema was for
 
-The documents exist, are enforced, and are watched. Nothing in `agents/` can create one, so the
-capability is reachable by SQL and not by conversation, which is the half this repository has always
-treated as the point.
+Built 2026-11-07, in the order this page asked for: the requirements page, then the schema, then the Go.
 
-- [ ] `docs/agent_requirements/sales/sales.md` first - the requirements page names the views and the
-      doors before any Go is written, the way `inventory.md` does, because the second agent proved the
-      cost of the opposite order
-- [ ] Fork `agents/customer_service/` to `agents/sales/` (`:4570`, `AGENT_ROLE=sales`, its own `.env`
-      and compose project), replace `pkg/crm` with `pkg/orders`, and keep the trajectory writer and the
-      memory store - the two things that made the inventory fork a third of the work rather than half
-- [ ] Tools for the surface that exists: read `vw_orders`, `vw_order_lines`, `vw_suppliers` and
-      `vw_order_commitments`; write through `create_order`, `add_order_line`, `transition_order`,
-      `ship_sales_order`, `receive_purchase_order`, `book_work_order_production` and
-      `cancel_inventory_reservation`. Each one claims a key (ADR-005) and records what it touched
-- [ ] `db/tests/7_1_orders.sql` with a probe per tool, CASES rows in `test-functions.sh`, cases in
-      `docs/agent_requirements/agent_test_plan.md`, and `scripts/docs/check_agent_docs.sh` green - a
-      tool in code and not in a README is a failing build here, deliberately
-- [ ] The `idempotency_sweep` keeper, which is item 2's debt and this agent's timer: one Go ticker,
-      `runInventoryCheck` as the pattern, so a sweep that ran is a row and not a log line
+- [x] `docs/agent_requirements/sales/sales.md` first, naming the views and the doors - and then
+      corrected, because the first version of it guessed at three things the catalog does not agree
+      with: SALES has no `SUBMITTED` (that is a PURCHASE word), `ship_sales_order` answers `PICKING` as
+      well as `SHIPPED`, and `add_supplier`'s currency is a column default, not a party's. Each is now
+      what the doors say, with the measured SQLSTATE beside it.
+- [x] `agents/customer_service/` forked to `agents/sales/` (`:4570`, `AGENT_ROLE=sales`, its own `.env`
+      and compose project), `pkg/crm` replaced by `pkg/orders`, trajectory writer and memory store kept.
+      The fork is the evidence for the claim in `architecture.md`: one domain package, four identity
+      strings, one working third agent.
+- [x] Twelve domain tools - five reads (`vw_orders`, `vw_order_lines`, `vw_order_commitments`,
+      `vw_suppliers`, `vw_customers`) and seven doors (`create_order`, `add_order_line`,
+      `transition_order`, `add_supplier`, `ship_sales_order`, `receive_purchase_order`,
+      `cancel_inventory_reservation`), each claiming a key (ADR-005) and recording what it touched. Two
+      installed doors are deliberately unregistered (`book_work_order_production`,
+      `plan_work_order_operation`), and their reason is a routing that does not exist.
+- [x] `db/tests/7_1_orders.sql`, CASES rows in `test-functions.sh`, cases 22-36 in the acceptance plan,
+      and `check_agent_docs.sh` green.
+- [x] The `idempotency_sweep` keeper - item 2, which needed a migration (0031) that nobody had planned.
+
+What is left of the third-agent programme is not the agent: it is `book_work_order_production`'s missing
+routings, the registry that would let three agents share a discovery surface, and the CAO that has no
+process yet.
 
 ## Now, item 3: the two test directories that write to the database they test
 
@@ -75,6 +94,33 @@ repository's own `AGENTS.md` listed as harness four does that without running a 
 Found by this sweep, not by a failure: the docs said "run these", and the code said what running them does.
 
 ## Next: the queued migrations (numbered, so they cannot be lost)
+
+- [ ] **`vw_order_commitments.reservation_id`, or a `vw_reservations`** - the sharper of the two gaps
+      the acceptance run found, and it is a schema gap rather than a Go one:
+      `cancel_inventory_reservation` takes `reservation_id`, and **no view in this database returns
+      one**, so the door `0030` built to release stuck stock can be reached by a human with psql and
+      not by a conversation. `0030` added `order_line_id` to `inventory_reservations` so the
+      reconciliation could be a query, and left the table's own key out of the answer - which is the
+      difference between seeing that a line is held and being able to say *which hold* to end. The
+      half that works: `reserve_inventory_for_order` answers `reservation_id`, so a hold an agent
+      raised itself is nameable afterwards; the half that does not is every hold that predates it,
+      including all of this server's `RESERVATION_BACKFILL` rows. The work is one column in a view
+      that already joins to that row, its grant, a `7_1` probe, and case 33 re-prompted so the agent
+      finds the id rather than being handed it.
+- [ ] **`vw_warehouses`, and `get_warehouses` on it** - the same class, one notch smaller than it
+      looked: the ids are readable from `get_orders` and `get_order_lines` now (they were not, until
+      the projection was fixed on 2026-11-07), so what is left open is the empty database - an agent
+      handed "the Main Warehouse" before any document names it has nothing to resolve it with. The
+      door is a view over `warehouses` - tenant-coded, RLS-forced, and keyed
+      `UNIQUE (tenant_id, warehouse_code)` already, so the work is a SELECT plus 0009's obligations
+      rather than a new shape - and then one registered read in `pkg/orders`, its row in the agent's
+      README, a `7_1` probe, and cases 25 and 26 re-run against a database with no documents in it.
+      The alternative, coercing a code into an id in the Go layer, is declined on 0002's grounds:
+      two ways to name one identity is how a wrong document gets written quietly, and it is why the
+      `create_order` tool refuses `MAIN` before any SQL runs.
+      These two take **0032** and **0033** in whichever order they land: `db/migrations/` numbers by
+      arrival and not by importance, and 0026 is the record of what happens when a file takes a
+      number that was another file's plan.
 
 | Task | Finding | Shape of the work |
 |---|---|---|
@@ -119,7 +165,7 @@ Both were planned as `0019`/`0020` and moved — see "Why the two planned migrat
 ## Success Metrics
 
 - **Acceptance:** every registered tool has a case in `docs/agent_requirements/agent_test_plan.md`, and the suite is green - a tool no prompt exercises is a tool whose contract nobody knows
-- **Schema:** `verify.sh` 37 green, `test-functions.sh` reporting no REGRESSION and only documented KNOWN-OPEN rows, no residue
+- **Schema:** `verify.sh` 38 green, `test-functions.sh` reporting no REGRESSION and only documented KNOWN-OPEN rows, no residue
 - **Reliability:** the inventory timer's ticks have no gaps in `agent_interactions`; a missing row is an outage, not a log search
 - **Response Time:** under 30 seconds for a typical single-tool turn on the local model; the plan's runs are the measurement
 - **Honesty:** `scripts/docs/check_agent_docs.sh` green, and no page in this repository claiming semantic search works

@@ -53,7 +53,7 @@ Thank you for your interest in contributing to Agent First ERP CRM! This documen
    agents and the harnesses expect:
    ```bash
    ./scripts/db/db up        # container, TLS, roles, then every file in db/migrations/ in order
-   ./scripts/db/db verify    # 37 structural assertions over the catalog you just built
+   ./scripts/db/db verify    # 38 structural assertions over the catalog you just built
    ./scripts/db/db seed      # db/seeds/*.sql - demo data, idempotent, no DDL
    ./scripts/db/db status    # what has been applied, and which container is running
    ```

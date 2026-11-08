@@ -12,6 +12,8 @@ import (
 
 	"jada-backend/pkg/tools"
 	"jada-backend/pkg/turn"
+	"sort"
+	"strconv"
 )
 
 // TestMain quiets the package's logging: these tests exercise write paths, and each one logs its
@@ -584,4 +586,182 @@ func expectedArg(tool, arg string) bool {
 		return arg == "entity_id" || arg == "followup"
 	}
 	return true
+}
+
+// TestEveryDoorKeyIsReadableFromARead is the property that makes a write tool callable in a
+// conversation rather than only in psql: every id a door's parameters name has to be returnable by
+// some read in this same process. It is asserted against the SQL the tools build, not against a list
+// in a comment, for the reason that took a week to find - `add_communication` told callers to pass a
+// contact_id, and refused to guess one, while the read that shows you who was on the call returned
+// contact_name and left the id in the view.
+func TestEveryDoorKeyIsReadableFromARead(t *testing.T) {
+	q := &fake{rows: []map[string]any{}}
+	readable := map[string]bool{}
+	sent := 0
+	for _, d := range Tools(q) {
+		if !d.Policy.ReadOnly {
+			continue
+		}
+		// Every read, driven with each selector it offers, because a tool's projection can differ by
+		// branch and the union is what a caller can actually rely on.
+		for _, args := range readArgShapes(d.Name) {
+			if _, err := d.ExecuteContext(runCtx("88888888-8888-8888-8888-888888888888"), args); err != nil {
+				continue
+			}
+			for _, c := range q.calls {
+				if c.name != "" {
+					continue
+				}
+				sent++
+				for _, col := range selectedColumns(c.sql) {
+					readable[col] = true
+				}
+			}
+			q.calls = nil
+		}
+	}
+	if sent == 0 {
+		t.Fatal("no read in this package sent a query the test could inspect")
+	}
+
+	// The keys the doors take. `id` is what vw_customers' row calls the entity: the column is named
+	// for the view and the argument is named for the table, and both spellings are accepted here so
+	// that renaming one without the other is a failing build rather than an unreachable door.
+	wanted := map[string][]string{
+		"customer_id": {"id", "entity_id"}, // update_customer, mark_customer_followup
+		"entity_id":   {"id", "entity_id"}, // add_communication
+		"contact_id":  {"contact_id"},      // add_communication, and the one this test found missing
+		"parent_id":   {"id", "communication_id"},
+	}
+	for arg, cols := range wanted {
+		ok := false
+		for _, c := range cols {
+			if readable[c] {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			t.Errorf("a door takes %s and no read here returns any of %v - the argument is only fillable "+
+				"by a human who already has it, which is the difference between a tool and a schema.\n"+
+				"Columns this package's reads do return: %s",
+				arg, cols, strings.Join(sortedKeys(readable), " "))
+		}
+	}
+}
+
+// readArgShapes is the per-tool argument sweep: one call per selector, plus the empty one the tools
+// that need no selector accept.
+func readArgShapes(name string) []map[string]any {
+	switch name {
+	case "get_customer_info":
+		return []map[string]any{
+			{"customer_name": "Jane"}, {"email": "j@x.test"}, {"phone": "+1777"},
+			{"entity_id": float64(3)}, {"customer_name": "Jane", "limit": 5},
+		}
+	case "get_customer_communications":
+		return []map[string]any{
+			{"entity_id": float64(3)}, {"customer_name": "Jane"},
+			{"entity_id": float64(3), "direction": "INBOUND", "since_days": 7}, {"limit": 5},
+		}
+	case "get_entity_stats":
+		return []map[string]any{{"entity_id": float64(3)}, {"entity_name": "Jane"}, {"limit": 5}}
+	case "get_followup_customers":
+		return []map[string]any{{}, {"days_threshold": 14}}
+	}
+	return []map[string]any{{}}
+}
+
+func selectedColumns(sql string) []string {
+	up := strings.Join(strings.Fields(sql), " ")
+	i := strings.Index(strings.ToUpper(up), "SELECT ")
+	j := strings.Index(strings.ToUpper(up[i:]), " FROM")
+	if i < 0 || j <= 0 {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(up[i+len("SELECT "):i+j], ",") {
+		part = strings.TrimSpace(part)
+		if k := strings.LastIndex(strings.ToUpper(part), " AS "); k >= 0 {
+			part = part[k+4:]
+		}
+		if d := strings.LastIndex(part, "."); d >= 0 {
+			part = part[d+1:]
+		}
+		if part != "" && part != "*" {
+			out = append(out, strings.ToLower(part))
+		}
+	}
+	return out
+}
+
+func sortedKeys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// TestNoQuerySendsAParameterItsSQLNeverNames is the sibling property, and in this fork it is
+// prevention: no filter here is placeholder-free today, so nothing has failed the way
+// agents/sales' get_suppliers failed 20 of its 28 calls. The clause builder is the same code in all
+// three backends, and this is what keeps a filter added in this one from arriving as a read that
+// Postgres refuses whole.
+func TestNoQuerySendsAParameterItsSQLNeverNames(t *testing.T) {
+	for _, d := range Tools(&fake{}) {
+		if !d.Policy.ReadOnly {
+			continue
+		}
+		for _, args := range readArgShapes(d.Name) {
+			q := &fake{rows: []map[string]any{}}
+			if _, err := d.ExecuteContext(runCtx("99999999-9999-9999-9999-999999999999"), args); err != nil {
+				continue
+			}
+			for _, c := range q.calls {
+				if c.name != "" {
+					continue
+				}
+				used, highest := map[int]bool{}, 0
+				for _, m := range dollarRefs(c.sql) {
+					used[m] = true
+					if m > highest {
+						highest = m
+					}
+				}
+				if highest > len(c.args) {
+					t.Errorf("%s names $%d and sends %d argument(s): %s", d.Name, highest, len(c.args), c.sql)
+					continue
+				}
+				for n := 1; n <= highest; n++ {
+					if !used[n] {
+						t.Errorf("%s sends %d arguments and never names $%d - a parameter Postgres cannot "+
+							"type, so the whole query fails with 42P18:\n  %s", d.Name, len(c.args), n, c.sql)
+					}
+				}
+			}
+		}
+	}
+}
+
+func dollarRefs(sql string) []int {
+	var out []int
+	for i := 0; i < len(sql); i++ {
+		if sql[i] != '$' {
+			continue
+		}
+		j := i + 1
+		for j < len(sql) && sql[j] >= '0' && sql[j] <= '9' {
+			j++
+		}
+		if j == i+1 {
+			continue
+		}
+		if n, err := strconv.Atoi(sql[i+1 : j]); err == nil {
+			out = append(out, n)
+		}
+		i = j - 1
+	}
+	return out
 }

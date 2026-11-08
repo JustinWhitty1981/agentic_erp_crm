@@ -19,6 +19,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -27,6 +28,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -483,9 +485,39 @@ func normalise(v any) any {
 		// Rendered in the 8-4-4-4-12 form the database itself prints, so the value in a tool's answer
 		// is textually identical to the value in psql.
 		return fmt.Sprintf("%x-%x-%x-%x-%x", t[0:4], t[4:6], t[6:8], t[8:10], t[10:16])
+	case pgtype.Numeric:
+		// A numeric column, as pgx hands it over when the query's target is `any`: a STRUCT, and an
+		// invisible one to json.Marshal, because pgtype.Numeric implements Marshaler. So a tool's JSON
+		// has been right all along (`"total_value":1320.00000000`) while anything reading the same
+		// value in Go has not: `%v` prints its four fields, which is how a deployed agent's summary
+		// line came to read "IN-1002 at Main Warehouse has {0 0 false finite true} available against
+		// {300000 -4 false finite true}", and how another one's hourly reconciliation sums its
+		// unresolved units to 0 - filing that as a clean finding, in the one column anybody queries,
+		// while vw_order_commitments said 13 over the same rows. Both measured here, 2026-11-07.
+		//
+		// The text comes from MarshalJSON rather than from a float64 on purpose. numeric carries a
+		// scale, and 1320.00000000 is the stored fact; converting to float64 would have fixed the Go
+		// reads by rewriting every number in every answer and every trajectory row from here - 14.50
+		// becoming 14.5, 0018's currency scales flattened - which is a bigger change to the record
+		// than the bug deserves. json.Number marshals as exactly the bytes it holds, so the JSON plane
+		// is untouched and a Go reader gets something it can parse.
+		if !t.Valid {
+			return nil
+		}
+		b, merr := t.MarshalJSON()
+		if merr != nil {
+			return t
+		}
+		if len(b) > 1 && b[0] == '"' {
+			// NaN, which pgx quotes because a JSON number cannot hold it. Unquoted here it would be an
+			// invalid json.Number, and json.Marshal would fail the whole row over one quiet cell.
+			return string(b[1 : len(b)-1])
+		}
+		return json.Number(b)
 	case uint64:
 		// json.Marshal handles it, but a uint64 above 2^53 cannot be read back exactly by every
-		// JSON parser downstream, and pgx produces one for a numeric column it cannot fit in an int64.
+		// JSON parser downstream, and pgx can produce one for an unsigned aggregate with no signed home.
+		// A numeric column is not that: it arrives as pgtype.Numeric, the case above.
 		return t
 	default:
 		return v

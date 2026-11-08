@@ -7,6 +7,7 @@ Three things can be "started" in this repository, and they are different exercis
 | **The database** | The schema, its migrations, and the harnesses that assert them | `scripts/db/`, `db/` |
 | **The customer service agent** | A deployed agent: Go backend, React UI, HTTP and SSE | `agents/customer_service/` |
 | **The inventory agent** | The same loop with stock tools and an in-container check timer | `agents/inventory/` |
+| **The sales & procurement agent** | The same loop with the orders surface and an in-container keeper | `agents/sales/` |
 
 `archive/blueprint/` is the reference implementation the other two descend from — a single-file Python
 LangChain agent on Telegram. It is lineage: read it for the pattern, deploy from `agents/`. The two
@@ -66,22 +67,28 @@ prompted — they are the state, not a constant, so read them as a smoke test ra
 ```bash
 cd agents/customer_service && docker compose up --build -d   # :4550
 cd agents/inventory        && docker compose up --build -d   # :4560
+cd agents/sales            && docker compose up --build -d   # :4570
 curl -s localhost:4550/api/health | jq
 curl -s localhost:4560/api/health | jq
+curl -s localhost:4570/api/health | jq
 ```
 
 `health` is the first thing to read, because a process starts **degraded rather than dead** when the
 database is configured and not answering: HTTP 503, a `degraded_reason`, and no domain tools
 registered. That is a maintenance window not taking the UI down with it. The state you want is
-`"status": "healthy"` with `crm_tools: 8` on `:4550` and `inventory_tools: 5` on `:4560` — `healthy`
+`"status": "healthy"` with `crm_tools: 8` on `:4550`, `inventory_tools: 5` on `:4560` and `order_tools: 12`
+on `:4570` — `healthy`
 rather than `ok`, which is what the field actually says. A `degraded` at HTTP 200 is the other case:
 a box deliberately configured with no database, which is a choice rather than a fault.
 
-Both read the same `afpc-pg` and the same tenant, and they are distinguished in every row by
-`AGENT_ROLE` → `agent_interactions.bot_id` and `communications.agent_id`.
+All three read the same `afpc-pg` and the same tenant, and they are distinguished in every row by
+`AGENT_ROLE` → `agent_interactions.bot_id` and `communications.agent_id`. Three compose projects, three
+generated `.env` files, three containers (`afpc-customer-service`, `afpc-inventory-agent`,
+`afpc-sales-agent`), each mapping its own host port to the binary's 8000.
 
 Configuration comes from the environment; the per-agent READMEs have the table for every key
-(`agents/customer_service/README.md`, `agents/inventory/README.md`). The four that decide whether it
+(`agents/customer_service/README.md`, `agents/inventory/README.md`, `agents/sales/README.md`). The four
+that decide whether it
 works:
 
 | | |
@@ -155,9 +162,9 @@ SELECT * FROM vw_tool_calls WHERE run_id = '<that run_id>';
 ./scripts/agents/tool_testplan.sh
 ```
 
-One prompt per registered tool of both deployed agents — 21 cases, 25 verdicts — each asserted on
+One prompt per registered tool of all three deployed agents — 36 cases, 40 verdicts — each asserted on
 three independent planes: the call happened, the state is real, the run recorded itself. The agent's
-prose is never the assertion. It takes 10–25 minutes because every case is a real model turn, and it
+prose is never the assertion. It takes 15–40 minutes because every case is a real model turn, and it
 re-runs cleanly because the fixtures carry a timestamp. Plan and rationale:
 [`docs/agent_requirements/agent_test_plan.md`](docs/agent_requirements/agent_test_plan.md).
 
@@ -208,16 +215,25 @@ id — which is why the acceptance harness stamps its threads per invocation.
 container, so no gap means the process was down; check `docker ps` and
 `INVENTORY_CHECK_INTERVAL_MINUTES`. "Did it run" is a query here, not a log search.
 
+The same question about the sales agent's two jobs — the claim sweep and the commitment reconciliation
+— is `WHERE bot_id = 'sales' AND human_input LIKE '<scheduled order housekeeping%'`, and its interval is
+`ORDERS_HOUSEKEEPING_INTERVAL_MINUTES`. One difference is worth knowing before you trust either list: the
+sales tick has a half that can be refused by a privilege rather than by a failure, so read
+`final_output` as well as `error_message`. "claims swept: 0 expired collected" with no error is a clean
+hour; the same sentence beginning `CLAIM SWEEP FAILED` is 0011's grant missing again.
+
 ## Next steps
 
 1. **Read the loop that ships:** `agents/customer_service/backend_go/pkg/agent/agent.go` — the dispatch, the trajectory `defer`, rehydration. `archive/blueprint/bot.py` is the same pattern in one Python file (lineage — [ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md)).
-2. **Read the deployments:** `agents/customer_service/README.md` and `agents/inventory/README.md` —
-   tools, environment, endpoints.
+2. **Read the deployments:** the three agent READMEs — `agents/customer_service/`,
+   `agents/inventory/`, `agents/sales/` — tools, environment, endpoints.
 3. **Read the design:** `architecture.md`, then `docs/database/agent_first_erp_crm_mental_model.md`.
 4. **Build a new agent:** copy `agents/customer_service/`, replace `pkg/crm` with your domain package,
    write the requirement first (`docs/agent_requirements/<role>/`), put the write rules in a migration
    before the tool that calls them, and keep the trajectory writer — a run you cannot read back is a run
-   you cannot fix.
+   you cannot fix. That recipe has now been followed twice: `agents/inventory/` is a domain package and
+   four identity strings, and `agents/sales/` is that plus seven doors that were already true in SQL.
+   The second fork is the cheaper one, which is the claim the loop is being asked to support.
 
 ---
 

@@ -10,7 +10,7 @@ development server, so **the data volume is durable and is never recreated impli
 | Secrets | `dev/.env`, mode 600, gitignored. Not in the repo, not in the image |
 | TLS | volume `afpc_tls` at `/certs`; CA copy in `dev/tls/afpc-ca.crt` |
 | Migrations | `db/migrations/`, applied in order by `scripts/db/migrate.sh` |
-| The agents | `afpc-customer-service` from `agents/customer_service/` on `:4550`, and `afpc-inventory-agent` from `agents/inventory/` on `:4560` - two compose projects, one database, separated in every row by `AGENT_ROLE`. `agents/jada` is the reference drop the first was derived from, and `:4545` is the container that predates both |
+| The agents | `afpc-customer-service` from `agents/customer_service/` on `:4550`, `afpc-inventory-agent` from `agents/inventory/` on `:4560`, and `afpc-sales-agent` from `agents/sales/` on `:4570` - three compose projects, one database, separated in every row by `AGENT_ROLE`. `agents/jada` is the reference drop the first was derived from, and `:4545` is the container that predates all three |
 | Not here | the LiteLLM database (`litellm-db-1`) publishes no host port and is on its own network; nothing in this setup reads or routes to it |
 
 ## Auditing from any server on the network
@@ -225,6 +225,11 @@ migration this deployment needed, 0021/0023/0022 - which is how a database migra
 announces itself instead of failing on the first write. `agents/inventory/` probes its own pair
 (`reserve_inventory_for_order`, `save_memory`): the list is a claim about which doors a process opens,
 and a forked probe list reports `healthy` about a database that agent cannot write to.
+`agents/sales/` probes nine, because it opens more doors and one of them is not a tool: the seven its
+surface calls, plus `idempotency_sweep` and `save_memory`, which are the two its scheduled tick calls.
+That list is how 0031 became findable - the health endpoint said `healthy` while the tick answered
+`42501`, because a probe list that omits a function the timer runs cannot see the grant that function
+lacks.
 
 **A streaming turn hangs for the whole timeout behind a buffering proxy.** SSE needs to reach the
 client incrementally; anything that buffers the response turns a working agent into one that appears

@@ -7,7 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	"fmt"
 	"jada-backend/pkg/turn"
+	"sort"
+	"strconv"
 )
 
 // fake is the whole database an inventory tool test needs: the calls it made, and the answers to
@@ -254,9 +257,9 @@ func TestShortfallAndSupplyAreArithmeticWithAnUnknown(t *testing.T) {
 
 func TestMovementSummaryResolvesSkuThroughViews(t *testing.T) {
 	f := &fake{queryRows: [][]map[string]any{
-		{{"item_id": itemA}},            // the sku lookup
+		{{"item_id": itemA}},                            // the sku lookup
 		{{"movement_date": "d", "total_outbound": 4.0}}, // the history
-		{{"avail": 20.0}},               // the availability sum
+		{{"avail": 20.0}},                               // the availability sum
 	}}
 	out, err := tool(t, f, "get_item_movement_summary")(context.Background(), map[string]any{"sku": "IN-1000"})
 	if err != nil {
@@ -305,4 +308,144 @@ func TestErrorWrappingStaysHonest(t *testing.T) {
 			"order_type": "SALES", "order_id": ordA}); !errors.Is(err, sentinel) {
 		t.Errorf("the SQLSTATE's message was replaced, not wrapped: %v", err)
 	}
+}
+
+// TestShortfallReadsWhatANumericColumnSends is the arithmetic in the test above, done with the values
+// a row actually carries. The distinction is a day old and it was live: `quantity_available` and
+// `reorder_point` are `numeric`, pgx hands numeric to Go as pgtype.Numeric, and `num` had no arm for
+// it - so `shortfall` answered nil, and `get_low_stock_items` advertised `suggested_shortfall` while
+// every answer it gave said "no shortfall". Measured here: the row that read as no shortfall was 4.0
+// available against a 30.0 reorder point, twenty-six units short, in the agent's own JSON.
+func TestShortfallReadsWhatANumericColumnSends(t *testing.T) {
+	if got := shortfall(map[string]any{
+		"quantity_available": json.Number("4.0000"), "reorder_point": json.Number("30.0000"),
+	}); got != 26.0 {
+		t.Errorf("shortfall on a real numeric row = %v, want 26 - this is the exact row the alert tool "+
+			"was reporting as having no shortfall", got)
+	}
+	// Above the point: nil, not a negative shortage. "No shortfall" and "negative shortfall" are
+	// different sentences, and the tool's own description says so.
+	if got := shortfall(map[string]any{
+		"quantity_available": json.Number("31.0000"), "reorder_point": json.Number("30"),
+	}); got != nil {
+		t.Errorf("above the reorder point must answer nil, got %v", got)
+	}
+	// The integer widths pgx chooses for integer columns, which num() also had to learn.
+	if f, ok := num(int32(14)); !ok || f != 14 {
+		t.Errorf("num(int32) = %v,%v; `integer` arrives as an int32 (pgtype_default.go:164)", f, ok)
+	}
+	if f, ok := num(int16(7)); !ok || f != 7 {
+		t.Errorf("num(int16) = %v,%v; `smallint` arrives as an int16", f, ok)
+	}
+	// SUM() over a numeric keeps its scale, so days_of_supply has to parse rather than truncate.
+	avail := json.Number("20.0000")
+	f, ok := num(avail)
+	if !ok {
+		t.Fatal("a SUM() over a numeric column read as no number, so days_of_supply is unknown forever")
+	}
+	rows := []map[string]any{{"total_outbound": json.Number("10.0000")},
+		{"total_outbound": json.Number("10.0000")}}
+	if d := daysOfSupply(rows, 30, &f); d != 30.0 {
+		t.Errorf("days_of_supply on numeric rows = %v, want 30 (20 available, 20 over 30 days)", d)
+	}
+}
+
+// TestNoQuerySendsAParameterItsSQLNeverNames is the sales fork's property, brought here because the
+// clause builder is the same code in all three backends and the defect that found it was in one of
+// them. A read that fails whole because a filter had nothing to bind is not a filter problem, it is a
+// broken tool, and it surfaces to a human as "the agent cannot see rows that are there".
+func TestNoQuerySendsAParameterItsSQLNeverNames(t *testing.T) {
+	cases := []struct {
+		tool string
+		args []map[string]any
+	}{
+		{"get_low_stock_items", []map[string]any{
+			{}, {"alert_level": "CRITICAL"}, {"category": "Cons"}, {"warehouse_id": whA},
+			{"category": "Cons", "alert_level": "LOW"}, {"limit": 5},
+		}},
+		{"get_item_availability", []map[string]any{
+			{}, {"only_need_reorder": true}, {"only_need_reorder": false},
+			{"sku": "IN-1002"}, {"item_id": itemA}, {"warehouse_id": whA, "only_need_reorder": true},
+			{"sku": "IN-1002", "limit": 5},
+		}},
+		{"get_item_movement_summary", []map[string]any{
+			{}, {"sku": "IN-1002"}, {"item_id": itemA}, {"days": 14}, {"sku": "IN-1002", "days": 7},
+		}},
+		{"get_inventory_valuation", []map[string]any{
+			{}, {"warehouse_id": whA}, {"category": "Cons"}, {"category": "Cons", "warehouse_id": whA},
+		}},
+	}
+	for _, tc := range cases {
+		for _, args := range tc.args {
+			q := &fake{queryRows: [][]map[string]any{{}}}
+			if _, err := tool(t, q, tc.tool)(runCtx("66666666-6666-6666-6666-666666666666"), args); err != nil {
+				continue // refused on its own arguments: no query was sent
+			}
+			for _, c := range q.calls {
+				if c.name != "" {
+					continue // a door call is positional, and its arity is pinned above
+				}
+				used, highest := map[int]bool{}, 0
+				for _, m := range dollarRefs(c.sql) {
+					used[m] = true
+					if m > highest {
+						highest = m
+					}
+				}
+				if highest > len(c.args) {
+					t.Errorf("%s%v names $%d and sends %d argument(s): %s",
+						tc.tool, showArgs(args), highest, len(c.args), c.sql)
+					continue
+				}
+				for n := 1; n <= highest; n++ {
+					if !used[n] {
+						t.Errorf("%s%v sends %d arguments and never names $%d - a parameter Postgres "+
+							"cannot type, so the whole query fails with 42P18:\n  %s",
+							tc.tool, showArgs(args), len(c.args), n, c.sql)
+					}
+				}
+			}
+		}
+	}
+}
+
+// dollarRefs returns the parameter positions a query names. Scanned rather than matched: these queries
+// are built in this package, so a `$` is always a parameter and never a literal.
+func dollarRefs(sql string) []int {
+	var out []int
+	for i := 0; i < len(sql); i++ {
+		if sql[i] != '$' {
+			continue
+		}
+		j := i + 1
+		for j < len(sql) && sql[j] >= '0' && sql[j] <= '9' {
+			j++
+		}
+		if j == i+1 {
+			continue
+		}
+		if n, err := strconv.Atoi(sql[i+1 : j]); err == nil {
+			out = append(out, n)
+		}
+		i = j - 1
+	}
+	return out
+}
+
+// showArgs prints a case's arguments in a fixed order, so a failing line names the combination to
+// re-run rather than a Go map's iteration order.
+func showArgs(m map[string]any) string {
+	if len(m) == 0 {
+		return " with no arguments"
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%v", k, m[k]))
+	}
+	return " with " + strings.Join(parts, " ")
 }

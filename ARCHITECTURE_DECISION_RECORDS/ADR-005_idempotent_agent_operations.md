@@ -55,19 +55,34 @@ Read-only operations are exempt.
   so the model never types an audit-critical value and a reissued call inside one run replays. Across
   runs the keys differ on purpose - two conversations about the same customer are two events.
 - **Which functions are guarded is a query, not a memory:** `vw_idempotency_status` answers pattern 1 /
-  2 / 3 or **UNGUARDED** per state-changing function. Today: 5 by claim
-  (`add_customer`, `add_communication`, `save_memory`, `reserve_inventory_for_order`,
-  `execute_inventory_movement`), 1 by natural uniqueness (`audit_summary_refresh`), 1 by version column
-  (`retire_item`), and 3 **UNGUARDED** - `update_customer`, `mark_customer_followup`,
-  `decommission_warehouse`. The first two are safe by idempotence-of-setting-values rather than by claim;
-  the third is a known gap, and a tool that writes must either join the claim ladder or say why not.
+  2 / 3 or **UNGUARDED** per state-changing function. Measured on this server, 2026-11-07: **15 take a
+  claim** - the four the deployment started with (`add_customer`, `add_communication`, `save_memory`,
+  `execute_inventory_movement`), the stock reservation door, and the ten the orders programme added
+  (`create_order`, `add_order_line`, `transition_order`, `add_supplier`, `add_work_centre`,
+  `plan_work_order_operation`, `ship_sales_order`, `receive_purchase_order`,
+  `book_work_order_production`, `cancel_inventory_reservation`); 1 by natural uniqueness
+  (`audit_summary_refresh`), 1 by version column (`retire_item`), and 3 **UNGUARDED** - `update_customer`,
+  `mark_customer_followup`, `decommission_warehouse`. The first two are safe by
+  idempotence-of-setting-values rather than by claim; the third is a known gap, and a tool that writes
+  must either join the claim ladder or say why not.
 - **A refusal releases its claim** - 0016 proved that by measurement, and probe I fixes the world rather
   than the arguments to keep it true: a key must not become a permanent "no".
 - **"Emit metrics for idempotent hit vs new execution" is not implemented.** There is no metrics endpoint
-  in either backend. The columns exist (`hits`, `status`) and the live sum of `hits` is 0, because the
-  replay path is not instrumented - which is precisely the difference between a guard and a guard you can
-  see working. `PLAN.md` carries the scheduling half: `idempotency_sweep` runs for nobody unless someone
-  schedules it, and until then `expires_at` is a promise with no keeper.
+  in any of the three backends. The columns exist (`hits`, `status`) and the live sum of `hits` is 0,
+  because the replay path is not instrumented - which is precisely the difference between a guard and a
+  guard you can see working.
+- **The retention clock has a keeper, and it took a migration to notice.** *Amended 2026-11-07.* This
+  ADR's original closing sentence - "`idempotency_sweep` runs for nobody unless someone schedules it, and
+  until then `expires_at` is a promise with no keeper" - was true for four months and is now false in a
+  way worth reading carefully, because the missing piece was never the timer. `agents/sales` runs the
+  sweep hourly (`runHousekeeping`), and the sweep failed anyway: 0011 had revoked `EXECUTE` from
+  `afpc_app` on purpose, on the grounds that collection is an operator action, and that closure was
+  asserted once at apply time and never re-checked, so a keeper with a schedule and no grant looked, in
+  the one column anybody reads, like a keeper that had found nothing to collect. **0031** is the grant,
+  justified by a two-tenant measurement of reach rather than by a restatement of this paragraph, and
+  `verify.sh` B30 now watches all five facts that make it the narrow thing it is. The ADR's decision
+  stands - a claim is one row, keyed, with a lease and a retention - and what it had not said out loud is
+  that **a policy needs a caller and a privilege, which live in different files.**
 
 ## Consequences
 

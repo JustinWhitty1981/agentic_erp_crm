@@ -12,14 +12,16 @@ Welcome! This guide is designed specifically for AI agents working on the Agent 
 - **[archive/README.md](archive/README.md)** - the frozen lineage: what `archive/blueprint/` is, and why nothing is added to it
 
 ### 🤖 Agent-Specific Guides
-- **[agents/customer_service/README.md](agents/customer_service/README.md)** - **the deployed agent**: Go backend, tools, environment, endpoints
+- **[agents/customer_service/README.md](agents/customer_service/README.md)** - **the first deployed agent** (the CRM half): Go backend, tools, environment, endpoints
 - **[agents/inventory/README.md](agents/inventory/README.md)** - **the second deployed agent**: same loop, stock tools, and the in-container check timer
-- **[agents/customer_service/backend_go/](agents/customer_service/backend_go/)** - that backend's source
+- **[agents/sales/README.md](agents/sales/README.md)** - **the third deployed agent**: same loop, the orders surface (5 reads, 7 doors), and the keeper for claim retention and the reconciliation
+- **[agents/customer_service/backend_go/](agents/customer_service/backend_go/)** - that backend's source, and the one the other two are forked from
 - **[archive/blueprint/AGENT_SUMMARY.md](archive/blueprint/AGENT_SUMMARY.md)** - the pattern's first statement, in Python - lineage, not a runtime (ADR-006)
 - **[archive/blueprint/tools/README.md](archive/blueprint/tools/README.md)** - Tool development guidelines
 - **[docs/agent_requirements/customer_service/customer_service.md](docs/agent_requirements/customer_service/customer_service.md)** - Customer service agent requirements
 - **[docs/agent_requirements/inventory/inventory.md](docs/agent_requirements/inventory/inventory.md)** - Inventory agent requirements
-- **[docs/agent_requirements/agent_test_plan.md](docs/agent_requirements/agent_test_plan.md)** - Acceptance plan for every tool of both deployed agents, and its executable form `scripts/agents/tool_testplan.sh`
+- **[docs/agent_requirements/sales/sales.md](docs/agent_requirements/sales/sales.md)** - Sales & procurement agent requirements, corrected in place on 2026-11-07 to what the doors actually answer
+- **[docs/agent_requirements/agent_test_plan.md](docs/agent_requirements/agent_test_plan.md)** - Acceptance plan for every tool of all three deployed agents (36 cases), and its executable form `scripts/agents/tool_testplan.sh`
 - **[docs/ATTACHMENT_SYSTEM.md](docs/ATTACHMENT_SYSTEM.md)** - Attachment system documentation
 
 ### 🏛️ Architecture Decision Records
@@ -54,12 +56,15 @@ Agent First ERP CRM is a database-first AI agent operating system that enables:
 - **Autonomous customer service agents** with full CRM capabilities - deployed, in `agents/customer_service/`
 - **An inventory control agent** on the same loop - deployed, in `agents/inventory/`, with a scheduled
   check whose every tick files a trajectory row
+- **A sales and procurement agent** on the same loop again - deployed, in `agents/sales/`, driving the
+  orders schema (`0027`-`0031`) through seven doors, and running the hourly keeper that claims retention
+  and the line-by-line reconciliation owe
 - **Tool-based architecture** where agents compose functions dynamically
 - **Verbose agent logging**, with every run's trajectory queryable from the database it wrote
 - **Semantic search** using PGVector - *the indexes exist (`0012`) and nothing fills them*: no embedder
   in the current deployment produces the 1536 dimensions the columns declare. Read
   `agents/customer_service/README.md`'s "What is not here" before planning around this one
-- **Telegram integration** - *not in either deployed agent*, which serve HTTP and SSE. The reference
+- **Telegram integration** - *not in any of the three deployed agents*, which serve HTTP and SSE. The reference
   implementation in `archive/blueprint/` and the upstream checkout at `/home/justin/agents/dumb_agent` both
   have working adapters; the transport is a `main.go` change and the loop does not care which is attached
 
@@ -67,12 +72,17 @@ Agent First ERP CRM is a database-first AI agent operating system that enables:
 
 ## Key Concepts
 
-### Three processes, one pattern
+### Four processes, one pattern
 - **Deployed, the CRM half**: `agents/customer_service/` - a Go backend, React UI, HTTP and SSE, and the
   trajectory writer. Start here to change what this agent does.
 - **Deployed, the stock half**: `agents/inventory/` - the same loop as a sibling fork, with `pkg/inventory`
   replacing `pkg/crm` and an in-container timer added. It is the evidence for the claim that the loop is
   reusable: one domain package, four identity strings, one working second agent.
+- **Deployed, the orders half**: `agents/sales/` - the same loop forked a second time, with `pkg/orders`
+  (five reads, seven doors) replacing `pkg/crm` and a different kind of timer: its tick has no model in
+  the loop at all, because both of its jobs are statements the database answers exactly. Two forks of
+  one loop, three months apart, is the claim `architecture.md` makes about the pattern; the second one
+  was the cheaper of the two, which is what makes it evidence rather than repetition.
 - **Reference**: `archive/blueprint/bot.py` (~215 lines) - the same loop in one Python file, with LangChain and
   Telegram. The pattern's shortest statement, and **deprecated as a runtime**: it opens a plaintext
   connection per tool call, checkpoints memory in process, and runs one polling worker. New agents
@@ -90,8 +100,9 @@ All agent state and knowledge lives in PostgreSQL:
 - **Audit logs**: Complete conversation and action history
 
 ### Agent Roles
-1. **Chief Agent Officer (CAO)** - Validation and orchestration layer. Not built; the customer service
-   agent has the detection half of an escalation and no second agent to route one to
+1. **Chief Agent Officer (CAO)** - Validation and orchestration layer. Not built - and note that three
+   deployed agents do not make one: each of them has the detection half of an escalation and nothing
+   above them to route one to. What stands in for the CAO today is named in *Agent Validation* below
 2. **Customer Service Agent** - Handles customer inquiries and support. **Deployed**, in
    `agents/customer_service/`; it is the role `AGENT_ROLE` defaults to
 3. **Inventory Agent** - Monitors stock, alerts on shortages, reserves on instruction. **Deployed**,
@@ -100,7 +111,16 @@ All agent state and knowledge lives in PostgreSQL:
    an `agent_interactions` row, so "it ran" is a query and not a log. Requirements in
    `docs/agent_requirements/inventory/inventory.md`, rewritten in place on 2026-11-04 to name the
    views and doors that exist rather than the tables that were reviewed out of existence
-4. **Communication Agent** - Handles multi-channel messaging. Not built
+4. **Sales & Procurement Agent** - Raises documents of all three kinds, moves them as far as a status
+   can be moved by hand, and finishes the ones stock finishes. **Deployed**, in `agents/sales/`
+   (`:4570`, `AGENT_ROLE=sales`): the same Go loop, `pkg/orders`' twelve domain tools, and an hourly tick
+   whose every run files an `agent_interactions` row - the keeper `0011`'s retention policy and `0030`'s
+   NOTICE both said was owed. Requirements in
+   `docs/agent_requirements/sales/sales.md`; the doors it declines to register are explained there too -
+   `book_work_order_production` and `plan_work_order_operation`, because a routing does not exist yet,
+   and `execute_inventory_movement`, for the inventory agent's inherited reason that a process which can
+   move stock freely can silence the alarms its own documents raise
+5. **Communication Agent** - Handles multi-channel messaging. Not built
 
 ---
 
@@ -148,31 +168,52 @@ Follow [QUICKSTART.md](QUICKSTART.md) for Docker-based deployment.
    `db/migrations/NNNN_*.sql` function, so start there and not in the Go file (ADR-002)
 2. Give the migration the next free number. `migrate.sh` rejects a file numbered at or below the highest
    applied, which is why the two planned ones became 0024 and 0025 - see db/MIGRATIONS.md. The highest
-   applied today is **0030** (the fourth file of the orders programme; 0026 before it took its number
-   rather than the free 0024 because a bug fix and a planned feature are not the same queue), so a new
-   file here is `0031_*` unless one of the planned two lands first
-3. Wire the tool in `agents/customer_service/backend_go/pkg/crm/tools.go`: read a `vw_*` view or call the
-   function, send an idempotency key if it writes (ADR-005), and record what it touched with `turn.Source`
+   applied today is **0031** (the fifth file of the orders programme; 0026 took a number rather than the
+   free 0024 because a bug fix and a planned feature are not the same queue), so a new file here is
+   `0032_*` unless one of the planned two lands first. `0031` is the grant that let `agents/sales`' keeper
+   run, and it is the one migration in this set that changes no row - which is worth knowing before you
+   assume a numbered file must be schema-shaped to be necessary
+3. Wire the tool in the domain package of the agent that owns it -
+   `agents/customer_service/backend_go/pkg/crm/tools.go`, `agents/inventory/.../pkg/inventory/tools.go`,
+   or `agents/sales/.../pkg/orders/tools.go`: read a `vw_*` view or call the function, send an
+   idempotency key if it writes (ADR-005), and record what it touched with `turn.Source`. Two rules live
+   in that file's own plumbing, and both were found by an agent failing a case rather than by a review:
+   a WHERE clause with nothing to bind must add no argument (`clauseFor` in the package's `args.go`), and
+   **every id the new door takes has to be returnable by some read in the same process** - a uuid no
+   read can produce is a capability that exists in SQL and not in conversation, which is the difference
+   this repository keeps making a tool in order to close. `TestEveryDoorKeyIsReadableFromARead` is the
+   assertion, and it names the one column that still fails it
 4. Write the description for a reader that cannot see the schema: what it answers, what it refuses, and
-   which fact only the caller has
-5. Add it to the table in `agents/customer_service/README.md`, then run `scripts/docs/check_agent_docs.sh`.
-   It fails on a tool in one and not the other, which is what makes step 5 not optional
+   which fact only the caller has. Where the description says a value "comes from" a tool, check that
+   the named tool's SELECT list really returns it: `create_order` advised a `warehouse_id` "from
+   `get_orders`" for a day while `get_orders` returned the name and dropped the id
+5. Add it to the table in the README of the agent that owns it — `agents/customer_service/`,
+   `agents/inventory/` or `agents/sales/` — then run `scripts/docs/check_agent_docs.sh`. It walks every
+   tracked `backend_go` and fails on a tool in one and not the other, in either direction, which is what
+   makes step 5 not optional
 6. Add a probe to `db/tests/` that fails the day the function stops meaning what the tool says
 
 ### Creating a New Agent
-1. Fork `agents/customer_service/`. [archive/blueprint/bot.py](archive/blueprint/bot.py) shows the whole pattern in one
+1. Fork `agents/customer_service/`. `agents/inventory/` and `agents/sales/` are that recipe executed
+   twice, so compare the two before choosing what to copy: the inventory fork is the smaller diff (one
+   domain package, four identity strings), and the sales fork adds a scheduled tick whose every run
+   records itself, which is the shape to copy if your agent has a fact it must check on a schedule.
+   [archive/blueprint/bot.py](archive/blueprint/bot.py) shows the whole pattern in one
    file as background — it is lineage, not an on-ramp, and ADR-006 records why
 2. Define agent-specific tools, in the order above: the function first, then the tool that calls it
 3. Keep the trajectory writer and the memory store. An agent that cannot be read back cannot be fixed,
    and an agent whose memory dies with its container has no memory - both are 0023's and 0011's subject
 4. Test the agent with your intended use cases, in `db/tests/` for the schema half and `go test ./...`
    for the loop half
+5. Then say so in this file, in `README.md`, in `architecture.md` and in `QUICKSTART.md`: a fourth agent
+   that these pages still describe as three is the same class of defect as a tool in code and not in a
+   README, and `check_agent_docs.sh` will only catch the narrower one
 
 ### Debugging
 1. Check PostgreSQL logs for SQL errors
 2. `GET /api/interactions?view=recent` is the agent reading its own trajectory; `docker logs -f
    afpc-customer-service` is the same run while it happens, at `LOG_LEVEL=debug`
-3. `audit_log` is who changed what — and it is the only row-level trail either agent writes.
+3. `audit_log` is who changed what — and it is the only row-level trail any of the agents writes.
    `human_sessions` and `bot_actions` exist and are read by the coverage machinery, and hold **zero
    rows**: no login console and no action logger write them, so looking for an agent's action in
    `bot_actions` is a dead end, and `agent_interactions` plus `audit_log` is the pair that answers.
@@ -184,6 +225,20 @@ Follow [QUICKSTART.md](QUICKSTART.md) for Docker-based deployment.
    point: a state the views cannot show is a state the agent cannot see either
 5. Query `agent_interactions` for full trajectory analysis, and `vw_tool_calls` to see it one call at a
    time
+6. **When an agent's number is wrong and its JSON is right, look in Go and not in SQL.** A `numeric`
+   column arrives from pgx as `pgtype.Numeric`, a struct, and `encoding/json` renders it perfectly
+   because the type implements `Marshaler` - so a tool answer and a trajectory row both read correctly
+   while anything that formats or adds that same value *in Go* is silently wrong: `%v` prints
+   `{300000 -4 false finite true}`, and a sum of such values is 0. That is how one deployed agent's
+   summary line said "0 units held unresolved" beside `vw_order_commitments`' 13, and how another
+   printed `{0 0 false finite true} available` in a sentence a human was meant to read. The same class,
+   one column type away: `integer` is an **int32** to pgx, so a reader that switches on `int64` reports
+   a claim sweep that ran as one that collected nothing. pgx's default map
+   (`pgtype/pgtype_default.go:163-177`) is the list to write a reader against, and `pkg/db`'s
+   `normalise` plus each domain package's `num`/`intArg` now do. The other shape of the same mistake is
+   in the reads rather than the rows: a WHERE clause with nothing to bind must add no argument, or the
+   query fails whole with `42P18 could not determine data type of parameter $n` - which is what
+   `get_suppliers` did on its default path until `clauseFor` stopped the builder guessing
 
 ### Testing
 Five things can be wrong independently, and each has its own harness:
@@ -211,7 +266,7 @@ Five things can be wrong independently, and each has its own harness:
    database (`createdb afpc_scratch && POSTGRES_DB=afpc_scratch python3 archive/blueprint/tests/test_functions.py`),
    and see `PLAN.md`'s item on guarding or deleting them
 5. `./scripts/agents/tool_testplan.sh` - the only harness that tests what a human gets: it prompts
-   both deployed agents through `POST /api/chat` once per registered tool and verifies each turn
+   all three deployed agents through `POST /api/chat` once per registered tool and verifies each turn
    on three independent planes - the call happened (`vw_tool_calls`, keyed by the returned
    `run_id`), the state is real (the views and trail the answer claims), the run recorded itself.
    Plan and cases: `docs/agent_requirements/agent_test_plan.md`. Slow (every case is a real model
@@ -232,15 +287,20 @@ superseded files at the same depth as current ones is how a reader ends up editi
 agent_first/
 ├── README.md, QUICKSTART.md, architecture.md, PLAN.md, AGENTS.md, CONTRIBUTING.md
 ├── Makefile                        # dev-up, db-verify, db-test, docs-schema
-├── ARCHITECTURE_DECISION_RECORDS/  # ADR-001..005, cited by the code that obeys them
+├── ARCHITECTURE_DECISION_RECORDS/  # ADR-001..006, cited by the code that obeys them
 │
 ├── agents/
+│   ├── sales/                      # THE THIRD DEPLOYED AGENT: same loop, the orders surface, a keeper
+│   │   ├── README.md               # tools, the two jobs on the timer, endpoints, what is not here
+│   │   ├── Dockerfile, docker-compose.yml   # :4570; its own .env, written by scripts/db/init.sh
+│   │   ├── frontend/               # the same React UI, third copy, four identity strings different
+│   │   └── backend_go/             # sibling fork: pkg/orders (5 reads, 7 doors, runHousekeeping) replaces pkg/crm
 │   ├── inventory/                  # THE SECOND DEPLOYED AGENT: same loop, inventory tools, a timer
 │   │   ├── README.md               # tools, schedule, endpoints, what is not here
 │   │   ├── Dockerfile, docker-compose.yml   # :4560; its own .env, written by scripts/db/init.sh
 │   │   ├── frontend/               # the sibling's React UI, copied rather than rewritten
 │   │   └── backend_go/             # sibling fork: pkg/inventory (4 reads, 1 door, RunCheck) replaces pkg/crm
-│   ├── customer_service/           # THE DEPLOYED AGENT
+│   ├── customer_service/           # THE FIRST DEPLOYED AGENT, and the one the other two fork
 │   │   ├── README.md               # tools, environment, endpoints, what is not here
 │   │   ├── Dockerfile, docker-compose.yml
 │   │   ├── frontend/               # React UI, built into backend_go/static and served by the binary; same-origin API_BASE
@@ -304,7 +364,7 @@ that the code contradicts is exactly what the sweep is for. When you change a po
 
 1. **Database First**: If a rule about persistent state is not in a migration, it is not enforced (ADR-002)
 2. **Tool Composition**: Design tools to be composable and reusable - the six shared tools are the same
-   code in both deployed agents
+   code in all three deployed agents
 3. **Semantic Search**: *Not available.* The columns and hnsw indexes exist and nothing writes them, so
    design a read against the views and the CHECK'd vocabularies (`vw_domain_vocabulary`) instead
 4. **Audit Everything**: The row trail is the triggers' job and it happens without asking; the agent's
@@ -325,7 +385,7 @@ Secrets live in the environment, never in a committed file:
   (mode 600, gitignored). `dev/.env.example` documents that file's shape and its values are deliberately
   empty - an unset password makes the tooling refuse to start rather than quietly use a committed guess
 - The agent runtime role: `AFPC_PG_USER` / `AFPC_PG_PASSWORD` (or `AFPC_APP_PASSWORD`, the name
-  `scripts/db/roles.sql` uses), read by both agents' compose files through `env_file`
+  `scripts/db/roles.sql` uses), read by all three agents' compose files through `env_file`
 - Endpoint auth: `API_KEYS` (comma-separated bearer tokens). Unset means open, and `/api/health` says
   `DISABLED` instead of implying otherwise
 - Third-party keys: `TAVILY_API_KEY`, `HIGHBYTE_MCP_BEARER_TOKEN`, the `AZURE_*` group - all three are
@@ -333,7 +393,7 @@ Secrets live in the environment, never in a committed file:
   broken one
 - **There is no root `.env.example`.** The template is `dev/.env.example` for the database, and each
   agent's README table is the list of what its own process reads. A `Telegram bot token` is not among
-  them because neither deployed agent speaks Telegram
+  them because no deployed agent speaks Telegram
 - `AFPC_PG_HOST` is in `agents/*/.env` and is gitignored for a different reason: it names a private
   address on a specific network, not a credential
 

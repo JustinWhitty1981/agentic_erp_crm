@@ -2,6 +2,9 @@ package db
 
 import (
 	"encoding/json"
+	"fmt"
+	"github.com/jackc/pgx/v5/pgtype"
+	"math/big"
 	"testing"
 	"time"
 )
@@ -58,5 +61,58 @@ func TestNormaliseLeavesTheOtherTypesAlone(t *testing.T) {
 	}
 	if s, ok := normalise([]byte{0xff, 0xfe, 0x00}).(string); ok {
 		t.Errorf("non-UTF8 bytes became the string %q; they should stay bytes and be base64 at the edge", s)
+	}
+}
+
+// TestNormaliseMakesNumericColumnsReadable is the second shape this file exists for, and the one no
+// JSON reader ever saw: pgx hands a `numeric` column over as pgtype.Numeric, a struct that
+// encoding/json renders correctly because the type implements Marshaler. Everything downstream of the
+// encoder reads Go instead of JSON, and `%v` on that struct is what a deployed agent was printing.
+func TestNormaliseMakesNumericColumnsReadable(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   pgtype.Numeric
+		text string // what a sentence built with %v must contain
+	}{
+		// 1320.00000000, the shape vw_inventory_valuation.total_value answers with.
+		{"scale kept", pgtype.Numeric{Int: big.NewInt(132000000000), Exp: -8, Valid: true}, "1320.00000000"},
+		{"zero", pgtype.Numeric{Int: big.NewInt(0), Exp: 0, Valid: true}, "0"},
+		// 30.0000, which is the value the inventory check's line printed as {300000 -4 false finite true}.
+		{"negative exponent", pgtype.Numeric{Int: big.NewInt(300000), Exp: -4, Valid: true}, "30.0000"},
+		// NaN is legal in a Postgres numeric and illegal in JSON, so it stays a string and stays
+		// quoted - the same bytes pgx's own marshaller produced before this case existed.
+		{"not a number", pgtype.Numeric{NaN: true, Valid: true}, "NaN"},
+		{"null", pgtype.Numeric{}, "<nil>"},
+	} {
+		got := normalise(tc.in)
+		if s := fmt.Sprintf("%v", got); s != tc.text {
+			t.Errorf("%s: normalise renders as %q; a sentence using it must read %q", tc.name, s, tc.text)
+		}
+		b, err := json.Marshal(map[string]any{"v": got})
+		if err != nil {
+			t.Errorf("%s: does not marshal: %v", tc.name, err)
+			continue
+		}
+		if !json.Valid(b) {
+			t.Errorf("%s: produced invalid JSON: %s", tc.name, b)
+		}
+	}
+
+	// The claim that makes this a fix rather than a reformatting: the JSON a tool returns is
+	// byte-identical to what the same column produced before normalise noticed it.
+	raw := pgtype.Numeric{Int: big.NewInt(132000000000), Exp: -8, Valid: true}
+	before, err := json.Marshal(map[string]any{"total_value": raw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := json.Marshal(map[string]any{"total_value": normalise(raw)})
+	if err != nil {
+		t.Fatalf("a normalised numeric must still marshal: %v", err)
+	}
+	if string(before) != string(after) {
+		t.Errorf("the fix changed a tool's JSON: was %s, now %s", before, after)
+	}
+	if string(after) != `{"total_value":1320.00000000}` {
+		t.Errorf("unexpected numeric form %s", after)
 	}
 }

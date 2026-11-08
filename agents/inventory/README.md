@@ -7,7 +7,13 @@ not have.
 
 Requirements: [`docs/agent_requirements/inventory/inventory.md`](../../docs/agent_requirements/inventory/inventory.md).
 Backend source: `backend_go/` (module `jada-backend`, a sibling lineage of the customer service
-agent's — mostly the same packages, rewritten tool layer).
+agent's). Counted with `diff` rather than remembered, the fork is: of its 25 Go files, **18 are
+byte-identical** to `agents/customer_service/`'s, **3 differ** — `cmd/server/main.go` (identity, port,
+the door-probe list, the timer), `pkg/agent/agent.go` (its system prompt names the stock tools rather
+than the CRM ones) and that package's test, which follows the prompt — and **4 are new**, the
+`pkg/inventory` package itself. `pkg/tools` and `pkg/db` are in the identical eighteen, which is the
+practical reason the split is written down: a fix to the shared loop or to the row decoder has to be
+applied three times, and the day it is applied once, this sentence is the thing that is wrong.
 
 ## Running it
 
@@ -45,6 +51,16 @@ SELECT timestamp, duration_ms, left(final_output, 60), error_message
   FROM agent_interactions WHERE bot_id = 'inventory' ORDER BY timestamp DESC LIMIT 10;
 ```
 
+The line is composed from the view's own numeric columns, and until 2026-11-07 it printed
+`pgtype.Numeric` structs instead of numbers - "has {0 0 false finite true} available against
+{300000 -4 false finite true}" - because pgx hands a `numeric` column to Go as a struct that only the
+JSON encoder knows how to render. The fix is in `pkg/db`'s `normalise`, and
+`agents/customer_service/README.md` carries the reason; the two numbers in this sentence are the
+evidence that it holds. The same defect was quietly emptying this agent's own answers:
+`suggested_shortfall` came back `null` on the row that was in fact 26 units short - 4.0 available
+against a 30.0 reorder point, measured in a trajectory row from 2026-11-07 - and its
+`days_of_supply`, which came back unknown for the same reason: `SUM(quantity_available)` is numeric too.
+
 That query *is* the reliability requirement: "must run every 30 minutes" is a gap in this list,
 and "did a check fail" is `vw_failed_interactions` with `bot_id='inventory'`. When the scan finds
 CRITICAL lines it also upserts `agent_memories` under `inventory.alert.state` — only when the
@@ -67,13 +83,22 @@ truth of which set is live.
 | `get_inventory_valuation` | `vw_inventory_valuation` | — | read-only |
 | `reserve_inventory` | — | `reserve_inventory_for_order(...)`, idempotency key last (ADR-005) | the only write |
 
-Plus the shared six from `pkg/tools` (`current_time`, `search_web`, `scrape_url`, and the three
-memory tools), which resolve to the database store exactly as they do for the customer service
+Plus the shared six from `pkg/tools` — `current_time`, `search_web`, `scrape_url`, `save_memory_tool`,
+`get_memory_tool` and `list_memories_tool` — which resolve to the database store exactly as they do for the customer service
 agent.
 
 The door this agent exists next to, `execute_inventory_movement`, is deliberately **not** a tool:
 a monitoring agent that can move stock can silence its own alarms. The seed and the
 `4_1`/`4_3` probes use it; the agent may not.
+
+Neither is `cancel_inventory_reservation`, which is the release this table used to have no answer for:
+`reserve_inventory_for_order` has written commitments since `0015` and, as `0030`'s header records,
+nothing in the schema could undo one — thirteen units on this server were held that way against a
+document that named no row. `0030` built the door and `agents/sales/` registered it, on the argument
+that a commitment is a fact about a *document* as much as about a shelf; `agents/sales/README.md` and
+that agent's requirements page keep the other direction of the decision, which is a question that is
+still open rather than a settled split. Ask this agent to release one and the right answer is that it
+can hold stock and name what is held; the door that lets it go is one seat away.
 
 ### What `reserve_inventory` answers look like
 

@@ -27,7 +27,7 @@ appears here and not in the code, or in the code and not here.
 | Tool | Reads / writes | What it is for |
 |---|---|---|
 | `get_customer_info` | read | Look up customers by name, email, phone, or id. One selector at a time. |
-| `get_customer_communications` | read | One customer's recent interactions, newest first, with outcome and sentiment. |
+| `get_customer_communications` | read | One customer's recent interactions, newest first, with outcome, sentiment, and the `entity_id`/`contact_id` a later write needs. |
 | `get_entity_stats` | read | Per-customer counts: resolved, pending, escalated, sentiment, first and last contact. |
 | `get_followup_customers` | read | Who needs contact, and which of the three reasons says so. |
 | `add_customer` | write | Create an entity, a contact, their relationship, and an address. |
@@ -185,6 +185,28 @@ is recent and it mattered: pgx hands a `uuid` column to an `any` target as a `[1
 `encoding/json` renders that as sixteen numbers, so `interaction_id` came back as
 `[1,161,166,...]` - nothing failed, and no caller could quote the id it was given.
 `pkg/db/normalise_test.go` pins the shape.
+
+The same family, found the hard way on 2026-11-07: **a `numeric` column arrives as `pgtype.Numeric`,
+which is a struct**, and `encoding/json` cannot tell you anything is wrong because that type implements
+`Marshaler`. So every tool's JSON has been right all along (`"total_value":1320.00000000`) while every
+Go-side read of the same value has been reading a struct - `%v` prints its four fields, and a numeric
+compare answers "not a number", which arrives as a zero rather than as an error. Two deployed sentences
+were therefore false: the inventory agent's check line said "IN-1002 at Main Warehouse has {0 0 false
+finite true} available against {300000 -4 false finite true}", and the sales agent's reconciliation
+summed its unresolved units to 0 while `vw_order_commitments` answered 13 over the same rows.
+`normalise` now unwraps the type to a `json.Number` holding pgx's own text, which leaves the JSON
+byte-identical - a float64 conversion would have fixed the Go reads by flattening 14.50 to 14.5 and
+every currency scale 0018 established - and gives the arithmetic something it can parse.
+
+The wider rule, because this trap is one column type wide: **pgx's default map is the specification**
+(`pgtype/pgtype_default.go:163-177`) - int2 as int16, int4 as int32, int8 as int64, float4 as float32,
+numeric as `pgtype.Numeric`, uuid as `[16]byte`. A reader that switches on `float64` and `int64`,
+because those are the shapes a *model's JSON arguments* arrive in, will silently mis-read a *row*. The
+third instance of it was in this programme's own keeper: `idempotency_sweep` RETURNS integer, which is
+an int32, so the tick's claim count read as 0 even while claims were being collected. `num` and
+`intArg` in the domain packages now cover the whole list, and
+`TestIntArgReadsEveryIntegerTheDriverSends` plus `TestNormaliseMakesNumericColumnsReadable` are the
+version the build enforces.
 
 The two "history" endpoints are different things, and the distinction is the one a support
 conversation most needs to get straight: `/api/history` is what the next prompt will contain, and

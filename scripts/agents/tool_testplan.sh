@@ -12,12 +12,24 @@
 # A pass means the database agrees with what was said; a fail says which plane disagreed.
 #
 # Fixtures carry the run stamp $TS because add_customer refuses a duplicate name OR email, and a
-# plan that cannot be re-run is a demo. Expect 10-25 minutes: every case is a real turn through a
+# plan that cannot be re-run is a demo. Expect 15-40 minutes: every case is a real turn through a
 # real model, which is the only way to test what a human would experience.
+#
+# Cases 22-36 are the third agent's surface: one per registered tool, one tool asked twice because an
+# item line and a service line are different questions to the same door, one refusal that carries the
+# whole programme's claim (29), and the timer. Cases 22-34 DEPEND on each other in
+# registration order: 23 registers the supplier 25 places the order with, 25 makes the document 26
+# lines and 28 transitions, 32 receives. That is not an accident to work around - a purchase order
+# that arrives already lined and submitted would test the read path of a fixture rather than the
+# write path of an agent. Each dependent case therefore names the case to re-run when its fixture is
+# missing, and the fixtures carry $TS so a re-run raises a new document instead of colliding with the
+# last one. Case 34's SALES fixture is the exception and says so where it is built: the case under
+# test is the ship door, and a fixture made by three prompts would fail with three possible causes.
 
 set -u
 CS=http://127.0.0.1:4550
 IV=http://127.0.0.1:4560
+SA=http://127.0.0.1:4570
 DBQ=(docker exec -i afpc-pg psql -U postgres -d agent_first_erp_crm -tAF'|' -c)
 
 TS=${FIXTURE_TS:-$(date +%H%M%S)}   # set FIXTURE_TS=<stamp> with CASE_FILTER to re-run one case
@@ -26,7 +38,22 @@ JANE="Jane Doe $TS"
 EMAIL="jane.$TS@afpc.example.invalid"
 PHONE="+1777$TS"
 MKEY="harness.pref.$TS"
-OUID=$(cat /proc/sys/kernel/random/uuid)
+# Case 20's order id, and the reason it is not a uuid the shell invented. Every version of this plan
+# before 0030 passed `$(cat /proc/sys/kernel/random/uuid)` here, and the reservation accepted it: the
+# commitment was filed against a document that named no row, which is the exact shape thirteen units
+# sat in for a hundred thousand hours. §3b's trigger now answers 23503, so the fixture raises a REAL
+# sales order through the door - which makes this case assert the thing it always claimed (a
+# reservation on an order) instead of the residue the schema used to permit.
+OUID=""
+OENT=$( "${DBQ[@]}" "SELECT id FROM entities WHERE entity_type='customer' ORDER BY id LIMIT 1")
+OUID=$( "${DBQ[@]}" "SELECT order_id FROM create_order('SALES',$OENT,NULL,
+        (SELECT warehouse_id FROM warehouses WHERE warehouse_code='MAIN'),NULL,'2026-12-31',NULL,
+        'tool_testplan fixture $TS','MANUAL',NULL)")
+if [ -z "$OUID" ]; then echo "  ABORT: case 20's fixture order could not be raised (0030 refuses a commitment against a document that does not exist, and gen_random_uuid() is no longer one)"; exit 2; fi
+echo "  fixture: sales order $OUID raised for case 20 to reserve against"
+SUPCODE="SUP-$TS"                          # suppliers_code_format wants [A-Z0-9][A-Z0-9_-]{0,49}
+SUPNAME="Steelworks $TS"
+WHMAIN=$( "${DBQ[@]}" "SELECT warehouse_id FROM warehouses WHERE warehouse_code='MAIN'")
 # Threads carry a per-invocation stamp, NOT just the fixture stamp: a filtered re-run against an
 # old FIXTURE_TS must not rehydrate the previous run's conversation. Measured on the second such
 # re-run, the agent answered "the record already reads 1235" from week-old-in-minutes history and
@@ -88,26 +115,58 @@ case_run() {
     QERRS=""   # a psql error anywhere since the last reset makes a false a WITNESS, not a verdict
     chat "$base" "tp_${n}_${TS}_${NOW}" "$prompt"
     if [ -z "$RID" ]; then verdict "case $n: $name" 1 "no run_id returned"; return; fi
-    if ! tool_called "$RID" "$tool"; then
-        verdict "case $n: $name" 1 "the run never called $tool (http $HTTP)${QERRS:+ | $QERRS}"
-        return
-    fi
+    # Three kinds of case, distinguished by what the call plane can prove.
+    PASSNOTE="called $tool"
+    case "$tool" in
+        __either__*)
+            # The door's refusal is the best evidence, and declining before asking is the second best:
+            # both leave the state untouched, and only one puts a SQLSTATE in the trail. Case 29 is this
+            # shape - see its comment for why the state plane carries the assertion.
+            tool="${tool#__either__}"
+            PASSNOTE="called $tool"
+            if tool_called "$RID" "$tool"; then
+                CALLPLANE=door
+            else
+                CALLPLANE=declined
+                PASSNOTE="never asked the door (it declined first)"
+            fi ;;
+        __*)
+            # A case whose subject is the schedule rather than a tool has no call plane: nothing in the
+            # turn invoked `__schedule__`, because that is not a tool name - it is the marker that says
+            # "the state plane is the whole assertion", and the state plane reads agent_interactions,
+            # which is the table the tick writes. Case 35 died here with "the run never called
+            # __schedule__" until the sentinel was honoured where it is *checked* rather than only where
+            # it is excused.
+            PASSNOTE="no call plane (a schedule, not a tool)"
+            CALLPLANE=none ;;
+        *)
+            if ! tool_called "$RID" "$tool"; then
+                verdict "case $n: $name" 1 "the run never called $tool (http $HTTP)${QERRS:+ | $QERRS}"
+                return
+            fi
+            CALLPLANE=required ;;
+    esac
+    # The state plane runs for EVERY case that has one, including the sentinel cases. The test used to
+    # read `[ "$tool" = "__none__" ] || ... || $after`, and `||` short-circuits: on a sentinel the
+    # after-fn was skipped and the case still printed "state verified", which is a verdict the harness
+    # had not earned. An empty $after is the only thing that legitimately skips it, and no case in this
+    # file is written that way.
     DETAIL=""
-    if [ "$tool" = "__none__" ] || $after; then
-        verdict "case $n: $name" 0 "${DETAIL:-called $tool; state verified}"
-    else
+    if [ -n "$after" ] && ! $after; then
         verdict "case $n: $name" 1 "${DETAIL:-the database disagrees with the answer}${QERRS:+ | harness SQL error: $QERRS}"
+    else
+        verdict "case $n: $name" 0 "${DETAIL:-$PASSNOTE; state verified}"
     fi
 }
 
-echo "== 0 preflight: both agents up with their tools =="
-for pair in "$CS crm_tools" "$IV inventory_tools"; do
+echo "== 0 preflight: all three agents up with their tools =="
+for pair in "$CS crm_tools" "$IV inventory_tools" "$SA order_tools"; do
     set -- $pair
     if ! curl -sf -m 5 "$1/api/health" | jq -e ".$2 > 0" >/dev/null; then
         echo "  ABORT: $1 reports no $2 - the acceptance plan cannot judge tools that are not registered"; exit 2
     fi
 done
-echo "  both surfaces registered (crm_tools, inventory_tools > 0)"
+echo "  all three surfaces registered (crm_tools, inventory_tools, order_tools > 0)"
 
 # ---------------------------------------------------------------------------
 # customer_service agent
@@ -238,16 +297,277 @@ after_20() {
     sql_true "EXISTS (SELECT 1 FROM audit_log WHERE table_name='inventory_reservations' AND action='INSERT'
                AND occurred_at > now() - interval '5 minutes')" ||
         DETAIL="reservation exists but left no trail"
+    # The order this commitment names now resolves, which is the difference between 0030 and before:
+    # a reservation whose document exists is one a door can release and a report can attribute.
+    sql_true "EXISTS (SELECT 1 FROM orders o WHERE o.order_id='$OUID' AND o.order_type='SALES')" ||
+        DETAIL="the reservation names an order that is not there - §3b's enforcement should have refused the write"
+    true
     true
 }
 case_run 20 reserve_inventory "$IV" \
   "Reserve 2 units of IN-1003 (Coolant 5L Jerrican) at the Main Warehouse for sales order $OUID, on behalf of the harness. Look up the item and warehouse ids with the read tools first." \
   reserve_inventory after_20
 
+
 # ---------------------------------------------------------------------------
-# the timer, and the cross-cutting invariants
+# sales & procurement agent
 # ---------------------------------------------------------------------------
-echo "== case 21 + cross-cutting =="
+echo "== cases 22-36: the sales & procurement agent (:4570) =="
+
+# The four orders this server already has were raised by 0030's backfill, not by anybody's business.
+# Case 22 asserts the agent can see them AND say what they are, which is the one place in the plan
+# where "no rows" and "rows whose origin is a data-cleanup decision" must not read the same.
+after_22() {
+    [ "$(q "SELECT count(*) FROM vw_orders")" -ge 1 ] || { DETAIL="no documents at all"; return 1; }
+    obs_has "$RID" get_orders "SO-0000" || obs_has "$RID" get_orders "RESERVATION_BACKFILL" ||
+        { DETAIL="the run listed orders without naming a single one of them"; return 1; }
+    true
+}
+case_run 22 get_orders "$SA" \
+  "What orders do we have, and what state are they in? Tell me the numbers, not a summary." get_orders after_22
+
+after_23() {
+    SID=$(q "SELECT supplier_id FROM vw_suppliers WHERE supplier_code='$SUPCODE'")
+    [ -n "$SID" ] || { DETAIL="no supplier with code $SUPCODE"; return 1; }
+    sql_true "EXISTS (SELECT 1 FROM audit_log WHERE table_name='suppliers' AND action='INSERT' AND row_pk->>'supplier_id'='$SID')" || { DETAIL="registered with no trail"; return 1; }
+    [ "$(q "SELECT party_name FROM vw_suppliers WHERE supplier_id='$SID'")" = "$SUPNAME" ] ||
+        DETAIL="the supplier row does not carry the party name the prompt gave"
+    true
+}
+case_run 23 add_supplier "$SA" \
+  "Register a new supplier: $SUPNAME, code $SUPCODE, payment terms NET30, 14 days lead time. They sell us steel. They are not a customer, so create the party too." \
+  add_supplier after_23
+
+after_24() { obs_has "$RID" get_suppliers "$SUPCODE"; }
+case_run 24 get_suppliers "$SA" "Who do we buy steel from, and on what terms?" get_suppliers after_24
+
+POID=""
+need_po() { [ -n "$POID" ] || POID=$(q "SELECT order_id FROM vw_orders WHERE order_type='PURCHASE' AND notes ILIKE '%$TS%' LIMIT 1"); [ -n "$POID" ]; }
+
+after_25() {
+    need_po || { DETAIL="no purchase order carrying reference $TS - run case 25 without a filter"; return 1; }
+    sql_true "(SELECT status='DRAFT' AND vendor_id IS NOT NULL AND customer_id IS NULL FROM orders WHERE order_id='$POID')" ||
+        { DETAIL="the document exists but is not an unshipped purchase order with exactly one counterparty"; return 1; }
+    sql_true "EXISTS (SELECT 1 FROM audit_log WHERE table_name='orders' AND action='INSERT' AND row_pk->>'order_id'='$POID')" || DETAIL="raised with no trail"
+    # The number is issued by the door, from a per-type counter - so a PURCHASE order answers PO-*,
+    # and an agent or a tool that composed the string would get this wrong in the quiet direction.
+    [ "$(q "SELECT left(order_number,3) FROM orders WHERE order_id='$POID'")" = "PO-" ] ||
+        DETAIL="a purchase order numbered $(q "SELECT order_number FROM orders WHERE order_id='$POID'")"
+    true
+}
+case_run 25 create_order "$SA" \
+  "Raise a purchase order to supplier $SUPCODE for the Main Warehouse, needed by 2026-12-31, priority 2. Look the warehouse id up from the documents you can already read rather than typing its name, and put reference $TS in the notes." \
+  create_order after_25
+
+after_26() {
+    need_po || return 1
+    LIN=$(q "SELECT order_line_id FROM vw_order_lines WHERE order_id='$POID' AND item_id=(SELECT item_id FROM inventory_items WHERE sku='IN-1003') LIMIT 1")
+    [ -n "$LIN" ] || { DETAIL="no line for IN-1000 on the fixture order"; return 1; }
+    sql_true "(SELECT quantity=10 AND line_amount=145 AND line_state='OPEN' AND line_type='STANDARD' FROM vw_order_lines WHERE order_line_id='$LIN')" ||
+        { DETAIL="the line exists but its amount or state is not what 10 x 14.50 says: $(q "SELECT quantity||'/'||coalesce(line_amount::text,'null')||'/'||line_state FROM vw_order_lines WHERE order_line_id='$LIN'")"; return 1; }
+    sql_true "EXISTS (SELECT 1 FROM audit_log WHERE table_name='order_items' AND action='INSERT' AND row_pk->>'order_line_id'='$LIN')" || DETAIL="lined with no trail"
+    true
+}
+case_run 26 add_order_line_item "$SA" \
+  "Add a line to purchase order $(q "SELECT order_number FROM orders WHERE order_id='$POID'"): 10 of item IN-1003 at 14.50 each - it is the coolant we already buy, so its id is on an existing order line." \
+  add_order_line after_26
+
+after_27() {
+    need_po || return 1
+    LSV=$(q "SELECT order_line_id FROM vw_order_lines WHERE order_id='$POID' AND item_id IS NULL LIMIT 1")
+    [ -n "$LSV" ] || { DETAIL="the service line was filed against an item, which is the MISCELLANEOUS failure 0028 exists to prevent"; return 1; }
+    sql_true "(SELECT btrim(description) <> '' AND quantity=1 AND line_amount=350 FROM order_items WHERE order_line_id='$LSV')" ||
+        { DETAIL="a line with no item carries no words or no amount"; return 1; }
+    # The line number is the door's, allocated under the document's unique index - so two lines must
+    # be 1 and 2 and never 2 and 2, which is what a caller composing the number would get wrong under
+    # concurrency rather than under this prompt.
+    [ "$(q "SELECT count(DISTINCT line_number) FROM order_items WHERE order_id='$POID'")" = "2" ] ||
+        DETAIL="two lines share a line_number in one document"
+    true
+}
+case_run 27 add_order_line_service "$SA" \
+  "Now add a second line to the same purchase order: a calibration service, no item code, 1 unit at 350. Describe it as calibration on the pump." \
+  add_order_line after_27
+
+after_28() {
+    need_po || return 1
+    [ "$(q "SELECT status FROM orders WHERE order_id='$POID'")" = "SUBMITTED" ] ||
+        { DETAIL="status is $(q "SELECT status FROM orders WHERE order_id='$POID'"), not SUBMITTED"; return 1; }
+    sql_true "(SELECT version > 1 AND closed_at IS NULL FROM orders WHERE order_id='$POID')" ||
+        { DETAIL="a write that did not move version, or a non-terminal status that stamped closed_at"; return 1; }
+    sql_true "EXISTS (SELECT 1 FROM audit_log WHERE table_name='orders' AND action='UPDATE' AND row_pk->>'order_id'='$POID' AND occurred_at > now() - interval '10 minutes')" ||
+        DETAIL="moved with no trail"
+    true
+}
+case_run 28 transition_order "$SA" \
+  "Submit purchase order $(q "SELECT order_number FROM orders WHERE order_id='$POID'") so the supplier has it. Reference $TS." \
+  transition_order after_28
+
+# THE refusal case, and the most important one in the plan. The claim being tested is not "the tool
+# answers an error" - it is that the database cannot be told a warehouse did something it did not do.
+# So the assertion is on the STATE after the turn: still SUBMITTED, and no movement naming the document.
+#
+# The call plane is optional here, and that is a decision rather than a looseness. Measured on the
+# second run of this case, the agent read the order, read its lines, read its commitments, and then
+# declined in one paragraph that named `receive_purchase_order` as the only door that produces
+# RECEIVED - without calling `transition_order` at all. That answer is better than the one this case
+# asked for: it spends no write attempt on a status it already knows is not writable, and it tells the
+# human which door would move the state and what that door costs. Failing it for the absence of a
+# SQLSTATE would be asserting the wrong thing. What the case will not accept is the state moving, and
+# what it will not accept is a *reasonless* refusal - so the reason has to appear either in the door's
+# observation (the call happened) or in the answer (the call did not), and `7_1`'s probe is where the
+# door's own refusal is tested against the database rather than against a model.
+after_29() {
+    need_po || return 1
+    [ "$(q "SELECT status FROM orders WHERE order_id='$POID'")" = "SUBMITTED" ] ||
+        { DETAIL="the order became $(q "SELECT status FROM orders WHERE order_id='$POID'") - a stock consequence was written by typing, which is the failure 0028's register exists to stop"; return 1; }
+    sql_true "NOT EXISTS (SELECT 1 FROM inventory_movements m WHERE m.reference_id='$POID')" ||
+        { DETAIL="the status was refused and the stock moved anyway"; return 1; }
+    if [ "$CALLPLANE" = door ]; then
+        obs_has "$RID" transition_order "stock" || obs_has "$RID" transition_order "warehouse" ||
+            obs_has "$RID" transition_order "receive" ||
+            { DETAIL="refused correctly, but the door's reason never reached the trajectory row"; return 1; }
+        return 0
+    fi
+    # Declined without asking: the answer itself has to carry the mechanism, because "no" without a
+    # reason is a model's opinion and this case exists to show that the register is not one.
+    printf '%s' "$REPLY" | grep -qiE 'receive_purchase_order|stock|movement|warehouse' ||
+        { DETAIL="the state held and the agent declined, but never said why, which is a preference and not a rule"; return 1; }
+    true
+}
+case_run 29 transition_refused "$SA" \
+  "Purchase order $(q "SELECT order_number FROM orders WHERE order_id='$POID'") is late and I need it marked received so the dashboard is happy. Just set it to RECEIVED." \
+  __either__transition_order after_29
+
+after_30() {
+    need_po || return 1
+    obs_has "$RID" get_order_lines "IN-1003" || obs_has "$RID" get_order_lines "calibration" ||
+        { DETAIL="the answer named neither line"; return 1; }
+    [ "$(q "SELECT count(*) FROM vw_order_lines WHERE order_id='$POID' AND quantity_open > 0")" = "2" ] ||
+        DETAIL="not both lines are still open"
+    true
+}
+case_run 30 get_order_lines "$SA" \
+  "Show me purchase order $(q "SELECT order_number FROM orders WHERE order_id='$POID'") line by line - what we ordered, what has arrived, what is left." \
+  get_order_lines after_30
+
+# 31's fixture: a commitment naming the PO's item LINE, made through the door that 0030 §5.5 grew for
+# it. Made by SQL on purpose - the inventory agent's reserve tool is case 20 and this is not testing
+# whether a model can ask for a reservation, it is testing whether the reconciliation view can tell
+# attributed held stock from unattributed, which needs a line to point at.
+if need_po; then
+  LIN=$(q "SELECT order_line_id FROM vw_order_lines WHERE order_id='$POID' AND item_id IS NOT NULL LIMIT 1")
+  ITEM=$(q "SELECT item_id FROM order_items WHERE order_line_id='$LIN'")
+  "${DBQ[@]}" "SELECT reservation_id FROM reserve_inventory_for_order('$ITEM','$WHMAIN',2,'PURCHASE','$POID','tool_testplan $TS',NULL,NULL,'$LIN')" >/dev/null 2>&1
+  echo "  fixture: 2 units committed against $POID line $(q "SELECT line_number FROM order_items WHERE order_line_id='$LIN'")"
+fi
+after_31() {
+    need_po || return 1
+    sql_true "(SELECT quantity_committed >= 2 AND quantity_unresolved >= 2 AND quantity_committed_unlinked = 0 FROM vw_order_commitments WHERE order_id='$POID' AND item_id IS NOT NULL)" ||
+        { DETAIL="the held stock is not attributed to the line it was held for: $(q "SELECT coalesce(quantity_committed,0)||' committed, '||coalesce(quantity_committed_unlinked,0)||' unlinked' FROM vw_order_commitments WHERE order_id='$POID' LIMIT 1")"; return 1; }
+    obs_has "$RID" get_order_commitments "$POID" || obs_has "$RID" get_order_commitments "PURCHASE" ||
+        DETAIL="the answer did not carry the rows the view holds"
+    true
+}
+case_run 31 get_order_commitments "$SA" \
+  "What stock is committed against purchase order $(q "SELECT order_number FROM orders WHERE order_id='$POID'"), and does it agree with the movement ledger?" \
+  get_order_commitments after_31
+
+after_32() {
+    need_po || return 1
+    [ "$(q "SELECT status FROM orders WHERE order_id='$POID'")" = "RECEIVED" ] ||
+        { DETAIL="still $(q "SELECT status FROM orders WHERE order_id='$POID'") after the receipt door ran"; return 1; }
+    sql_true "EXISTS (SELECT 1 FROM inventory_movements m WHERE m.movement_type='RECEIPT' AND m.reference_id='$POID' AND m.reference_line_id IS NOT NULL)" ||
+        { DETAIL="stock arrived with no ledger row naming the line - 0030 §1's whole point"; return 1; }
+    sql_true "(SELECT bool_and(quantity_fulfilled = quantity) FROM order_items i WHERE i.order_id='$POID' AND i.item_id IS NOT NULL) AND (SELECT count(*) FROM order_items i WHERE i.order_id='$POID' AND i.item_id IS NOT NULL) > 0" || { DETAIL="the item line's counter did not move with its receipt"; return 1; }
+    sql_true "(SELECT bool_and(quantity_fulfilled = quantity) FROM order_items i WHERE i.order_id='$POID' AND i.item_id IS NULL) AND (SELECT count(*) FROM order_items i WHERE i.order_id='$POID' AND i.item_id IS NULL) > 0" ||
+        { DETAIL="the SERVICE line was left unfulfilled - a door that books no movement for a service still has to book it as delivered"; return 1; }
+    # The reconciliation has to AGREE with itself afterwards, or the counters and the ledger are two
+    # truths again, which is what the whole programme was for.
+    [ "$(q "SELECT count(*) FROM vw_order_commitments WHERE order_id='$POID' AND ledger_agreement='DISAGREES'")" = "0" ] ||
+        DETAIL="a line's counter and its ledger rows disagree after a door that writes both"
+    true
+}
+case_run 32 receive_purchase_order "$SA" \
+  "Purchase order $(q "SELECT order_number FROM orders WHERE order_id='$POID'") has arrived in full at the Main Warehouse. Book it." \
+  receive_purchase_order after_32
+
+# 33's fixture: a commitment with nothing settled, on a document of its own. Same reasoning as 31 -
+# the case is the release door, and the release needs something to release.
+RESID=""
+if need_eid; then
+  "${DBQ[@]}" "SELECT order_id FROM create_order('SALES',$EID,NULL,'$WHMAIN',NULL,'2026-12-20',NULL,'tool_testplan release fixture $TS','MANUAL',NULL)" >/dev/null 2>&1
+  REL_ORD=$(q "SELECT order_id FROM vw_orders WHERE notes ILIKE '%release fixture $TS%' LIMIT 1")
+  REL_LIN=$(q "SELECT order_line_id FROM add_order_line('$REL_ORD',(SELECT item_id FROM inventory_items WHERE sku='IN-1004'),NULL,5,40,NULL,'STANDARD','$WHMAIN',NULL,NULL,NULL,NULL)")
+  RESID=$(q "SELECT reservation_id FROM reserve_inventory_for_order((SELECT item_id FROM inventory_items WHERE sku='IN-1004'),'$WHMAIN',5,'SALES','$REL_ORD','tool_testplan $TS',NULL,NULL,'$REL_LIN')")
+  echo "  fixture: reservation $RESID holding 5 units for $REL_ORD"
+fi
+after_33() {
+    [ -n "$RESID" ] || { DETAIL="the release fixture could not be made"; return 1; }
+    sql_true "(SELECT cancelled_quantity >= 5 AND reserved_quantity - coalesce(shipped_quantity,0) - coalesce(cancelled_quantity,0) = 0 FROM inventory_reservations WHERE reservation_id='$RESID')" ||
+        { DETAIL="still holding: $(q "SELECT coalesce(cancelled_quantity,0)||' of '||reserved_quantity||' cancelled' FROM inventory_reservations WHERE reservation_id='$RESID'")"; return 1; }
+    sql_true "EXISTS (SELECT 1 FROM inventory_reservations WHERE reservation_id='$RESID')" ||
+        { DETAIL="releasing a commitment deleted it - 0008's rule for a thing that cannot leave a trail"; return 1; }
+    sql_true "(SELECT updated_at > created_at FROM inventory_reservations WHERE reservation_id='$RESID')" ||
+        DETAIL="the settled commitment cannot say WHEN it settled (§4b's whole reason for existing)"
+    true
+}
+# The reservation id is in the prompt rather than discovered, and that is a statement about the surface
+# and not a shortcut: `vw_order_commitments` carries every fact about a commitment except its own row's
+# key, so no read in any agent returns a reservation_id at all. Case 33 tests the door, which is what it
+# is for; the discovery gap is a migration, named in agents/sales/README.md and in PLAN.md.
+case_run 33 cancel_inventory_reservation "$SA" \
+  "Release the stock held on reservation $RESID - the customer changed their mind about the order. Do not cancel the order itself." \
+  cancel_inventory_reservation after_33
+
+# 34's fixture, stated as SQL because the case is the ship door and nothing else: a SALES order with
+# one item line, the stock committed against that line, and enough on hand to issue. Three prompts
+# would make a failure here ambiguous.
+SHIP_ORD=""
+if need_eid; then
+  "${DBQ[@]}" "SELECT order_id FROM create_order('SALES',$EID,NULL,'$WHMAIN',NULL,'2026-12-19',NULL,'tool_testplan ship fixture $TS','MANUAL',NULL)" >/dev/null 2>&1
+  SHIP_ORD=$(q "SELECT order_id FROM vw_orders WHERE notes ILIKE '%ship fixture $TS%' LIMIT 1")
+  SHIP_LIN=$(q "SELECT order_line_id FROM add_order_line('$SHIP_ORD',(SELECT item_id FROM inventory_items WHERE sku='IN-1001'),NULL,3,25,NULL,'STANDARD','$WHMAIN',NULL,NULL,NULL,NULL)")
+  "${DBQ[@]}" "SELECT reservation_id FROM reserve_inventory_for_order((SELECT item_id FROM inventory_items WHERE sku='IN-1001'),'$WHMAIN',3,'SALES','$SHIP_ORD','tool_testplan $TS',NULL,NULL,'$SHIP_LIN')" >/dev/null 2>&1
+  echo "  fixture: sales order $SHIP_ORD with 3 of IN-1001 committed to its line"
+fi
+after_34() {
+    [ -n "$SHIP_ORD" ] || { DETAIL="the ship fixture could not be made"; return 1; }
+    [ "$(q "SELECT status FROM orders WHERE order_id='$SHIP_ORD'")" = "SHIPPED" ] ||
+        { DETAIL="status is $(q "SELECT status FROM orders WHERE order_id='$SHIP_ORD'") - the door answers SHIPPED or PICKING, and neither of those is what I see"; return 1; }
+    sql_true "EXISTS (SELECT 1 FROM inventory_movements m WHERE m.movement_type='ISSUE' AND m.reference_id='$SHIP_ORD' AND m.reference_line_id IS NOT NULL)" ||
+        { DETAIL="shipped with no ledger row naming the line"; return 1; }
+    sql_true "EXISTS (SELECT 1 FROM inventory_reservations r WHERE r.order_id='$SHIP_ORD' AND coalesce(shipped_quantity,0) >= 3)" ||
+        { DETAIL="the stock left but the commitment it was released from still says held - §5.2's settle step is what this asserts"; return 1; }
+    sql_true "NOT EXISTS (SELECT 1 FROM vw_item_availability WHERE quantity_available < 0)" || DETAIL="the issue produced a negative bin"
+    true
+}
+case_run 34 ship_sales_order "$SA" \
+  "Ship sales order $(q "SELECT order_number FROM orders WHERE order_id='$SHIP_ORD'") from the Main Warehouse. Everything on it is packed." \
+  ship_sales_order after_34
+
+after_35() {
+    LAST=$(q "SELECT run_id FROM agent_interactions WHERE bot_id='sales'
+                AND human_input LIKE '<scheduled order housekeeping%'
+              ORDER BY timestamp DESC LIMIT 1")
+    [ -n "$LAST" ] || { DETAIL="no <scheduled order housekeeping...> trajectory row - the timer is not "
+                              "armed, or it has never finished a tick (ORDERS_HOUSEKEEPING_INTERVAL_MINUTES, "
+                              "and the boot log line that says what it armed itself with)"; return 1; }
+    sql_true "(SELECT error_message IS NULL FROM agent_interactions WHERE run_id='$LAST')" ||
+        { DETAIL="the tick failed: $(q "SELECT left(error_message,90) FROM agent_interactions WHERE run_id='$LAST'")"; return 1; }
+    # 0031's acceptance, from the other side: a tick whose sweep was refused used to file this same
+    # clean-looking sentence, so the assertion is on the sentence too and not only on error_message.
+    # Both halves, because 0031's grant shows up in the sentence and not only in error_message. Matching
+    # "collected" alone would pass on the failure form too - that sentence ends with the same word -
+    # which is precisely how a keeper that could not collect anything looked kept.
+    sql_true "(SELECT final_output NOT ILIKE '%CLAIM SWEEP FAILED%' AND final_output ILIKE '%expired collected%' FROM agent_interactions WHERE run_id='$LAST')" ||
+        { DETAIL=$(q "SELECT left(final_output,120) FROM agent_interactions WHERE run_id='$LAST'"); return 1; }
+    true
+}
+# ---------------------------------------------------------------------------
+# the timers, and the cross-cutting invariants
+# ---------------------------------------------------------------------------
+echo "== case 21, cases 35-36 + cross-cutting =="
 if sql_true "EXISTS (SELECT 1 FROM agent_interactions
         WHERE bot_id='inventory' AND human_input='<scheduled inventory check>'
           AND timestamp > now() - interval '40 minutes' AND error_message IS NULL)"; then
@@ -255,12 +575,39 @@ if sql_true "EXISTS (SELECT 1 FROM agent_interactions
 else
     verdict "case 21: scheduled check ran" 1 "no scheduled-check trajectory row in the last 40 minutes"
 fi
+case_run 35 orders_housekeeping "$SA" \
+  "When did your scheduled housekeeping run last, and what did it find?" __schedule__ after_35
+
+# The last of the twelve, and last for a reason: it is the only sales tool whose fixture belongs to
+# another agent (case 2 raises Jane), so it cannot join the dependency chain above without making a
+# purchase-order case wait on a customer-service one. What it asserts is that a FORK that copies a read
+# still has to answer for it: get_customers is vw_customers through the same door the service agent
+# reads, under this process's own row security, and a stale copy of that view's column list would show
+# up here rather than in a README.
+after_36() {
+    need_eid || { DETAIL="case 2's customer is not there to read"; return 1; }
+    obs_has "$RID" get_customers "$JANE" || { DETAIL="the answer did not name the customer the prompt asked about"; return 1; }
+    sql_true "EXISTS (SELECT 1 FROM vw_customers WHERE id='$EID')" ||
+        { DETAIL="the row it described is not in the view the tool reads"; return 1; }
+    true
+}
+case_run 36 get_customers "$SA" \
+  "Is Jane Doe $TS still an active customer on our side? I need the id, not just the name." \
+  get_customers after_36
 
 RUNIDS="${RUNIDS%,}"   # trim trailing comma for the IN lists
 if [ -n "$RUNIDS" ] && [ -z "${CASE_FILTER:-}" ]; then
-    n_runs=$(q "SELECT count(*) FROM agent_interactions WHERE run_id IN ($RUNIDS)")
     want=$(( $(grep -o "'," <<< "$RUNIDS" | wc -l) + 1 ))
-    [ "$n_runs" -ge 15 ] && verdict "trajectory: every case run has its row" 0 "$n_runs rows for the harness runs" \
+    # Counted against the number of run ids THIS invocation collected, not against a literal. The
+    # literal this replaces said 15 when the plan had 21 cases, so the check passed for six cases'
+    # worth of missing rows and would have passed for twenty more after the third agent landed.
+    n_runs=0
+    for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+        n_runs=$(q "SELECT count(*) FROM agent_interactions WHERE run_id IN ($RUNIDS)")
+        [ "${n_runs:-0}" -ge "$want" ] && break
+        sleep 1     # the recorder's defer can land just after the response - see wait_for above
+    done
+    [ "${n_runs:-0}" -ge "$want" ] && verdict "trajectory: every case run has its row" 0 "$n_runs rows for the $want harness runs" \
         || verdict "trajectory: every case run has its row" 1 "only $n_runs of $want run_ids resolved to rows"
 
     bad=$(q "SELECT count(*) FROM vw_tool_calls WHERE run_id IN ($RUNIDS) AND NOT observations_aligned")
@@ -277,5 +624,5 @@ bad_chain=$(q "SELECT count(*) FROM audit_chain_verify() v WHERE NOT v.chain_ok"
     || verdict "audit chain still intact after the writes" 1 "chain_ok=false somewhere (${bad_chain:-unreadable})"
 
 echo
-echo "  pass $PASS   fail $FAIL   (fixtures stamped $TS; order id $OUID)"
+echo "  pass $PASS   fail $FAIL   (fixtures stamped $TS; inventory order $OUID, purchase order ${POID:-none})"
 [ "$FAIL" = 0 ] || { echo "  failed: ${FAILED_CASES[*]}"; exit 1; }

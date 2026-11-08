@@ -142,9 +142,11 @@ func getCustomerInfo(q Querier) tools.ToolDefinition {
 			where := []string{}
 			vals := []any{}
 			add := func(clause string, v any) {
-				where = append(where, strings.Replace(clause, "?",
-					"$"+strconv.Itoa(len(vals)+1), 1))
-				vals = append(vals, v)
+				sql, took := clauseFor(clause, len(vals)+1)
+				where = append(where, sql)
+				if took {
+					vals = append(vals, v)
+				}
 			}
 			if name != nil {
 				add("name ILIKE ?", "%"+name.(string)+"%")
@@ -179,6 +181,8 @@ func getCustomerCommunications(q Querier) tools.ToolDefinition {
 		Name: "get_customer_communications",
 		Description: "One customer's recent interactions, newest first, from " +
 			"vw_customer_communications_summary: date, direction, type, subject, summary, outcome, " +
+			"and both sides of who was on the call - entity_id and contact_id beside the names, because " +
+			"the ids are what the write tools take and the names are not acceptable in their place, " +
 			"priority, sentiment, and whether a follow-up is owed. Name the customer with entity_id " +
 			"or customer_name, never both. Defaults to the five most recent, which is what the " +
 			"requirements ask for; raise limit for a longer history. An outcome of pending or " +
@@ -218,9 +222,11 @@ func getCustomerCommunications(q Querier) tools.ToolDefinition {
 			vals := []any{}
 			where := []string{}
 			add := func(clause string, v any) {
-				where = append(where, strings.Replace(clause, "?",
-					"$"+strconv.Itoa(len(vals)+1), 1))
-				vals = append(vals, v)
+				sql, took := clauseFor(clause, len(vals)+1)
+				where = append(where, sql)
+				if took {
+					vals = append(vals, v)
+				}
 			}
 
 			if id != nil {
@@ -241,7 +247,12 @@ func getCustomerCommunications(q Querier) tools.ToolDefinition {
 			}
 
 			vals = append(vals, limit)
-			sql := "SELECT id, started_at, entity_id, entity_name, contact_name," +
+			// contact_id beside contact_name, for the reason the projection is otherwise the view's
+			// own column list: add_communication takes a contact_id, tells the caller never to guess it,
+			// and until now had no read in this process that returned one. A required-by-nothing,
+			// guessable-by-nobody argument is a column that does not exist as far as a conversation is
+			// concerned. TestEveryDoorKeyIsReadableFromARead is the assertion.
+			sql := "SELECT id, started_at, entity_id, entity_name, contact_id, contact_name," +
 				" communication_type, direction, subject, summary, channel, outcome, priority," +
 				" sentiment_label, sentiment_score, duration_seconds, follow_up_required," +
 				" follow_up_date, agent_id" +
@@ -474,9 +485,16 @@ func addCommunication(q Querier) tools.ToolDefinition {
 			"retry of the same call inside one turn is answered from the first one's result and " +
 			"does not file a second copy of a phone call.",
 		Parameters: object(map[string]any{
-			"customer_name":      text("Part or all of the customer's name."),
-			"entity_id":          integer("The customer's entity id, preferred once one is known."),
-			"contact_id":         integer("The person actually spoken to. Never guessed from the primary contact."),
+			"customer_name": text("Part or all of the customer's name."),
+			"entity_id":     integer("The customer's entity id, preferred once one is known."),
+			"contact_id": integer("The person actually spoken to, as contacts.id - never guessed " +
+				"from the primary contact. This is the id, not the name: two contacts of one company " +
+				"can share a name in the log and only one of them said the thing. Read it from " +
+				"get_customer_communications' own rows, which carry contact_id beside contact_name; " +
+				"on a customer you have never written up, there is no read here that produces one, " +
+				"and the honest answer is to ask. 0021's finding is the reason it is not defaulted: " +
+				"a wrong contact poisons vw_entity_communication_stats, which is derived from this " +
+				"column and is what an escalation reads."),
 			"communication_type": text("call, email, meeting, chat, note, sms or telegram. Default note."),
 			"direction":          text("inbound, outbound or internal. Default outbound."),
 			"subject":            text("A short line; threads are grouped by it."),

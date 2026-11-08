@@ -5,7 +5,7 @@
 For AI agents working on this project, see:
 - **[AGENTS.md](AGENTS.md)** - Complete navigation guide for AI agents
 - **[README.md](README.md)** - Project overview
-- **[agents/customer_service/README.md](agents/customer_service/README.md)** and **[agents/inventory/README.md](agents/inventory/README.md)** - the two deployed agents
+- **[agents/customer_service/README.md](agents/customer_service/README.md)**, **[agents/inventory/README.md](agents/inventory/README.md)** and **[agents/sales/README.md](agents/sales/README.md)** - the three deployed agents
 - **[archive/blueprint/AGENT_SUMMARY.md](archive/blueprint/AGENT_SUMMARY.md)** - the pattern's first statement (lineage; the runtime is Go — [ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md))
 - **[ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md)** - why the deployed half is Go
 - **[db/README.md](db/README.md)** - the schema, in the order it is applied
@@ -29,11 +29,11 @@ same loop in Go with a tool surface, a trajectory writer, and a second role reus
 
 | | The blueprint (ships) | The ancestor (archived) |
 |---|---|---|
-| Where | `agents/customer_service/`, `agents/inventory/` | `archive/blueprint/` |
+| Where | `agents/customer_service/`, `agents/inventory/`, `agents/sales/` | `archive/blueprint/` |
 | Shape | Go backend (module `jada-backend`) + React UI, one process each | `bot.py`, ~215 lines, Python + LangChain |
 | Transport | HTTP `POST /api/chat`, SSE `POST /api/chat/stream`, bundled UI | Telegram bot |
 | Memory | `agent_memories` (0023) plus history rehydrated from `agent_interactions` on a cold thread | LangChain checkpointer + in-process state |
-| Tools | 14 (customer service) / 11 (inventory): domain tools + three memory tools + a clock + two web tools | 8, all customer-domain |
+| Tools | 14 / 11 / 18 (service, stock, orders): domain tools + three memory tools + a clock + two web tools | 8, all customer-domain |
 | Schedule | customer service: a prompt. inventory: a prompt **or** a 30-minute in-container timer | whatever wakes the bot |
 | Trajectory | the loop's own `defer`: a run that panics still records itself | `interaction_logger.py`, best effort |
 
@@ -110,6 +110,27 @@ server.** What its job description assumed has been taken by other parts of the 
   and is deliberately **not** a tool: a monitoring agent that can move stock can silence its own alarms.
 - **Requirements:** [docs/agent_requirements/inventory/inventory.md](docs/agent_requirements/inventory/inventory.md)
 
+**Sales & Procurement** — `agents/sales/`, `:4570`, `AGENT_ROLE=sales`
+- **Responsibilities:** raise documents of all three kinds and move them as far as a status can be moved
+  by hand; finish the ones that stock finishes; and keep two policies the schema has always had from
+  decaying quietly — claim retention, and the agreement between a line's counter and the ledger that
+  moved its stock.
+- **Reads:** `vw_orders`, `vw_order_lines`, `vw_order_commitments`, `vw_suppliers`, and `vw_customers`
+  through the same door the service agent reads, deliberately not a second copy of that read in a second
+  place.
+- **Writes:** seven doors — `create_order`, `add_order_line`, `transition_order`, `add_supplier`
+  (0027/0028), `ship_sales_order`, `receive_purchase_order`, `cancel_inventory_reservation` (0030). The
+  Go layer coerces arguments and claims a key; it composes no business SQL, which is the rule
+  `code:cs_writes_through_doors` watches across all three agents.
+- **On a schedule:** `runHousekeeping`, hourly, `runInventoryCheck`'s shape: `idempotency_sweep()` (the
+  keeper 0011's policy and 0030's NOTICE both said was owed; 0031 is the grant that let it run), then a
+  scan of `vw_order_commitments` whose finding lands in `agent_memories` only when it changed.
+- **What it refuses:** `book_work_order_production`, `plan_work_order_operation`, `add_work_centre` and
+  `execute_inventory_movement` are installed and unregistered. The first three need routings, which 0029
+  §7 declined to invent; the fourth is the inventory agent's argument, inherited verbatim — a process
+  that moves stock freely can silence the alarms its own documents raise.
+- **Requirements:** [docs/agent_requirements/sales/sales.md](docs/agent_requirements/sales/sales.md)
+
 ### 3.3 Not built
 HR Onboarding, Accounting, Sales, and the Communication (multi-channel) agent. Each would be the
 customer service fork with `pkg/crm` replaced, the prompt and identity strings changed, the trajectory
@@ -124,7 +145,7 @@ The core is a **PostgreSQL 17 database with PGVector**, reached over `verify-ful
 ### 4.1 Core tables
 **See [db/README.md](db/README.md) for the single source of truth, and [docs/database/](docs/database/) for the generated catalog listings.**
 
-What the two agents read and write:
+What the three deployed agents read and write:
 - `entities`, `contacts`, `entity_relationships`, `addresses` - the party model; `vw_customers` is its customer-facing join
 - `communications` - interaction history; every row arrives through `add_communication`
 - `agent_memories` - what an agent was told to remember (0023), append-only by grant

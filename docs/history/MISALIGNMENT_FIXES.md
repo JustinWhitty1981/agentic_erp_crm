@@ -13,8 +13,10 @@
 > | `docs/MISALIGNMENT_FIXES.md` - "Created" | the file moved to `docs/history/MISALIGNMENT_FIXES.md`; every link that says otherwise is broken, and `PLAN.md`'s copy of that link was fixed in the 2026-11-05 sweep |
 >
 > `agents/` does exist, and the sentence above about it being "empty" is the single most outdated line in
-> the file: it holds two deployed agents, each with a Go backend, a React UI, a Dockerfile and a
-> README - `agents/customer_service/` on `:4550` and `agents/inventory/` on `:4560`.
+> the file: it holds three deployed agents, each with a Go backend, a React UI, a Dockerfile and a
+> README - `agents/customer_service/` on `:4550`, `agents/inventory/` on `:4560` and `agents/sales/` on
+> `:4570`, the last two forked from the first. The one line of the July record this does not repair is
+> the Telegram transport: still absent from all three, which are HTTP and SSE.
 
 This document tracks the misalignments identified between the codebase and documentation, and the fixes applied.
 

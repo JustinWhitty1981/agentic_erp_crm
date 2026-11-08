@@ -9,13 +9,19 @@
 #
 # What it checks, and why each one is a real failure rather than a tidiness rule:
 #
-#   1. every tool the Go backend registers is named in the agent's README, and every tool the README
-#      names is registered. A tool in the code but not the docs is a capability nobody knows the agent
-#      has; a tool in the docs but not the code is worse, because the system prompt tells the model
-#      about a name that answers "not found", which reads to a human as a data problem.
+#   1. for **every deployed agent** - discovered as "a tracked directory under agents/ with a
+#      backend_go", which is what makes a third and fourth fork checked without anyone remembering to
+#      add them: every tool the Go backend registers is named in that agent's README, and every tool the
+#      README's *table* names is registered. A tool in the code but not the docs is a capability nobody
+#      knows the agent has; a tool in the docs but not the code is worse, because the system prompt tells
+#      the model about a name that answers "not found", which reads to a human as a data problem. The two
+#      directions are not symmetric on purpose: prose may name a door to explain that it is NOT a tool
+#      (`agents/sales` does exactly that), a table row may not.
 #   2. every environment variable the deployment sets is documented. An undocumented key is a knob
 #      that gets changed by accident and a behaviour nobody can reproduce, and AGENTS.md makes
-#      environment variables the whole of the configuration story.
+#      environment variables the whole of the configuration story. The documented set is the union over
+#      the repo's pages and all three agent READMEs, because requiring three copies of the same twenty
+#      rows is the duplication 0018 §3b is the record of; §1 is what holds each agent to its own table.
 #   3. every view the root AGENTS.md advertises exists in the database. This is the check the schema
 #      half of this repo has always needed: the table of views in AGENTS.md was written from a
 #      superseded SQL file, and two of the rows in it named views that no migration ever created (T4).
@@ -35,13 +41,40 @@ set -uo pipefail
 # failure is indistinguishable from one that cannot.
 ROOT="${AFPC_DOCS_ROOT:-}"
 [ -n "$ROOT" ] || ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-AGENT_DIR="$ROOT/agents/customer_service"
-GO_DIR="$AGENT_DIR/backend_go"
-# Defined here rather than where it is first read: §1 only sets it inside the "the Go backend exists"
-# branch, and §2 uses it in the documented-keys list, so a tree with no backend_go hit an unbound
-# variable and stopped - which is how the self-test in test_check_agent_docs.sh found it. The real
-# repository always has the backend, and that is exactly why the bug was invisible.
-agent_readme="$AGENT_DIR/README.md"
+# Which agents are deployed is a fact about the tree, not a list in this file: an agent is a directory
+# under agents/ with a backend_go in it. That is what makes `agents/inventory` and `agents/sales`
+# checked without anyone remembering to add them, and it is why agents/jada - the reference drop, no
+# backend, unreadable to the build user - is not.
+#
+# The rule being extended is §1's own ("a tool in the code and not in a README is a failing build
+# here, deliberately"), and the reason it matters more now than when it was written is the fork: three
+# processes register three overlapping tool sets from three near-identical sources, and a check that
+# reads only the first of them certifies one third of the advertised surface.
+agents=()
+for d in "$ROOT"/agents/*/; do
+    [ -d "$d/backend_go" ] || continue
+    # ...and tracked. agents/jada is the reference drop the customer service agent was derived from:
+    # unmodified, gitignored, and no README in this repository claims it, so its Go source is not this
+    # project's advertised surface. Presence of a backend_go is the wrong question to ask of it - a
+    # fork of the same loop is exactly what it is - which is why the exclusion is about the repository
+    # rather than about the directory. Outside a work tree (the fixture this file's self-test builds)
+    # nothing is ignored, and every agent stays in.
+    if git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1 && git -C "$ROOT" check-ignore -q "$d"; then
+        continue
+    fi
+    agents+=("${d%/}")
+done
+# The fixture in test_check_agent_docs.sh has a README and no Go source, and §1-§2 have to keep running
+# over it - with the "no backend" branch exercised - for those two sections to stay under test.
+[ "${#agents[@]}" -gt 0 ] || agents=("$ROOT/agents/customer_service")
+
+GO_DIRS=()
+for d in "${agents[@]}"; do
+    [ -d "$d/backend_go" ] && GO_DIRS+=("$d/backend_go")
+done
+# The empty case again, for the same reason and the same seam: bash 4.3 and earlier treat an empty
+# array expansion as an unbound variable under `set -u`, and §2-§3 iterate over this one.
+[ "${#GO_DIRS[@]}" -gt 0 ] || GO_DIRS=("${agents[0]}/backend_go")
 DOC_QUIET=0
 [ "${1:-}" = "--quiet" ] && DOC_QUIET=1
 
@@ -63,34 +96,53 @@ say() { [ "$DOC_QUIET" -eq 1 ] || printf '\n== %s ==\n' "$*"; }
 # check in section 1c catches that difference rather than assuming it away.
 say "1 tools: the code and the README describe one surface"
 
-if [ ! -d "$GO_DIR" ]; then
-    skip "no Go backend at $GO_DIR"
-else
-    code_tools=$(grep -rhoE '^\s*Name:\s*"[a-z0-9_]+"' \
-        "$GO_DIR/pkg/tools/tools.go" "$GO_DIR/pkg/crm/tools.go" 2>/dev/null \
-        | sed -E 's/.*"([a-z0-9_]+)".*/\1/' | sort -u)
+for AGENT_DIR in "${agents[@]}"; do
+    GO_DIR="$AGENT_DIR/backend_go"
+    agent_readme="$AGENT_DIR/README.md"
+    # Named in every message this loop prints: with three agents the failure has to say which one is
+    # wrong, and "get_orders is registered and absent from the README" is unactionable otherwise.
+    who=$(basename "$AGENT_DIR")
 
-    # crm.Tools() builds its list through helper functions, so the names are the helpers'.
+    if [ ! -d "$GO_DIR" ]; then
+        skip "$who: no Go backend at $GO_DIR"
+        continue
+    fi
+
+    # The domain package is whatever sits beside pkg/tools: crm, inventory, orders. Naming them would
+    # have made this file's second silent gap - the first was a grep for one compose form - because a
+    # fourth agent's package is not one of the three spellings.
+    code_tools=$(grep -rhoE '^\s*Name:\s*"[a-z0-9_]+"' "$GO_DIR"/pkg/*/tools.go 2>/dev/null \
+        | sed -E 's/.*"([a-z0-9_]+)".*/\1/' | sort -u)
     code_tools=$(printf '%s\n' "$code_tools" | grep -v '^$' | sort -u)
     code_count=$(printf '%s\n' "$code_tools" | grep -c '.')
 
     if [ ! -f "$agent_readme" ]; then
-        bad "agents/customer_service/README.md does not exist - the deployed agent is undocumented"
+        bad "$who: $agent_readme does not exist - a deployed agent that documents nothing"
     else
-        doc_tools=$(grep -ohE '^\| `(get|add|update|mark|save|list|current|search|scrape)[a-z0-9_]*`' \
+        # The table's first column is the claim, so only that column is read. A README may name a door
+        # in prose that it does not register - `agents/sales` documents `book_work_order_production`
+        # precisely to say it is NOT a tool - and that sentence is a description of the schema, not an
+        # advertisement. The verbs are the ones this repository's tool names begin with, plus `get_`,
+        # because a read is named for what it returns.
+        doc_tools=$(grep -ohE '^\| `(get|add|update|mark|save|list|current|search|scrape|create|transition|ship|receive|cancel|reserve|delete|find|plan|book|check|run|count)[a-z0-9_]*`' \
             "$agent_readme" | tr -d '|` ' | sort -u)
 
+        # Two directions, and they are not symmetric, because the two failures are different. A tool in
+        # the CODE must be MENTIONED somewhere in the README - the six shared tools are one prose
+        # sentence in the sibling agents and fourteen table rows in the customer service one, and both
+        # are honest about what the binary registers. A tool in a README TABLE is a stronger claim -
+        # that is the surface - so table rows are compared against the registry exactly.
         for t in $code_tools; do
-            if ! printf '%s\n' "$doc_tools" | grep -qx "$t"; then
-                bad "$t is registered by the backend and absent from $(basename "$agent_readme")"
+            if ! grep -q "\`$t\`" "$agent_readme"; then
+                bad "$who: $t is registered by the backend and named nowhere in $agent_readme"
             fi
         done
         for t in $doc_tools; do
             if ! printf '%s\n' "$code_tools" | grep -qx "$t"; then
-                bad "$t is documented in $(basename "$agent_readme") and not registered by the backend"
+                bad "$who: $t is documented in $agent_readme and not registered by the backend"
             fi
         done
-        note "$(printf '%s\n' "$code_tools" | grep -c '.') tools in the code, \
+        note "$who: $(printf '%s\n' "$code_tools" | grep -c '.') tools in the code, \
 $(printf '%s\n' "$doc_tools" | grep -c '.') in the README"
     fi
 
@@ -98,17 +150,18 @@ $(printf '%s\n' "$doc_tools" | grep -c '.') in the README"
     #     description is a tool the model cannot choose correctly and nothing else reports it.
     empty_desc=$(grep -rnE '^\s*Description:\s*""' "$GO_DIR/pkg" 2>/dev/null | cut -d: -f2 | tr '\n' ' ')
     if [ -n "$empty_desc" ]; then
-        bad "tool definitions with an empty Description: line $empty_desc"
+        bad "$who: tool definitions with an empty Description: line $empty_desc"
     else
-        note "no empty tool descriptions"
+        note "$who: no empty tool descriptions"
     fi
 
     # 1c. The count of Name: literals versus the count the registry assembles. These are equal for the
     #     shape this codebase uses; a future registry that built names by concatenation would break
     #     the equality, and the message says which of the two numbers moved.
     literal_names=$(grep -rhoE '^\s*Name:\s*"[a-z0-9_]+"' "$GO_DIR/pkg" 2>/dev/null | wc -l | tr -d ' ')
-    note "$literal_names Name: literals across pkg/, $code_count distinct tool names"
-fi
+    note "$who: $literal_names Name: literals across pkg/, $code_count distinct tool names"
+
+done
 
 # ---------------------------------------------------------------------------
 # 2. Environment: documented, or set by the deployment
@@ -121,6 +174,7 @@ say "2 environment: every key the deployment sets appears in a table"
 set_keys=$(mktemp); got_keys=$(mktemp); doc_keys=$(mktemp)
 trap 'rm -f "$set_keys" "$got_keys" "$doc_keys"' EXIT
 
+for AGENT_DIR in "${agents[@]}"; do
 grep -rhoE '^\s*-\s*[A-Z][A-Z0-9_]+=' "$AGENT_DIR"/*.yml "$AGENT_DIR"/*.yaml 2>/dev/null \
     | tr -d ' -=' | sed 's/=.*//' | sort -u > "$set_keys" || true
 grep -rhoE '^\s{4,}[A-Z][A-Z0-9_]+:' "$AGENT_DIR"/*.yml "$AGENT_DIR"/*.yaml 2>/dev/null \
@@ -129,16 +183,22 @@ grep -rhoE '^\s{4,}[A-Z][A-Z0-9_]+:' "$AGENT_DIR"/*.yml "$AGENT_DIR"/*.yaml 2>/d
 # (SSL_CERT_FILE) appears nowhere else.
 grep -hoE '^ENV\s+([A-Z][A-Z0-9_]+)' "$AGENT_DIR"/Dockerfile 2>/dev/null \
     | awk '{print $2}' | sort -u >> "$set_keys" || true
+done
 sort -u -o "$set_keys" "$set_keys"
+for GO_DIR in "${GO_DIRS[@]}"; do
 grep -rhoE '\bos\.Getenv\("([A-Z][A-Z0-9_]+)"\)' "$GO_DIR/pkg" "$GO_DIR/cmd" 2>/dev/null \
     | sed -E 's/.*"([A-Z0-9_]+)".*/\1/' | sort -u >> "$got_keys" || true
 # Constants named Env* hold the key names in this codebase, so they are Getenv's other half.
 grep -rhoE '\bEnv[A-Za-z0-9]*\s*=\s*"([A-Z][A-Z0-9_]+)"' "$GO_DIR/pkg" "$GO_DIR/cmd" 2>/dev/null \
     | sed -E 's/.*"([A-Z0-9_]+)".*/\1/' | sort -u >> "$got_keys"
+done
 sort -u -o "$got_keys" "$got_keys"
 
+# The documented set is the union: a key one agent's README explains is documented, and requiring each
+# of three READMEs to carry the whole shared table would be a fourth copy of the same twenty rows -
+# which is the duplication 0018 §3b is the record of. The per-agent tables are what §1's loop covers.
 for f in "$ROOT/README.md" "$ROOT/AGENTS.md" "$ROOT/QUICKSTART.md" "$ROOT/dev/README.md" \
-         "$agent_readme" "$ROOT/docs/api.md" "$GO_DIR"/../../README.md; do
+         "$ROOT"/agents/*/README.md "$ROOT/docs/api.md"; do
     [ -f "$f" ] && grep -ohE '`[A-Z][A-Z0-9_]{2,}`' "$f" | tr -d '`' >> "$doc_keys" || true
 done
 sort -u -o "$doc_keys" "$doc_keys"
@@ -205,7 +265,14 @@ for f in "$ROOT/AGENTS.md" "$ROOT/archive/blueprint/docs/views.md" "$ROOT/db/REA
 done
 # The Go source is a claim by construction: a query that names a view either parses or the binary does
 # not start, so whatever it references has to exist for the deployment to work at all.
-grep -rhoE '\bvw_[a-z0-9_]+' "$GO_DIR/pkg" 2>/dev/null >> "$declared" || true
+# The binary's source, and only the binary's: a _test.go file that substring-matches SQL is not a query
+# the process sends, and `pkg/inventory/tools_test.go`'s "FROM vw_low" - a prefix chosen so the
+# assertion survives a reformatted query - would otherwise be read as a claim that a view called vw_low
+# exists. The rule this section asserts is about what starts up, so the files that never ship are out.
+for GO_DIR in "${GO_DIRS[@]}"; do
+    find "$GO_DIR/pkg" -name '*.go' ! -name '*_test.go' -print0 2>/dev/null \
+        | xargs -0 grep -hoE '\bvw_[a-z0-9_]+' 2>/dev/null >> "$declared" || true
+done
 sort -u -o "$declared" "$declared"
 # Names that only ever appear in the places excluded above are still worth reporting, because a doc
 # that says "not in the schema" about a view some migration added later is stale in the other
@@ -215,7 +282,9 @@ for f in "$ROOT/AGENTS.md" "$ROOT/archive/blueprint/docs/views.md" "$ROOT/db/REA
     [ -f "$f" ] || continue
     grep -hoE '\bvw_[a-z0-9_]+' "$f" | sort -u >> "$caveated" || true
 done
-comm -13 <(sort -u "$declared") <(sort -u "$caveated") | grep -v '^$' > "$caveated.r" || true
+# Same bytewise rule as §3b, and the same reason: these are vw_* names, and comm may not be handed
+    # locale-ordered input.
+LC_ALL=C comm -13 <(LC_ALL=C sort -u "$declared") <(LC_ALL=C sort -u "$caveated") | grep -v '^$' > "$caveated.r" || true
 
 if [ -n "${PSQL:-}" ] || command -v docker >/dev/null 2>&1 && docker inspect afpc-pg >/dev/null 2>&1; then
     exists=$(mktemp)
@@ -303,12 +372,19 @@ else
     # named `listed`, and not `declared`: §3 above keeps its list of advertised views in a *tempfile*
     # called declared, and reusing that name here replaces the filename with view names, which the
     # EXIT trap then tries to rm -f and reports "File name too long" for the whole list.
-    listed=$(cut -d' ' -f1 "$pairs" | sort -u | comm -12 - <(cut -d' ' -f1 "$real" | sort -u))
+    # LC_ALL=C on every sort and comm in this pair, and that is a correctness fix rather than a quiet:
+    # both sides of the comparison are identifiers whose only punctuation is `_`, and in a UTF-8 locale
+    # collation an underscore is ignorable at the primary level. `sort -u` then emits an order `comm`
+    # refuses - the "not in sorted order" this section used to print four lines at a time, and worse than
+    # the noise, comm's own documentation says its output is unspecified for inputs it cannot order. A
+    # column list could have been compared to a scrambled partner and reported as matching. Bytewise is
+    # the order both programs agree on, and no identifier's meaning depends on which one they used.
+    listed=$(cut -d' ' -f1 "$pairs" | LC_ALL=C sort -u | LC_ALL=C comm -12 - <(cut -d' ' -f1 "$real" | LC_ALL=C sort -u))
     for v in $listed; do
-        want=$(grep "^$v " "$pairs" | cut -d' ' -f2 | sort -u)
-        have=$(grep "^$v " "$real" | cut -d' ' -f2 | sort -u)
-        extra=$(comm -23 <(printf '%s\n' "$want") <(printf '%s\n' "$have"))
-        miss=$(comm -13 <(printf '%s\n' "$want") <(printf '%s\n' "$have"))
+        want=$(grep "^$v " "$pairs" | cut -d' ' -f2 | LC_ALL=C sort -u)
+        have=$(grep "^$v " "$real" | cut -d' ' -f2 | LC_ALL=C sort -u)
+        extra=$(LC_ALL=C comm -23 <(printf '%s\n' "$want") <(printf '%s\n' "$have"))
+        miss=$(LC_ALL=C comm -13 <(printf '%s\n' "$want") <(printf '%s\n' "$have"))
         [ -n "$extra" ] && bad "$v's list names $(echo $extra | tr '\n' ' ') which the view does not have (42703 for anyone who writes the query from the page)"
         [ -n "$miss" ] && bad "$v has $(echo $miss | tr '\n' ' ') that no list on the page mentions"
     done

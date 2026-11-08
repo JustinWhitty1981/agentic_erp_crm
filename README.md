@@ -14,12 +14,14 @@ A **Database-First, Agent-Native** business operating system.
 > check that proves it.
 
 ### What This Is
-- **Two deployed agents**, not one: a customer service agent (`agents/customer_service/`, `:4550`) and
-  an inventory control agent (`agents/inventory/`, `:4560`). Both are Go backends with a React UI, HTTP
-  and SSE transports, and the same agent loop — the second is a sibling fork of the first with the tool
-  layer replaced and a check timer added.
-- **A schema that enforces what the documentation claims**: 27 applied migrations (`0000`-`0018`,
-  `0021`-`0023`, `0026`-`0030`), row-level security `FORCED` on all 27 tenant-coded tables while the
+- **Three deployed agents**, not one: a customer service agent (`agents/customer_service/`, `:4550`),
+  an inventory control agent (`agents/inventory/`, `:4560`), and a sales & procurement agent
+  (`agents/sales/`, `:4570`) — the one the orders schema was built for. All three are Go backends with a
+  React UI, HTTP and SSE transports, and the same agent loop; the second and third are sibling forks of
+  the first with the tool layer replaced and one scheduled job added, because both of the loops that
+  ship have a fact they are obliged to check whether or not anyone asks.
+- **A schema that enforces what the documentation claims**: 28 applied migrations (`0000`-`0018`,
+  `0021`-`0023`, `0026`-`0031`), row-level security `FORCED` on all 27 tenant-coded tables while the
   seven exceptions are declared with their reasons rather than forgotten (five global master-data
   tables, one build ledger, one legacy graph nothing writes — `vw_rls_status` publishes every predicate
   verbatim and gives a verdict), a tamper-evident row trail chained per tenant and month (`audit_log`,
@@ -81,20 +83,26 @@ day-one tool and whose ledger bug 0026 found and fixed).
    `curl -s localhost:4560/api/health | jq`. Eleven tools: four stock reads, one reservation door, and
    the same six shared tools — plus a 30-minute deterministic check whose every tick files a trajectory
    row.
-3. **Run the acceptance plan against both** — `./scripts/agents/tool_testplan.sh`. It is slow (every
-   case is a real model turn) and it re-runs cleanly (fixtures carry a timestamp).
-4. **Read the loop** — `agents/customer_service/backend_go/pkg/agent/agent.go` is the shape of a run
+3. **Run the sales & procurement agent** — `cd agents/sales && docker compose up --build -d`, then
+   `curl -s localhost:4570/api/health | jq`. Eighteen tools: five document reads, seven doors
+   (`create_order`, `add_order_line`, `transition_order`, `add_supplier`, `ship_sales_order`,
+   `receive_purchase_order`, `cancel_inventory_reservation`), and the same six shared ones — plus an
+   hourly keeper that runs `idempotency_sweep()` and reconciles every order line against the ledger.
+4. **Run the acceptance plan against all three** — `./scripts/agents/tool_testplan.sh`. It is slow
+   (every case is a real model turn) and it re-runs cleanly (fixtures carry a timestamp).
+5. **Read the loop** — `agents/customer_service/backend_go/pkg/agent/agent.go` is the shape of a run
    turn: dispatch, trajectory defer, rehydration. The archived `bot.py` is the same loop's ancestor in
    215 Python lines — background reading, not an on-ramp ([ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md)).
-5. **Contribute** to the tool library, the schema's doors, or the documentation — `AGENTS.md` is the
+6. **Contribute** to the tool library, the schema's doors, or the documentation — `AGENTS.md` is the
    route map and `PLAN.md` is the queue.
 
 ### Roadmap
 | Phase | Goal | Status |
 |-------|------|--------|
 | **Alpha** | Core blueprint + 1 working agent | 🟢 Done: the pattern proven in Python (`archive/blueprint/`), and a deployed Go agent behind it |
+| **Alpha++** | A third agent, and the schema it needed | 🟢 Done 2026-11-07: `agents/sales/` on `:4570`, with `0027`-`0031` landed first and the agent second, which is the order ADR-002 asks for |
 | **Alpha+** | A second agent on the same loop, and an acceptance plan that verifies it | 🟢 Done 2026-11-04: `agents/inventory/`, `scripts/agents/tool_testplan.sh` |
-| **Beta** | Tool library + 3 agents + basic registry | 🔵 2 of 3 agents deployed; the registry and the third role are open |
+| **Beta** | Tool library + 3 agents + basic registry | 🔵 all three roles deployed; what is left of Beta is the registry, which is a fourth thing and not a third agent |
 | **1.0** | Production-ready with monitoring, security, docs | ⚪ Future — the monitoring half needs an alerting path that does not exist yet |
 
 ---
@@ -105,7 +113,7 @@ day-one tool and whose ledger bug 0026 found and fixed).
 
 If you're an AI agent working on this project, start here:
 - **[AGENTS.md](AGENTS.md)** - Complete guide for AI agents navigating this project
-- **[agents/customer_service/](agents/customer_service/)** and **[agents/inventory/](agents/inventory/)** - the two deployed agents; **[archive/blueprint/](archive/blueprint/)** - the pattern's first statement, in one Python file: lineage, not a runtime ([ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md))
+- **[agents/customer_service/](agents/customer_service/)**, **[agents/inventory/](agents/inventory/)** and **[agents/sales/](agents/sales/)** - the three deployed agents; **[archive/blueprint/](archive/blueprint/)** - the pattern's first statement, in one Python file: lineage, not a runtime ([ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md))
 - **[QUICKSTART.md](QUICKSTART.md)** - Setup and deployment instructions
 - **[docs/agent_requirements/agent_test_plan.md](docs/agent_requirements/agent_test_plan.md)** - how a turn is proven, tool by tool
 
@@ -115,7 +123,8 @@ Create a swarm of specialized AI agents to run a business where **the conversati
 
 - **No Dashboards:** Natural language UI, simply ask, "How are sales?" and get an instant answer.
 - **No Forms:** Say, "Add a note to John's file," and it's done.
-- **Shared Memory:** PostgreSQL holds the collective memory of all agents in tables both agents read;
+- **Shared Memory:** PostgreSQL holds the collective memory of all agents in tables all three
+  deployed agents read;
   PGVector is where semantic recall will live, and its columns are empty until an embedder is deployed
   that matches them.
 
@@ -145,10 +154,11 @@ Create a swarm of specialized AI agents to run a business where **the conversati
 | [PLAN.md](PLAN.md) | Development roadmap and priorities |
 | [agents/customer_service/README.md](agents/customer_service/README.md) | The deployed customer service agent: tools, environment, endpoints |
 | [agents/inventory/README.md](agents/inventory/README.md) | The second deployed agent, and its check timer |
+| [agents/sales/README.md](agents/sales/README.md) | The third deployed agent: orders, the fulfilment doors, and a keeper with two jobs |
 | [db/README.md](db/README.md) | **Single source of truth for the schema**, and which SQL directories are superseded |
 | [db/MIGRATIONS.md](db/MIGRATIONS.md) | finding → migration, one row per thing the review found |
 | [dev/README.md](dev/README.md) | This development server: container, roles, TLS, gotchas |
-| [docs/agent_requirements/agent_test_plan.md](docs/agent_requirements/agent_test_plan.md) | The acceptance plan for every tool of both agents |
+| [docs/agent_requirements/agent_test_plan.md](docs/agent_requirements/agent_test_plan.md) | The acceptance plan for every tool of all three deployed agents |
 | [archive/blueprint/AGENT_SUMMARY.md](archive/blueprint/AGENT_SUMMARY.md) | The pattern's first statement, in Python — lineage, not a runtime |
 | [ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md) | Why the runtime is Go and the blueprint is lineage |
 | [docs/database/](docs/database/) | Database schema and documentation |

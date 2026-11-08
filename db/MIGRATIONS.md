@@ -437,6 +437,18 @@ Also deferred from 0003, deliberately:
   privilege gap in the retention policy says nothing about whether a line's counter agrees with the
   ledger that moved its stock, and an earlier version of that block returned before the
   reconciliation's memory write. `TestATickStillReconcilesWhenTheSweepFails` holds both.
+- **`vw_order_commitments` answers everything about a commitment except which commitment it is.** The
+  view carries the line's quantities, the ledger's total, and a verdict, and no `reservation_id` - and no
+  view in the schema has one, measured over every `vw_*` column. So `cancel_inventory_reservation`, the
+  door `0030` exists to be the way a hold ends, takes an argument no read can return - and the creating
+  door answers it, so a hold raised after `0030` is nameable by whoever raised it:
+  reachable from psql, unreachable in a conversation. `0030` added `order_line_id` to
+  `inventory_reservations` so that the reconciliation could be a query, and the same argument that
+  justified *that* - a fact the agents must act on needs a key the agents can name - applies one column
+  later. The fix is that column in the view that already joins to the row, plus its grant and a probe;
+  `agents/sales/README.md`'s "What is not here" and `TestEveryDoorKeyIsReadableFromARead` keep it visible
+  until then, the latter by asserting the absence so that adding it updates the documentation in the same
+  commit rather than three months after.
 - **`vw_order_commitments.ledger_agreement` now has a subscriber.** The same tick scans it hourly, and
   when the answer moves it writes `agent_memories` under `orders.reconciliation.state`, so "what
   changed overnight" is a read rather than a re-scan. `audit_summary`'s rollup and

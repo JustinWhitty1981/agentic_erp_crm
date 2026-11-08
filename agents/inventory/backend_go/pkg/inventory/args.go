@@ -209,3 +209,17 @@ func clampInt(args map[string]any, name string, def, min, max int) (int, error) 
 	}
 	return n, nil
 }
+
+// clauseFor rewrites a WHERE fragment's single `?` into the positional parameter at argument index
+// n, and reports whether the fragment carried an argument at all. A fragment with no placeholder has
+// to contribute no argument: an unreferenced parameter position is one Postgres cannot type, and it
+// refuses the whole query with 42P18. No filter in this package is placeholder-free today, so this
+// is prevention; the defect that needed inventing is measured in
+// agents/sales/backend_go/pkg/orders/args.go, whose clause builder is this same code.
+func clauseFor(fragment string, n int) (string, bool) {
+	i := strings.Index(fragment, "?")
+	if i < 0 {
+		return fragment, false
+	}
+	return fragment[:i] + "$" + strconv.Itoa(n) + fragment[i+1:], true
+}

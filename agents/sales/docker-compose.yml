@@ -1,0 +1,101 @@
+# The sales and procurement agent, on this server. Third of three, and the same lineage as its two
+# siblings - same machine facts, read the same way, for the reasons stated in
+# agents/customer_service/docker-compose.yml and repeated only where they change meaning here.
+#
+#   * AFPC_PG_HOST is an IP address, not `afpc-pg`: the leaf certificate carries IP SANs only, and
+#     sslmode=verify-full validates against those. scripts/db/init.sh writes that machine fact to
+#     every agent directory's own .env - including this one - because Compose interpolates ${...} only
+#     from the project .env and the shell, never from an env_file entry. A shared file would update
+#     one agent on re-provision and silently leave another pointing at an address the new certificate
+#     no longer lists.
+#   * The CA is bind-mounted read-only from dev/tls/, never baked into the image, for the same
+#     re-export reason.
+#
+# The port is 4570: the reference drop holds 4545, the customer service agent 4550 and the inventory
+# agent 4560, and an agent's port is the one part of its identity an operator has to type.
+
+services:
+  sales-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: afpc-sales-agent
+    ports:
+      - "4570:8000"
+    env_file:
+      # The database credentials, as with the other two: dev/.env is the source of truth and
+      # scripts/db/roles.sql sets the role passwords from it. AFPC_PG_HOST for the interpolation below
+      # comes from the .env init.sh wrote beside this file, not from here.
+      - ../../dev/.env
+    environment:
+      # --- which model to talk to ---------------------------------------------
+      - LLM_PROVIDER=${LLM_PROVIDER:-local}
+      - VLLM_BASE_URL=${VLLM_BASE_URL:-http://192.168.0.42:18300/v1}
+      - VLLM_MODEL=${VLLM_MODEL:-qwen3.8-flash-next}
+      - LLM_STREAM=${LLM_STREAM:-true}
+
+      # --- who this process is, in the trail ---------------------------------
+      # This value is agent_interactions.bot_id on every row this process writes, conversational and
+      # scheduled alike, and the default for a door's reserved_by / performed_by. It is the field that
+      # separates this agent's trajectory from the other two when three agents share one database,
+      # which is the case here.
+      - AGENT_ROLE=sales
+
+      # --- which tenant this process answers as ------------------------------
+      - AFPC_TENANT_ID=${AFPC_TENANT_ID:-00000000-0000-0000-0000-000000000001}
+      - AFPC_PG_HOST=${AFPC_PG_HOST:?set it to an address in the leaf certificate's SAN list, or run scripts/db/init.sh on this machine, which writes this file's sibling with the one it just put in the certificate}
+      - AFPC_PG_PORT=${AFPC_PG_PORT:-5432}
+      - AFPC_PG_DB=${AFPC_PG_DB:-agent_first_erp_crm}
+      - AFPC_PG_USER=${AFPC_PG_USER:-afpc_app}
+      - AFPC_PG_SSLMODE=${AFPC_PG_SSLMODE:-verify-full}
+      - AFPC_PG_SSLROOTCERT=/etc/ssl/certs/afpc-ca.crt
+      - AFPC_PG_APPNAME=${AFPC_PG_APPNAME:-sales-agent}
+
+      # --- the schedule ------------------------------------------------------
+      # Minutes between the deterministic housekeeping tick: sweep the expired idempotency claims
+      # 0011's retention policy promised to collect, and re-read vw_order_commitments to see whether
+      # any line's counter now disagrees with the ledger that moved it. An hour, because the first is
+      # measured in units of its own 24-hour lease and the second is a scan of documents, not of
+      # shelves - the stock check is the one that wants 30 minutes.
+      #
+      # No host cron: the schedule lives with the process it schedules, both halves restart together,
+      # and "did every hour run" is a query against agent_interactions rather than a cron log.
+      - ORDERS_HOUSEKEEPING_INTERVAL_MINUTES=${ORDERS_HOUSEKEEPING_INTERVAL_MINUTES:-60}
+
+      # --- how loud and how careful ------------------------------------------
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - LOG_FORMAT=${LOG_FORMAT:-text}
+      - LOG_AGENT_INTERACTIONS=${LOG_AGENT_INTERACTIONS:-true}
+      # Worth turning on for this binary in particular: eight of its twelve domain tools can write and
+      # three of those move stock. The gate is caller-side, so the schema does not change when it is on.
+      - STRICT_TOOL_POLICIES=${STRICT_TOOL_POLICIES:-true}
+      - REQUIRE_WRITE_APPROVAL=${REQUIRE_WRITE_APPROVAL:-false}
+      - MAX_TOOL_ITERATIONS=${MAX_TOOL_ITERATIONS:-10}
+      - MAX_BODY_BYTES=${MAX_BODY_BYTES:-1048576}
+
+      # --- who this endpoint answers -----------------------------------------
+      - API_KEYS=${API_KEYS:-}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:4570,http://127.0.0.1:4570}
+
+      # --- runtime plumbing -------------------------------------------------
+      - HOST=0.0.0.0
+      - PORT=8000
+      - TZ=${TZ:-America/Chicago}
+      # db, not file: the reconciliation state the timer writes is only worth writing if the next
+      # container can read it, which is the argument 0023 was written for.
+      - MEMORY_DRIVER=db
+
+    volumes:
+      - ../../dev/tls/afpc-ca.crt:/etc/ssl/certs/afpc-ca.crt:ro
+
+    restart: unless-stopped
+    healthcheck:
+      # Same contract as the siblings: 503 when the database is configured and not answering. A
+      # degraded container here means the timer is not running either, which is exactly the state a
+      # monitor should catch - a sweep that stopped with the connection is the failure mode 0011's
+      # retention policy has been waiting for.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

@@ -12,8 +12,9 @@ import (
 	"strconv"
 	"strings"
 
-	"jada-backend/pkg/turn"
+	"encoding/json"
 	"jada-backend/pkg/tools"
+	"jada-backend/pkg/turn"
 )
 
 // Querier is the whole of the database this package needs - identical in shape to the customer
@@ -91,9 +92,11 @@ func getLowStockItems(q Querier) tools.ToolDefinition {
 
 			where, vals := []string{"true"}, []any{}
 			add := func(clause string, v any) {
-				where = append(where, strings.Replace(clause, "?",
-					"$"+strconv.Itoa(len(vals)+1), 1))
-				vals = append(vals, v)
+				sql, took := clauseFor(clause, len(vals)+1)
+				where = append(where, sql)
+				if took {
+					vals = append(vals, v)
+				}
 			}
 			if lvl := str(args, "alert_level"); lvl != nil {
 				L := strings.ToUpper(lvl.(string))
@@ -142,11 +145,11 @@ func getItemAvailability(q Querier) tools.ToolDefinition {
 			"available, not on hand, is the number a promise is measured against.",
 		Policy: tools.ToolPolicy{ReadOnly: true},
 		Parameters: object(map[string]any{
-			"item_id":         text("The item's uuid."),
-			"sku":             text("The exact SKU as stored."),
-			"warehouse_id":    text("A warehouse id (uuid)."),
+			"item_id":           text("The item's uuid."),
+			"sku":               text("The exact SKU as stored."),
+			"warehouse_id":      text("A warehouse id (uuid)."),
 			"only_need_reorder": boolean("True to return just the lines where needs_reorder holds."),
-			"limit":           integer("Rows to return, 1-200. Default 20."),
+			"limit":             integer("Rows to return, 1-200. Default 20."),
 		}),
 		ExecuteContext: func(ctx context.Context, args map[string]any) (string, error) {
 			limit, err := clampInt(args, "limit", defaultItemRows, 1, maxItemRows)
@@ -156,9 +159,11 @@ func getItemAvailability(q Querier) tools.ToolDefinition {
 
 			where, vals := []string{"true"}, []any{}
 			add := func(clause string, v any) {
-				where = append(where, strings.Replace(clause, "?",
-					"$"+strconv.Itoa(len(vals)+1), 1))
-				vals = append(vals, v)
+				sql, took := clauseFor(clause, len(vals)+1)
+				where = append(where, sql)
+				if took {
+					vals = append(vals, v)
+				}
 			}
 			if id, err := uuidArg(args, "item_id"); err != nil {
 				return "", err
@@ -174,7 +179,13 @@ func getItemAvailability(q Querier) tools.ToolDefinition {
 				add("warehouse_id = ?", wh)
 			}
 			if b, _ := boolArg(args, "only_need_reorder", false).(bool); b {
-				where = append(where, "needs_reorder")
+				// Through add() rather than straight into `where`, so that every clause this package
+				// builds passes the one builder that knows the rule: a fragment with nothing to bind
+				// contributes no argument (clauseFor in args.go, and agents/sales'
+				// TestNoQuerySendsAParameterItsSQLNeverNames for the version a build enforces). This form
+				// was already right on its own; two spellings of "add a condition" is how one of them
+				// drifts, and in the sales fork one of them did.
+				add("needs_reorder", nil)
 			}
 
 			sql := "SELECT item_id, sku, name, warehouse_id, warehouse_name, location_code," +
@@ -234,7 +245,7 @@ func getItemMovementSummary(q Querier) tools.ToolDefinition {
 					return "", err
 				}
 				if len(rows) == 0 {
-					return "", fmt.Errorf("no stock lines carry sku %q - an item with zero " +
+					return "", fmt.Errorf("no stock lines carry sku %q - an item with zero "+
 						"movements and no on-hand row is invisible to the ledger views too", sku)
 				}
 				itemID = rows[0]["item_id"]
@@ -292,9 +303,11 @@ func getInventoryValuation(q Querier) tools.ToolDefinition {
 		ExecuteContext: func(ctx context.Context, args map[string]any) (string, error) {
 			where, vals := []string{"true"}, []any{}
 			add := func(clause string, v any) {
-				where = append(where, strings.Replace(clause, "?",
-					"$"+strconv.Itoa(len(vals)+1), 1))
-				vals = append(vals, v)
+				sql, took := clauseFor(clause, len(vals)+1)
+				where = append(where, sql)
+				if took {
+					vals = append(vals, v)
+				}
 			}
 			if wh, err := uuidArg(args, "warehouse_id"); err != nil {
 				return "", err
@@ -333,7 +346,11 @@ func reserveInventory(q Querier) tools.ToolDefinition {
 			"restock does. A nonexistent item or warehouse, a non-positive quantity, or an order " +
 			"type outside the list is an error and not a shortage: one says the shelf is empty, " +
 			"the other says the wrong question was asked, and the human in the loop needs to be " +
-			"told which. reserved_by should name who the hold is for.",
+			"told which - and since 0030, a document-typed hold that names a uuid no order answers to " +
+			"is a third case: an error, and a new one, because the column used to accept anything. " +
+			"reserved_by should name who the hold is for. Releasing a hold is not this tool's job and " +
+			"no longer needs to be nobody's: cancel_inventory_reservation is 0030's door and the sales " +
+			"agent registers it.",
 		Policy: tools.ToolPolicy{ReadOnly: false},
 		Parameters: func() map[string]any {
 			p := object(map[string]any{
@@ -341,8 +358,12 @@ func reserveInventory(q Querier) tools.ToolDefinition {
 				"warehouse_id": text("The warehouse's uuid. Required."),
 				"quantity":     integer("Whole units to reserve; must be positive. Required."),
 				"order_type":   text("PURCHASE, SALES, WORK, TRANSFER or STOCK. Required."),
-				"order_id":     text("The document's uuid; omit only for STOCK."),
-				"reserved_by":  text("Who the hold is for; defaults to this agent's role."),
+				"order_id": text("The document's uuid. Required for SALES, PURCHASE and WORK, and " +
+					"it must name an order that EXISTS and is of that type: 0030's enforcement " +
+					"refuses a commitment against a document that is not there, which is the rule " +
+					"thirteen units on this server sat in violation of. Omit it for STOCK and for " +
+					"TRANSFER, the two types that name no document table and no such table exists."),
+				"reserved_by": text("Who the hold is for; defaults to this agent's role."),
 			})
 			p["required"] = []string{"item_id", "warehouse_id", "quantity", "order_type"}
 			return p
@@ -455,12 +476,41 @@ func daysOfSupply(history []map[string]any, windowDays int, avail *float64) any 
 
 func num(v any) (float64, bool) {
 	switch t := v.(type) {
-	case float64:
-		return t, true
 	case int64:
 		return float64(t), true
+	case int32:
+		// int4, which is what an `integer` column is. Every numeric reader in these three forks was
+		// written against the shapes a model's JSON arguments produce - float64, and the odd int64 -
+		// so a row's int2 or int4 fell through to "not a number", which arrives as a zero rather than
+		// as an error. pgx v5's own default map is the list worth copying: it sends int2 as int16,
+		// int4 as int32, int8 as int64, float4 as float32, and numeric as pgtype.Numeric
+		// (pgtype/pgtype_default.go:163-177).
+		return float64(t), true
+	case int16:
+		return float64(t), true // smallint
+	case uint64:
+		return float64(t), true
+	case float32:
+		return float64(t), true // real
+	case float64:
+		return t, true
 	case int:
 		return float64(t), true
+	case json.Number:
+		// What pkg/db hands back for a numeric column since 2026-11-07, when the alternative was
+		// noticing that `%v` on pgtype.Numeric prints its four fields - which is what this package's
+		// scheduled summary line had been doing, in production, in final_output.
+		f, err := strconv.ParseFloat(t.String(), 64)
+		if err != nil {
+			return 0, false
+		}
+		return f, true
+	case string:
+		f, err := strconv.ParseFloat(strings.TrimSpace(t), 64)
+		if err != nil {
+			return 0, false
+		}
+		return f, true
 	default:
 		return 0, false
 	}

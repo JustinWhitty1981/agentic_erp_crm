@@ -127,10 +127,14 @@ closed() {
         code:cs_writes_through_doors)
             # 0021's rule, watched: recording an interaction goes through add_communication, and
             # not through an INSERT that whichever caller wrote it last happens to have kept
-            # correct. Scope is every implementation that can run: the deployment in
-            # agents/customer_service, the archived blueprint tools (archive/blueprint/) it was derived from, and the reference
-            # drop. A .sql copy under scripts/database/ is superseded by db/README and grepping it
-            # would only re-report §3.3.
+            # correct. Scope is every implementation that can run, which since 2026-11-07 means three
+            # deployed agents: the whole of agents/ (the customer service original, the inventory fork,
+            # the sales fork, and the reference drop inside it) plus the archived blueprint tools it was
+            # derived from. The list this used to carry named two of those directories, which is the
+            # shape of bug a list always is - a third agent could compose its own INSERT and this
+            # marker would have gone on reporting 1, quietly certifying a surface nobody had looked at.
+            # A .sql copy under scripts/database/ is superseded by db/README and grepping it would only
+            # re-report §3.3.
             #
             # The qualified alternative is in the pattern on purpose. It was not in the first draft,
             # and that omission is how long the rule went unbroken-looking: four blueprint tools were
@@ -138,7 +142,7 @@ closed() {
             # runtime, and reads as a clean marker.
             local n
             n=$(grep -rn --include='*.go' --include='*.py' -E 'INSERT[[:space:]]+(INTO)[[:space:]]+((public|agent_first_erp_crm)\.)?communications' \
-                    agents/customer_service agents/jada archive/blueprint/ 2>/dev/null | wc -l)
+                    agents/ archive/blueprint/ 2>/dev/null | wc -l)
             [ "$n" -eq 0 ] && echo 1 || echo 0 ;;
         code:agent_docs_match_surface)
             # The documentation claim, watched by the script that can check it. A .md file that
