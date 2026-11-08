@@ -595,6 +595,94 @@ case_run 36 get_customers "$SA" \
   "Is Jane Doe $TS still an active customer on our side? I need the id, not just the name." \
   get_customers after_36
 
+# ---------------------------------------------------------------------------
+# case 37: three agents, one thread string, three conversations.
+#
+# Not a tool case, and the reason is the defect it exists for. `ids.Thread` hashed the caller's thread
+# string alone, so with three backends on one namespace and one tenant - and every web UI posting the
+# same thread string, the literal 'default' until 2026-11-08 - one thread named ONE conversation
+# between all three. `pkg/agent`'s Rehydrate reads history by that id, and the sales agent answered
+# "Hi" with "I'm the Inventory Control Agent" plus a shelf report it had never read: ten worked
+# examples of another agent's voice, ahead of a correct system prompt. 0032 and the two-argument
+# derivation fixed it; probe 4.9 watches the table. This is the case that watches what a person gets,
+# because a green table and a wrong greeting are compatible, and only one of them is a defect nobody
+# has to notice.
+#
+# Three planes, in the order that makes a failure legible: the call plane is that each turn filed a
+# trajectory row (the cross-cutting checks below read RUNIDS, which chat() appended); the state plane
+# is that the three conversation ids are pairwise distinct AND that none of them holds rows of two
+# bots; the answer plane is that each reply names its own agent.
+if want_case 37; then
+    # The detector proves itself first, which is probe 4.9a's discipline applied here: plant one
+    # conversation held by two agents inside a transaction that is discarded, and require the check to
+    # see it. A green line from a query that cannot see its own subject is the false green this file
+    # has now been caught printing twice - once through a phrase map, once through an unevaluated ||
+    # arm - and a third time would be a habit.
+    PLANT37=$("${DBQ[@]}" "BEGIN;
+        INSERT INTO agent_interactions (conversation_id, run_id, bot_id, telegram_chat_id,
+                                        \"timestamp\", human_input, final_output, tenant_id)
+        VALUES ('00000000-0000-5000-8000-000000000371', '00000000-0000-4000-8000-000000003701',
+                'inventory', 'planted-37', now(), '<planted 37>', 'x',
+                        (SELECT tenant_id FROM tenants LIMIT 1)),
+               ('00000000-0000-5000-8000-000000000371', '00000000-0000-4000-8000-000000003702',
+                'sales', 'planted-37', now(), '<planted 37>', 'y',
+                        (SELECT tenant_id FROM tenants LIMIT 1));
+        SELECT CASE WHEN EXISTS (SELECT 1 FROM agent_interactions
+                                  WHERE conversation_id = '00000000-0000-5000-8000-000000000371'
+                                  GROUP BY conversation_id
+                                 HAVING count(DISTINCT bot_id) > 1)
+                    THEN 'seen' ELSE 'blind' END;
+        ROLLBACK;" | tr -d '\r' | head -1)
+    [ "$PLANT37" = seen ] || D37="case 37 cannot see a shared conversation even with one planted, so any verdict it reaches here is about nothing"
+    T37="tp37_${TS}_${NOW}"
+    D37=""
+    SEEN=""
+    CONV37=""
+    for who in "customer_service|$CS" "inventory|$IV" "sales|$SA"; do
+        bot="${who%%|*}"; base="${who#*|}"
+        chat "$base" "$T37" "Who are you, in one line? Say which agent this is."
+        if [ -z "$RID" ]; then D37="$bot filed no run_id (http $HTTP)"; break; fi
+        conv=$(q "SELECT conversation_id FROM agent_interactions WHERE run_id='$RID'")
+        if [ -z "$conv" ]; then D37="$bot's run $RID has no trajectory row to read a conversation from"; break; fi
+        case "|$SEEN|" in *"|$conv|"*)
+            D37="$bot and an earlier agent answered the same thread under one conversation id ($conv)"
+            break ;;
+        esac
+        SEEN="$SEEN|$conv"
+        CONV37="$CONV37'$conv',"
+        # The word each agent has to use about itself. Deliberately a substring test on prose: an
+        # answer that names the right agent in the wrong register still tells a human who they are
+        # talking to, which is the whole of what this case is for.
+        case "$bot" in
+            customer_service) own='customer service' ;;
+            inventory)        own='inventor' ;;
+            sales)            own='sales|procurement' ;;
+        esac
+        if ! printf '%s' "$REPLY" | grep -qiE "$own"; then
+            D37="$bot answered without naming itself ($(printf '%s' "$REPLY" | tr '\n' ' ' | cut -c1-90)...)"
+            break
+        fi
+    done
+    if [ -z "$D37" ] && [ -n "$CONV37" ]; then
+        # The state plane, and the one that would have failed every day this server has been up:
+        # no conversation these turns touched may hold another agent's turns.
+        CONV37="${CONV37%,}"
+        if ! sql_true "NOT EXISTS (SELECT 1 FROM agent_interactions
+                           WHERE conversation_id IN ($CONV37)
+                           GROUP BY conversation_id HAVING count(DISTINCT bot_id) > 1)"; then
+            D37="a conversation this run started already belongs to two agents: $(q "SELECT string_agg(conversation_id||'='||(string_agg(DISTINCT bot_id, '+')), ', ') FROM agent_interactions WHERE conversation_id IN ($CONV37) GROUP BY conversation_id")"
+        else
+            DETAIL="3 agents, 1 thread string, $(printf '%s\n' "$SEEN" | tr -cd '|' | wc -c | tr -d ' ') distinct conversations"
+            verdict "case 37: agent_conversation_identity" 0 "$DETAIL"
+        fi
+        [ -n "$D37" ] && verdict "case 37: agent_conversation_identity" 1 "$D37"
+    else
+        [ -n "$D37" ] && verdict "case 37: agent_conversation_identity" 1 "$D37"
+    fi
+else
+    printf '  %-42s SKIP  filtered\n' "case 37: agent_conversation_identity"
+fi
+
 RUNIDS="${RUNIDS%,}"   # trim trailing comma for the IN lists
 if [ -n "$RUNIDS" ] && [ -z "${CASE_FILTER:-}" ]; then
     want=$(( $(grep -o "'," <<< "$RUNIDS" | wc -l) + 1 ))

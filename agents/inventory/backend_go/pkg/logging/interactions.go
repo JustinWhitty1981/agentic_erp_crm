@@ -66,12 +66,14 @@ type Run struct {
 	finished    bool
 }
 
-// NewRun starts the clock. threadID is the caller's chat thread; botID names this agent, and it
-// is what vw_tool_performance and vw_agent_activity_summary group by, so it must be stable across
-// deployments and distinct between agents.
+// NewRun starts the clock. threadID is the caller's chat thread; botID names this agent, and it is
+// what vw_tool_performance and vw_agent_activity_summary group by, so it must be stable across
+// deployments and distinct between agents. It is also half of the conversation's identity - see
+// ids.Thread - because a thread string alone is a name that does not say who is on it, and three
+// agents on one tenant proved that is not a detail.
 func NewRun(threadID, message, botID, model string) *Run {
 	return &Run{
-		ConversationID: conversationID(threadID),
+		ConversationID: conversationID(botID, threadID),
 		RunID:          newUUID(),
 		ThreadID:       threadID,
 		BotID:          botID,
@@ -98,9 +100,11 @@ func (r *Run) Steps() int {
 	return len(r.actions)
 }
 
-// ConversationID is the uuid a thread's history is filed under. Exported for the read path that
-// rehydrates history, which has to ask the same question the writer answers.
-func ConversationID(threadID string) string { return conversationID(threadID) }
+// ConversationID is the uuid one thread's history with one agent is filed under. Exported for the
+// read path that rehydrates history, which has to ask the same question the writer answers - same two
+// arguments, same order, and a test that says so, because a reader that derived it differently would
+// silently rehydrate nothing and every conversation would start over on every restart.
+func ConversationID(botID, threadID string) string { return conversationID(botID, threadID) }
 
 // Thought records assistant text produced in one iteration of the loop. In the streaming path
 // this is the reasoning-out-loud the model emits before it calls a tool; it is the field that
@@ -378,6 +382,6 @@ func jsonParam(v any) json.RawMessage {
 	return b
 }
 
-func conversationID(threadID string) string { return ids.Thread(threadID) }
+func conversationID(botID, threadID string) string { return ids.Thread(botID, threadID) }
 
 func newUUID() string { return ids.New() }

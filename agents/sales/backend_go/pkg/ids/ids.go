@@ -32,11 +32,32 @@ import (
 // has no meaning. Its stability does.
 const Namespace = "f69d1282-6418-457f-90ba-5482b6cb90c9"
 
-// Thread is the conversation id agent_interactions is keyed by, for one caller-side thread.
+// Thread is the conversation id agent_interactions is keyed by, for one caller-side thread *of one
+// agent* - and the agent half of that input is what this function's signature used to lack.
 //
-// The same thread id must produce the same conversation id in every process and after every
-// rebuild, because the column is how a week of runs are read back as one conversation.
-func Thread(threadID string) string { return v5("thread", threadID) }
+// The same role and thread must produce the same id in every process and after every rebuild, because
+// the column is how a week of runs are read back as one conversation. That sentence was true and
+// incomplete: with three deployed agents sharing one namespace and one tenant, a name that omits
+// *whose* conversation it is names one conversation between all three. Every web UI posts the same
+// thread string, so the histories were literally merged - and the reader is Rehydrate, which feeds
+// them back as prior assistant turns. On 2026-11-08 the sales agent answered "Hi" with "I'm the
+// Inventory Control Agent" and a shelf report it had never read, having been handed ten turns of the
+// inventory agent saying exactly that. Its system prompt was correct; the model followed the examples.
+//
+// So the role is part of the identity now, and it is not a filter bolted onto the read: a conversation
+// belongs to two parties, and a key that names one of them is a key that lies about the other. The
+// order of the parts is load-bearing in one way only - v5 joins them with NUL, so ("sales","x")
+// cannot collide with ("s","alesx").
+//
+// The cost this would have been, had the column not already held the answer: a derivation cannot
+// normally be repaired in SQL, because the table stores the hash and not the input. Here it can,
+// because pkg/logging writes the caller's thread string into agent_interactions.telegram_chat_id - a
+// column named for the blueprint's transport and filled with the HTTP thread id - so 0032 re-keys
+// every existing row to (agent, thread) and no conversation is lost, only de-merged. What would have
+// been true, and is worth keeping in mind the next time a derivation changes: that recovery depends on
+// a column whose name says nothing about it, and on 0017's fixture rows having no thread string at all
+// and therefore being skipped rather than silently re-attributed.
+func Thread(agentID, threadID string) string { return v5("thread", agentID, threadID) }
 
 // CallKey is the idempotency claim key for one tool call inside one run.
 //

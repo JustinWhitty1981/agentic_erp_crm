@@ -188,7 +188,7 @@ Keys this container sets; the shared ones mean what they mean in `agents/custome
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `AGENT_ROLE` | `sales` | `agent_interactions.bot_id` on every row this process writes, scheduled or conversational, and the `reserved_by` / `performed_by` default on the doors that take one. Two places, one value, resolved once — `pkg/agent`'s identity test is what keeps them from disagreeing. |
+| `AGENT_ROLE` | `sales` | `agent_interactions.bot_id` on every row this process writes, scheduled or conversational; the `reserved_by` / `performed_by` default on the doors that take one; and half of `conversation_id`, since `ids.Thread` hashes `(bot, thread)` and that is the key history is rehydrated by. Two places, one value, resolved once — `pkg/agent`'s identity test is what keeps them from disagreeing, and finding 4.9 is what a fork that skips this line would cost. |
 | `ORDERS_HOUSEKEEPING_INTERVAL_MINUTES` | `60` | The timer. Non-positive or unparsable falls back to 60 **and says 60 in the warning**, because a warning naming the wrong value sends an operator looking for a schedule that is not running. |
 | `AFPC_PG_APPNAME` | `sales-agent` | So `pg_stat_activity` can tell these connections from the other two agents', which share the role and the tenant. |
 | `REQUIRE_WRITE_APPROVAL` | `false` | Worth turning on for this binary: seven of the twelve domain tools can write. The gate is caller-side, so nothing in the schema changes when it is on. |
@@ -211,7 +211,8 @@ Keys this container sets; the shared ones mean what they mean in `agents/custome
   What remains genuinely open is narrower and worth stating as such: on a database with **no documents
   at all**, this agent cannot resolve a warehouse name, because the only reads that carry the id are
   documents. `PLAN.md` carries `vw_warehouses` as the way to close that - one of the queued two, which
-  take 0032 and 0033 in whichever order they land. What is *not* done is teaching the Go layer to look
+  take 0033 and 0034 in whichever order they land - 0032 went to finding 4.9's conversation re-key.
+  What is *not* done is teaching the Go layer to look
   up a code, which would put a second way to name one identity into a process that writes documents.
 - **No way to find a reservation to cancel.** `cancel_inventory_reservation` takes `reservation_id`, and
   **no view in this schema returns one** - measured over every `vw_*` column, not guessed: the id lives

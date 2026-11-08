@@ -5,10 +5,12 @@ prompts the agent through its real interface, does the right tool get called, an
 up meaning what the agent's answer said? A test plan that only checks the prose verifies the model's
 vocabulary; this one verifies the system.
 
-Thirty-six cases: fifteen for the customer service agent, six for the inventory agent (its five tools
+Thirty-seven cases: fifteen for the customer service agent, six for the inventory agent (its five tools
 and its timer), fifteen for the sales agent (its twelve tools, one of them asked twice because an item
-line and a service line are different questions, one refusal, and its timer). Cases 1–15 are
-`agents/customer_service/`, 16–21 are `agents/inventory/`, 22–36 are `agents/sales/`. The count is a
+line and a service line are different questions, one refusal, and its timer), and one whose subject is
+the boundary between the three of them rather than any tool. Cases 1–15 are
+`agents/customer_service/`, 16–21 are `agents/inventory/`, 22–36 are `agents/sales/`, and 37 is all
+three of them answering the same thread string.
 claim about coverage, and `case_run`'s "the run never called X" line is what keeps it one: a registered
 tool with no case is a capability nobody has ever seen used through the interface it is advertised on.
 Case 36 is last for that reason and not for tidiness — `get_customers` is the twelfth, and the block
@@ -145,9 +147,20 @@ three possible causes.
 | 33 | cancel_inventory_reservation | "Release the stock held on reservation `$RESID` — the customer changed their mind. Do not cancel the order itself." | `cancel_inventory_reservation` | `cancelled_quantity` covers the hold, the reservation **row still exists** (0008's rule: a thing that cannot leave a trail is not deleted), and `updated_at > created_at` — §4b's reason for adding that column |
 | 34 | ship_sales_order | "Ship sales order SO-… from the Main Warehouse. Everything on it is packed." | `ship_sales_order` | `status` is `SHIPPED` (or `PICKING`, and the case says which it is not); `ISSUE` movements naming lines; the commitment it drew on shows `shipped_quantity ≥ 3`; no negative bin anywhere |
 | 35 | scheduled housekeeping *(not a tool — the timer)* | "When did your scheduled housekeeping run last, and what did it find?" | the tick, via `__schedule__` | the newest `<scheduled order housekeeping>` row for `bot_id='sales'` exists, has **no** `error_message`, and its `final_output` neither says `CLAIM SWEEP FAILED` nor omits the claims it collected |
+| 37 | **agent conversation identity** *(not a tool — the derivation)* | "Who are you, in one line? Say which agent this is." — the same prompt and the **same thread string** to all three agents | the state plane is the case: the three runs' `conversation_id`s are pairwise distinct, and none of those conversations holds rows of a second bot. The answer plane asks only that each reply names its own agent. It carries its own negative control, in the way probe 4.9a does: a shared conversation is planted inside a transaction that is discarded, and the check has to see it before its verdict on the real rows means anything |
 | 36 | get_customers | "Is Jane Doe $TS still an active customer on our side? I need the id, not just the name." | `get_customers` | the observation names the customer case 2 raised, and the row is in `vw_customers` under this process's own row security — a fork that copied a read still has to answer for it |
 
-Two of these are the reason the block was worth adding to a plan that already passed. Case 29 is the
+Case 37 is a third reason, and a different kind of case: the other 36 ask whether a tool
+works, and this one asks whether the process answering is the one that owns the tool. It exists because
+of finding 4.9 (`docs/INTERACTION_LOGGING.md`) - the sales agent greeting a caller as the Inventory
+Control agent, having been rehydrated with another agent's ten turns, because `ids.Thread` hashed the
+thread string and nothing else. Every case above would have stayed green through that, and did: this
+server ran three agents on one merged conversation for four days, and the trajectory table recorded it
+faithfully in rows that no check was asking about. A tool plane cannot see an identity defect, so the
+case has no tool.
+
+Two of these - 29 and 35 - are the reason the block was worth adding to a plan that already passed.
+Case 29 is the
 programme's claim as one prompt: *a status that reports what a warehouse did cannot be typed*, asked in
 the form a hurried human actually uses, and asserted on the state rather than on the apology. Case 35 is
 the claim that a schedule runs, and it earned its keep in its first hour: the tick filed
@@ -179,6 +192,7 @@ exist and why the sentence now says `CLAIM SWEEP FAILED` when the sweep is refus
 | case 25, "warehouse_id is not a uuid", and nothing else in the chain runs | the prompt named a warehouse the way a human does, and the id was not readable until 2026-11-07 - `get_orders` selected `warehouse_name` and dropped `warehouse_id`, which the view has. Fixed in the projection; on a database with no documents the case still needs one raised by hand, which is `PLAN.md`'s `vw_warehouses` |
 | case 25, "the run never called create_order", and the answer says *names but not ids* | the same gap seen from inside the turn rather than from the error: the agent read its way to a warehouse name, found no key beside it, and stopped. That is correct behaviour, and it is the shape `TestEveryDoorKeyIsReadableFromARead` was written for |
 | a sales read tool fails whole with `42P18 could not determine data type of parameter $n` | a WHERE clause with nothing to bind contributed an argument. The rule is in `clauseFor` in each domain package's `args.go`; see `agents/sales/README.md`'s debugging item 5 |
+| any case, and the agent answers as one of the other two | finding 4.9, and it is not a tool defect: `conversation_id` is read back as history, so if the derivation ever stops naming the agent the turns someone else's process filed become this one's voice. Case 37 is the check, and it carries its own planted failure so a green line cannot come from a blind query |
 
 ## Deliberately not in this plan
 

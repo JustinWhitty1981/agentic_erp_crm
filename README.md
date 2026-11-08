@@ -20,7 +20,7 @@ A **Database-First, Agent-Native** business operating system.
   React UI, HTTP and SSE transports, and the same agent loop; the second and third are sibling forks of
   the first with the tool layer replaced and one scheduled job added, because both of the loops that
   ship have a fact they are obliged to check whether or not anyone asks.
-- **A schema that enforces what the documentation claims**: 28 applied migrations (`0000`-`0018`,
+- **A schema that enforces what the documentation claims**: 29 applied migrations (`0000`-`0018`,
   `0021`-`0023`, `0026`-`0031`), row-level security `FORCED` on all 27 tenant-coded tables while the
   seven exceptions are declared with their reasons rather than forgotten (five global master-data
   tables, one build ledger, one legacy graph nothing writes — `vw_rls_status` publishes every predicate

@@ -15,7 +15,10 @@ The Agent First ERP CRM system includes enterprise-grade interaction logging tha
 For every interaction, we capture:
 
 ### 1. **Correlation Context**
-- `conversation_id`: Links all messages in a single conversation thread
+- `conversation_id`: Links all messages in a single conversation thread **with one agent**. It is
+  a UUIDv5 of the pair `(bot_id, thread_id)` computed by `pkg/ids` - and the agent half of that pair is
+  recent, and it is the subject of finding 4.9 below, so read that before treating the column as a
+  thread's name alone.
 - `telegram_chat_id`: **in the deployed agents this column carries the HTTP/SSE thread id**, not a
   Telegram id - `pkg/logging/interactions.go` writes `row["thread_id"]` into it, which is why live
   values read `default`, `web:date-check`, `tp_4_195257` and the scheduled check's `schedule`. The
@@ -127,6 +130,41 @@ log_agent_trajectory(
     model_used=OLLAMA_MODEL
 )
 ```
+
+## Finding 4.9: a conversation that belonged to three agents (2026-11-08)
+
+The sales agent answered "Hi" with *"I'm the Inventory Control Agent - stock levels, shortages,
+movement history, valuation, and reservations"*, and followed it with a shelf report it had never read.
+Nothing in its prompt was wrong - `pkg/agent`'s first sentence names Sales and Procurement - and no
+tool had been called (`actions_taken` was `[]`), so the answer came from the context the process was
+handed rather than from the database. `Rehydrate` reads history by `conversation_id`, and until
+2026-11-08 that id was `uuid5(namespace, "thread", thread_id)`: a name with a *which* and no *whose*.
+Three backends share one namespace and one tenant, and every web UI posted the same thread string - the
+literal `'default'` - so a thread *was* one conversation between all three agents, and ten worked
+examples of another agent's voice outrank a system prompt.
+
+Two measurements, because both matter and neither is obvious from the schema:
+
+```sql
+-- 1. Was a conversation shared? Before 0032, on this server: 22 rows over three agents under 'default',
+--    and 202 scheduled ticks from two agents under 'schedule'.
+SELECT telegram_chat_id, count(*) AS rows, count(DISTINCT bot_id) AS agents
+  FROM agent_interactions GROUP BY 1 HAVING count(DISTINCT bot_id) > 1;
+
+-- 2. Is the id the derivation of the pair? After 0032, zero rows disagree - see probe 4_9's §c.
+```
+
+The fix has three parts and they are not interchangeable: `ids.Thread(agentID, threadID)` in all three
+backends (the identity was already at the call site - `logging.NewRun` receives `botID` and had been
+using it as a label only), `Rehydrate` deriving with `am.BotID`, and the UIs minting a per-tab thread
+id, because a hardcoded thread string is a shared conversation whatever the hash says. 0032 re-keyed
+the 430 rows the old rule had written, which was possible only because `pkg/logging` files the caller's
+thread string in `telegram_chat_id` - the hash is not the record. A fourth agent needs no change to any
+of this, which is the point of putting the rule in the derivation rather than in each reader.
+
+What watches it now: `TestMatchesAReferenceImplementation` pins three golden vectors, one per agent;
+`TestRehydrateAsksForThisAgentsConversation` pins the reader; `TestConversationIdentityNamesTheAgent`
+pins writer and reader agreeing; probe `4_9` and acceptance case 37 pin the running system.
 
 ## Debugging Queries
 
@@ -383,9 +421,10 @@ is the tail of the turn's latency. If you notice slowdowns: If you notice slowdo
 
 ## In the deployed agents
 
-Both Go agents write this table from one place, `pkg/logging`: the loop accumulates a run's tool calls
-and observations, and a `defer` files the row with `run_id`, `conversation_id` (a UUIDv5 of the thread,
-`pkg/ids`), `bot_id` from `AGENT_ROLE`, `duration_ms`, and `response_sources` naming the rows it touched.
+All three Go backends write this table from one place, `pkg/logging`: the loop accumulates a run's tool
+calls and observations, and a `defer` files the row with `run_id`, `conversation_id` (a UUIDv5 of
+`(bot_id, thread_id)`, `pkg/ids`), `bot_id` from `AGENT_ROLE`, `duration_ms`, and `response_sources`
+naming the rows it touched.
 Two consequences worth knowing before debugging with this page:
 
 - **Read it through the endpoint as well as the table.** `GET /api/interactions?view=recent|failed|tool_calls|performance`

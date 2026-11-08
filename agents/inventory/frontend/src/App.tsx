@@ -5,6 +5,33 @@ import './Chat.css'
 
 const API_BASE = window.location.origin
 const API_KEY = import.meta.env.VITE_API_KEY || (window as any).API_KEY || ''
+// One conversation per browser tab rather than one per deployment. The literal 'default' this file
+// used to send was a shared name: two people on one agent, or one person on two agents, were the same
+// conversation in agent_interactions.conversation_id, and an agent that rehydrates another agent's
+// turns starts answering in the other agent's voice. sessionStorage keeps it stable across a refresh
+// and new per tab; the write can fail in private mode, which leaves a per-page-load id - still not
+// somebody else's history.
+const THREAD_KEY = 'afpc_thread_id'
+
+function threadId(): string {
+  let id: string | null = null
+  try {
+    id = sessionStorage.getItem(THREAD_KEY)
+  } catch {
+    id = null
+  }
+  if (!id) {
+    id = `web:${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+    try {
+      sessionStorage.setItem(THREAD_KEY, id)
+    } catch {
+      // No storage: the id lives for this page load.
+    }
+  }
+  return id
+}
+
+const THREAD_ID = threadId()
 
 function App() {
   const [messages, setMessages] = useState<Message[]>([
@@ -57,7 +84,7 @@ function App() {
         headers,
         body: JSON.stringify({
           message: text,
-          thread_id: 'default'
+          thread_id: THREAD_ID
         })
       })
 

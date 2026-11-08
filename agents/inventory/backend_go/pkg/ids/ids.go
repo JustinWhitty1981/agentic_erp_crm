@@ -32,11 +32,18 @@ import (
 // has no meaning. Its stability does.
 const Namespace = "f69d1282-6418-457f-90ba-5482b6cb90c9"
 
-// Thread is the conversation id agent_interactions is keyed by, for one caller-side thread.
+// Thread is the conversation id agent_interactions is keyed by, for one caller-side thread *of one
+// agent* - and the agent half of that input is what this function's signature lacked until
+// 2026-11-08, when the third deployed backend answered "Hi" by introducing itself as this agent. A
+// derivation with no *whose* in it is not one conversation per agent: all three backends share one
+// namespace, one tenant and - because every web UI posts the same thread string - one history, and
+// pkg/agent's Rehydrate feeds that history back as prior assistant turns. Ten worked examples of
+// another agent's voice outrank this process's system prompt, which was and is correct.
 //
-// The same thread id must produce the same conversation id in every process and after every
-// rebuild, because the column is how a week of runs are read back as one conversation.
-func Thread(threadID string) string { return v5("thread", threadID) }
+// agents/sales/backend_go/pkg/ids/ids.go carries the long form of the finding, and 0032 is the re-key
+// of the rows this binary had already written. Recovery was possible only because pkg/logging files
+// the caller's thread string into agent_interactions.telegram_chat_id: the hash is not the record.
+func Thread(agentID, threadID string) string { return v5("thread", agentID, threadID) }
 
 // CallKey is the idempotency claim key for one tool call inside one run.
 //

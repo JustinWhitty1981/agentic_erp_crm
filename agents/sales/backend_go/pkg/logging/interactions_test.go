@@ -302,8 +302,9 @@ func TestSourcesAreDeduplicated(t *testing.T) {
 // conversation and /api/interactions shows a shorter story than the database holds.
 func TestThreadMappingIsStable(t *testing.T) {
 	const thread = "web:demo-thread-1"
-	a := ConversationID(thread)
-	if b := ConversationID(thread); a != b {
+	const bot = "customer_service"
+	a := ConversationID(bot, thread)
+	if b := ConversationID(bot, thread); a != b {
 		t.Fatalf("ConversationID is not deterministic: %s then %s", a, b)
 	}
 	if strings.Count(a, "-") != 4 || len(a) != 36 {
@@ -313,7 +314,7 @@ func TestThreadMappingIsStable(t *testing.T) {
 	if a[14] != '5' {
 		t.Errorf("conversation id %s is not a v5 uuid; it should be derived, not random", a)
 	}
-	if ConversationID("web:other") == a {
+	if ConversationID(bot, "web:other") == a {
 		t.Error("two threads share one conversation id, so their histories would interleave")
 	}
 }
@@ -438,4 +439,23 @@ func decodeStrings(t *testing.T, v any) []string {
 func asString(v any) string {
 	s, _ := v.(string)
 	return s
+}
+
+// TestConversationIdentityNamesTheAgent is the two sentences the reader and the writer have to agree
+// on: one derivation, called with the same pair from both paths, and a different pair for a different
+// agent on the same thread string. The second half is the defect this file exists for - three
+// backends, one tenant, one literal thread id ("default") in all three web UIs, and therefore one
+// merged history until the agent joined the key.
+func TestConversationIdentityNamesTheAgent(t *testing.T) {
+	for _, bot := range []string{"customer_service", "inventory", "sales"} {
+		run := NewRun("web:shared-thread", "hi", bot, "model-x")
+		if run.ConversationID != ConversationID(bot, "web:shared-thread") {
+			t.Errorf("%s files history under %s and reads it under %s: a conversation the writer cannot "+
+				"find is a conversation that starts over on every restart",
+				bot, run.ConversationID, ConversationID(bot, "web:shared-thread"))
+		}
+	}
+	if ConversationID("inventory", "default") == ConversationID("sales", "default") {
+		t.Error("thread \"default\" is one conversation across two agents, so each rehydrates the other's voice")
+	}
 }

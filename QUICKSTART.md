@@ -162,7 +162,7 @@ SELECT * FROM vw_tool_calls WHERE run_id = '<that run_id>';
 ./scripts/agents/tool_testplan.sh
 ```
 
-One prompt per registered tool of all three deployed agents — 36 cases, 40 verdicts — each asserted on
+One prompt per registered tool of all three deployed agents — 37 cases, 41 verdicts — each asserted on
 three independent planes: the call happened, the state is real, the run recorded itself. The agent's
 prose is never the assertion. It takes 15–40 minutes because every case is a real model turn, and it
 re-runs cleanly because the fixtures carry a timestamp. Plan and rationale:

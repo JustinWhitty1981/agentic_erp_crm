@@ -299,7 +299,11 @@ func (am *AgentManager) Rehydrate(ctx context.Context, q crm.Querier, threadID s
 	}
 	am.historyMutex.Unlock()
 
-	conversationID := logging.ConversationID(threadID)
+	// This agent's own history, and no one else's: the conversation id is the pair
+	// (bot, thread), so a thread string reused against another port cannot pull this
+	// process's turns or lose itself into another's. ids.Thread is the reason, and
+	// TestRehydrateAsksForThisAgentsConversation is the assertion on the reader.
+	conversationID := logging.ConversationID(am.BotID, threadID)
 	rows, err := q.Query(ctx, `
 		SELECT human_input, final_output
 		  FROM vw_recent_interactions

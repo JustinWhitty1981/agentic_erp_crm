@@ -21,7 +21,7 @@ Welcome! This guide is designed specifically for AI agents working on the Agent 
 - **[docs/agent_requirements/customer_service/customer_service.md](docs/agent_requirements/customer_service/customer_service.md)** - Customer service agent requirements
 - **[docs/agent_requirements/inventory/inventory.md](docs/agent_requirements/inventory/inventory.md)** - Inventory agent requirements
 - **[docs/agent_requirements/sales/sales.md](docs/agent_requirements/sales/sales.md)** - Sales & procurement agent requirements, corrected in place on 2026-11-07 to what the doors actually answer
-- **[docs/agent_requirements/agent_test_plan.md](docs/agent_requirements/agent_test_plan.md)** - Acceptance plan for every tool of all three deployed agents (36 cases), and its executable form `scripts/agents/tool_testplan.sh`
+- **[docs/agent_requirements/agent_test_plan.md](docs/agent_requirements/agent_test_plan.md)** - Acceptance plan for every tool of all three deployed agents (37 cases), and its executable form `scripts/agents/tool_testplan.sh`
 - **[docs/ATTACHMENT_SYSTEM.md](docs/ATTACHMENT_SYSTEM.md)** - Attachment system documentation
 
 ### 🏛️ Architecture Decision Records
@@ -168,11 +168,12 @@ Follow [QUICKSTART.md](QUICKSTART.md) for Docker-based deployment.
    `db/migrations/NNNN_*.sql` function, so start there and not in the Go file (ADR-002)
 2. Give the migration the next free number. `migrate.sh` rejects a file numbered at or below the highest
    applied, which is why the two planned ones became 0024 and 0025 - see db/MIGRATIONS.md. The highest
-   applied today is **0031** (the fifth file of the orders programme; 0026 took a number rather than the
-   free 0024 because a bug fix and a planned feature are not the same queue), so a new file here is
-   `0032_*` unless one of the planned two lands first. `0031` is the grant that let `agents/sales`' keeper
-   run, and it is the one migration in this set that changes no row - which is worth knowing before you
-   assume a numbered file must be schema-shaped to be necessary
+   applied today is **0032** (a re-key rather than a shape change: `conversation_id` had to learn which
+   agent it belonged to, and finding 4.9 is in `docs/INTERACTION_LOGGING.md`), so a new file here is
+   `0033_*`. The two queued items in `PLAN.md` move with it. 0026 took a number rather than the free 0024
+   because a bug fix and a planned feature are not the same queue, and 0032 is the same rule arriving on
+   the day it was needed: `0031` is the grant that let `agents/sales`' keeper run and is the one migration
+   in this set that changes no row, while `0032` changes 430 of them and no row shape
 3. Wire the tool in the domain package of the agent that owns it -
    `agents/customer_service/backend_go/pkg/crm/tools.go`, `agents/inventory/.../pkg/inventory/tools.go`,
    or `agents/sales/.../pkg/orders/tools.go`: read a `vw_*` view or call the function, send an
@@ -202,7 +203,13 @@ Follow [QUICKSTART.md](QUICKSTART.md) for Docker-based deployment.
    file as background — it is lineage, not an on-ramp, and ADR-006 records why
 2. Define agent-specific tools, in the order above: the function first, then the tool that calls it
 3. Keep the trajectory writer and the memory store. An agent that cannot be read back cannot be fixed,
-   and an agent whose memory dies with its container has no memory - both are 0023's and 0011's subject
+   and an agent whose memory dies with its container has no memory - both are 0023's and 0011's subject.
+   One consequence of keeping the writer, learned the hard way on 2026-11-08: `AGENT_ROLE` is not just a
+   label on the rows, it is half of the key the history is *read back* by (`ids.Thread(agent, thread)`),
+   so a fork that copies the loop and keeps its parent's `AGENT_ROLE` does not merely log under the wrong
+   name - it rehydrates the parent's conversations and starts answering in the parent's voice. Probe
+   `4_9` and acceptance case 37 are the two checks that make that visible without a human noticing a
+   greeting
 4. Test the agent with your intended use cases, in `db/tests/` for the schema half and `go test ./...`
    for the loop half
 5. Then say so in this file, in `README.md`, in `architecture.md` and in `QUICKSTART.md`: a fourth agent
@@ -239,6 +246,12 @@ Follow [QUICKSTART.md](QUICKSTART.md) for Docker-based deployment.
    in the reads rather than the rows: a WHERE clause with nothing to bind must add no argument, or the
    query fails whole with `42P18 could not determine data type of parameter $n` - which is what
    `get_suppliers` did on its default path until `clauseFor` stopped the builder guessing
+7. **If an agent greets you as one of the other agents, read `conversation_id` before you read the
+   prompt.** The prompt is assembled per process and is usually the innocent party; the history is
+   fetched by conversation id, and a model follows ten prior turns of someone else's voice. `SELECT
+   telegram_chat_id, count(DISTINCT bot_id) FROM agent_interactions GROUP BY 1 HAVING count(DISTINCT
+   bot_id) > 1` is the question, and finding 4.9 in `docs/INTERACTION_LOGGING.md` is the answer -
+   including why a thread string is not a conversation, and why `ids.Thread` takes the pair
 
 ### Testing
 Five things can be wrong independently, and each has its own harness:
@@ -323,7 +336,7 @@ agent_first/
 ├── db/                             # THE SCHEMA, and the harness that asserts it
 │   ├── README.md                   # single source of truth: which SQL files are superseded
 │   ├── MIGRATIONS.md               # finding to migration, the marker table, and the tracked tasks
-│   ├── migrations/                 # 0000-0018, 0021-0023, 0026-0030 applied in filename order; 0024/0025 planned
+│   ├── migrations/                 # 0000-0018, 0021-0023, 0026-0032 applied in filename order; 0024/0025 planned
 │   ├── tests/                      # N_N_<finding>.sql, one probe per block, VERDICT lines
 │   └── seeds/                      # 01_demo_customers.sql, 02_demo_inventory.sql - data, idempotent, never DDL
 │

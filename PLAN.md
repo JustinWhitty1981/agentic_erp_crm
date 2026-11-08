@@ -17,7 +17,7 @@ Before starting work, AI agents should review:
    [ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md) made the Go
    backends the runtime
 ✅ **Three agents deployed** - `agents/customer_service/` (`:4550`, 14 tools), `agents/inventory/` (`:4560`, 11 tools and a 30-minute check timer), `agents/sales/` (`:4570`, 18 tools and an hourly keeper)
-✅ **Schema enforced, not documented-only** - 28 applied migrations; `./scripts/db/verify.sh` reports 38 structural checks green, `./scripts/db/test-functions.sh` runs 89 mapped cases against one probe per review finding, no residue
+✅ **Schema enforced, not documented-only** - 29 applied migrations; `./scripts/db/verify.sh` reports 38 structural checks green, `./scripts/db/test-functions.sh` runs 89 mapped cases against one probe per review finding, no residue
 ✅ **Orders in the schema, of all three kinds, and driven by an agent** - `0027`-`0031` landed 2026-11-07: `orders`/`order_items` for SALES, PURCHASE and WORK, suppliers as a party extension, a work order's operation plan, the four fulfilment doors that finally release what `0015` started holding, and the one grant that let the keeper keep. Behavioural probes inside those files, `verify.sh` 37/0, `test-functions.sh` closed with no residue, and a clean from-zero lineage rebuilt twice to prove the order of it. `agents/sales/` registers twelve of the surface, declines two doors with reasons in its README, and its first hour of ticks is what found 0031
 ✅ **The backends read a row as the database means it** - fixed 2026-11-07, in all three forks, and the
    fix was found only by an agent's own sentence disagreeing with a view. Two shapes: pgx hands a
@@ -69,6 +69,8 @@ Built 2026-11-07, in the order this page asked for: the requirements page, then 
       installed doors are deliberately unregistered (`book_work_order_production`,
       `plan_work_order_operation`), and their reason is a routing that does not exist.
 - [x] `db/tests/7_1_orders.sql`, CASES rows in `test-functions.sh`, cases 22-36 in the acceptance plan,
+      and case 37 - three agents asked who they are, on one shared thread string, which is the
+      acceptance half of finding 4.9 and the only plane on which a wrong greeting is a failure,
       and `check_agent_docs.sh` green.
 - [x] The `idempotency_sweep` keeper - item 2, which needed a migration (0031) that nobody had planned.
 
@@ -118,9 +120,9 @@ Found by this sweep, not by a failure: the docs said "run these", and the code s
       The alternative, coercing a code into an id in the Go layer, is declined on 0002's grounds:
       two ways to name one identity is how a wrong document gets written quietly, and it is why the
       `create_order` tool refuses `MAIN` before any SQL runs.
-      These two take **0032** and **0033** in whichever order they land: `db/migrations/` numbers by
-      arrival and not by importance, and 0026 is the record of what happens when a file takes a
-      number that was another file's plan.
+      These two now take **0033** and **0034**: 0032 went to finding 4.9's conversation re-key, which
+      arrived first, and `db/migrations/` numbers by arrival and not by importance - 0026 is the record
+      of what happens when a file takes a number that was another file's plan.
 
 | Task | Finding | Shape of the work |
 |---|---|---|
@@ -131,11 +133,28 @@ Both were planned as `0019`/`0020` and moved — see "Why the two planned migrat
 
 ## Then: the roles the swarm needs
 
-### 3. A third agent, and the registry that would make it more than a copy
-- [ ] Pick a domain whose tables already exist (the accounting side has `currencies` and `currency_rates`; sales does not have `orders` yet), write its requirement first in `docs/agent_requirements/<role>/<role>.md`, naming views and doors that exist
-- [ ] Fork `agents/customer_service/`, replace `pkg/crm`, keep the loop, the trajectory writer and the memory store - that is the sequence the inventory agent proved in one working day
-- [ ] **Agent registry:** still open, and still not a table. Before one exists, "an agent" is a process with an `AGENT_ROLE`, a set of grants, a port and a README; the honest first increment is `agent_interactions`-derived presence (`vw_agent_activity_summary` plus a heartbeat row) rather than a registry nobody keeps current
-- [ ] `bot_actions` and `human_sessions`: either give them writers (a human console logs in; an action audit beyond the row trail) or say in `db/README.md` that they are vestigial. Two empty tables that documentation describes as live is how a debugger loses an afternoon
+### 3. A fourth agent, and the registry that would make the four of them more than copies
+- [ ] Pick a domain whose tables already exist. The accounting side has `currencies` and `currency_rates`
+      and no agent that speaks them; the orders side has `orders` now, which is what `agents/sales` was
+      for. Write the requirement page first, in the register `docs/agent_requirements/sales/sales.md`
+      uses - views and doors that exist, not tables that were reviewed.
+- [ ] Fork `agents/customer_service/`, replace the domain package, keep the loop, the trajectory writer
+      and the memory store. That sequence has been executed twice: the inventory fork is the smaller diff
+      (one package, four identity strings) and the sales fork adds the self-recording timer. One thing the
+      two forks did not catch, because it is not a diff: an identity string that is also *part of a key*.
+      `AGENT_ROLE` names the process in `agent_interactions.bot_id` **and** half of `conversation_id`, so
+      a fork that keeps its parent's role keeps its parent's conversations - finding 4.9, and the reason
+      the recipe in `AGENTS.md` now says what `AGENT_ROLE` is loaded with.
+- [ ] **Agent registry:** still open, and still not a table. Before one exists, "an agent" is a process
+      with an `AGENT_ROLE`, a set of grants, a port and a README; the honest statement of the gap is that
+      two of the three places an agent's identity has to reach are already keyed by it (the row trail's
+      `bot_id`, the conversation derivation) and one is not. `agent_memories` has no agent column at all:
+      17 keys today from three writers, namespaced by convention, including `warehouse.main.id` and
+      `tools.get_orders.broken`, which read as facts about the deployment rather than as one process's
+      notes. 4.9 is what a missing discriminator costs when the value is *read back* as history; memory
+      is the same shape one store away, and the registry is the same decision one level up.
+- [ ] `bot_actions` and `human_sessions`: either give them writers (a human console logs in; an action
+      audit beyond the row trail) or say in `db/README.md` that they are vestigial.
 
 ### 4. The CAO and the escalation it would receive
 - [ ] Requirement 7's routing half: detection exists (sentiment, `escalated` outcomes, `get_entity_stats`); there is nothing to route *to*. A second agent with a validation prompt over the same views is the whole architecture decision

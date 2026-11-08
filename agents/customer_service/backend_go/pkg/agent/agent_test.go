@@ -560,3 +560,46 @@ func TestAgentIdentityIsOneValueForBothAuditColumns(t *testing.T) {
 		}
 	}
 }
+
+// TestRehydrateAsksForThisAgentsConversation is the read path, asserted rather than trusted. History
+// rehydration is the only place this process reads agent_interactions to decide what it already knows,
+// and the argument that matters is the conversation id - derived here from (bot, thread), so a thread
+// string reused against another agent's port cannot pull this agent's turns, and cannot lose them into
+// another's.
+func TestRehydrateAsksForThisAgentsConversation(t *testing.T) {
+	q := &fakeQuerier{}
+	am := NewAgentManager(nil)
+	am.BotID = "sales"
+	if n := am.Rehydrate(context.Background(), q, "web:shared-thread"); n != 0 {
+		t.Fatalf("an empty history rehydrated %d messages", n)
+	}
+	if len(q.sqls) != 1 {
+		t.Fatalf("rehydration sent %d queries, want 1", len(q.sqls))
+	}
+	asked, want := q.args[0][0], logging.ConversationID("sales", "web:shared-thread")
+	if asked != want {
+		t.Errorf("rehydration asked for conversation %v; the writer files this agent's turns under %v",
+			asked, want)
+	}
+	if other := logging.ConversationID("inventory", "web:shared-thread"); asked == other {
+		t.Errorf("the same thread names one conversation for two agents (%s), so this process would read "+
+			"another agent's turns as its own history", asked)
+	}
+}
+
+type fakeQuerier struct {
+	sqls []string
+	args [][]any
+}
+
+func (f *fakeQuerier) Query(_ context.Context, sql string, args ...any) ([]map[string]any, error) {
+	f.sqls = append(f.sqls, sql)
+	f.args = append(f.args, args)
+	return nil, nil
+}
+
+func (f *fakeQuerier) Call(_ context.Context, name string, args []any) ([]map[string]any, error) {
+	f.sqls = append(f.sqls, "CALL "+name)
+	f.args = append(f.args, args)
+	return nil, nil
+}

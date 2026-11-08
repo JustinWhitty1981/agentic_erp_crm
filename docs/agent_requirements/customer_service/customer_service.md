@@ -64,8 +64,12 @@
 - **Safety:** No destructive actions (DELETE, DROP) allowed.
 - **Context Awareness:** Remembers previous interactions in the *thread*, and after a restart too:
   `Rehydrate` reads the thread's last turns back out of `vw_recent_interactions` (keyed by a UUIDv5 of
-  the thread id, `pkg/ids`) before the first prompt of a cold conversation is assembled, and durable
-  facts live in `agent_memories` behind the three memory tools. `InMemorySaver` is the blueprint's
+  the pair **(agent, thread)** - `pkg/ids`, and the agent half arrived on 2026-11-08 by way of finding
+  4.9: this binary's `AGENT_ROLE` is also a `vw_recent_interactions` filter in all but name, because a
+  thread string hashed alone is one conversation shared with every other agent on the tenant) before the
+  first prompt of a cold conversation is assembled. Durable facts live in `agent_memories` behind the
+  three memory tools - and that store has no agent column, so a key is namespaced by convention, which
+  is the open half of the same requirement (`PLAN.md` §3). `InMemorySaver` is the blueprint's
   answer and dies with its container - which is 0023's subject, not a detail
 
 ## Validation Rules

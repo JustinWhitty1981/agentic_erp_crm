@@ -108,7 +108,7 @@ undocumented knob that is *off* is indistinguishable from one that is broken.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `AGENT_ROLE` | `customer_service` | `communications.agent_id`, `agent_interactions.bot_id`, and the escalation label. |
+| `AGENT_ROLE` | `customer_service` | `communications.agent_id`, `agent_interactions.bot_id`, the escalation label — and half of `conversation_id`, which is the key history is read back by. Set it to another agent's value and this process rehydrates that agent's conversations: finding 4.9, `docs/INTERACTION_LOGGING.md`. |
 | `LOG_LEVEL` | `info` | `debug` logs every tool call's arguments, masked. |
 | `LOG_FORMAT` | `text` | `json` for anything that pipes logs into a collector. |
 | `LOG_AGENT_INTERACTIONS` | `true` | `false` stops writing the trajectory. That is not a privacy switch — the trajectory is how a run is debugged, and switching it off removes the record rather than the sensitive part of it. |
@@ -244,7 +244,7 @@ agents/customer_service/
 │       ├── crm/                the eight CRM tools and their argument coercion
 │       ├── db/                 the pool: TLS modes, tenant on connect, row → JSON
 │       ├── formatters/         truncation and fallback summaries (reference implementation)
-│       ├── ids/                UUIDv5 derivations: conversation ids, claim keys
+│       ├── ids/                UUIDv5 derivations: conversation ids (agent + thread), claim keys
 │       ├── llm/                Azure token provider
 │       ├── logging/            slog + masking, and the agent_interactions writer
 │       ├── mcp/                HighByte MCP client (inherited, unused here)

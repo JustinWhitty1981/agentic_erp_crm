@@ -5,15 +5,32 @@ import "testing"
 // TestMatchesAReferenceImplementation is a golden vector, and it is here because the interesting
 // failure of a derivation is the one nobody notices: a hash built in the wrong order still produces a
 // well-formed uuid, still distributes, and still passes every test that only checks the shape. The
-// value below is what an independent implementation - Python's uuid.uuid5 over the same namespace and
-// the same pre-image - produces. If it ever stops matching, this derivation changed, and every
-// conversation id and claim key already in the database changed with it.
+// values below are what an independent implementation - Python's uuid.uuid5 over the same namespace
+// and the same pre-image - produces, one per deployed agent, because the agent is part of the input.
+//
+// Three vectors rather than one, and that is the finding this signature came from: on 2026-11-08 the
+// sales agent introduced itself as the Inventory Control Agent, because the thread string alone named
+// one conversation shared by all three backends and rehydration handed it the other agent's turns.
+// If any value here stops matching, the derivation changed, and every conversation id already in the
+// database now belongs to a different thread. The last time that happened it could be repaired -
+// 0032 re-derived the rows because pkg/logging keeps the caller's thread string in
+// agent_interactions.telegram_chat_id - but that recovery depends on a column named for a transport
+// nobody uses, so do not count on it being possible twice.
 func TestMatchesAReferenceImplementation(t *testing.T) {
-	// uuid5(UUID("f69d1282-6418-457f-90ba-5482b6cb90c9"), "thread\x00web:7c9f")
-	if got, want := Thread("web:7c9f"), "dc86e0ce-0241-52fe-a400-5594423aff25"; got != want {
-		t.Errorf("Thread(%q) =\n  got  %s\n  want %s\nthe derivation no longer matches an "+
-			"independent implementation, which means every conversation id in agent_interactions "+
-			"now belongs to a different thread", "web:7c9f", got, want)
+	for _, tc := range []struct {
+		agent, thread string
+		want          string
+	}{
+		// uuid5(NS, "thread\x00customer_service\x00web:7c9f"), and the same for the other two.
+		{"customer_service", "web:7c9f", "2ea5874c-f768-5323-a05e-3dfee5205e7b"},
+		{"inventory", "web:7c9f", "d44a7bca-7a4d-57e0-b590-90f501b61557"},
+		{"sales", "web:7c9f", "8e14e8f2-32b3-513e-8c07-13053be02278"},
+	} {
+		if got := Thread(tc.agent, tc.thread); got != tc.want {
+			t.Errorf("Thread(%q, %q) =\n  got  %s\n  want %s\nthe derivation no longer matches an "+
+				"independent implementation, which means every conversation id in agent_interactions "+
+				"now belongs to a different thread", tc.agent, tc.thread, got, tc.want)
+		}
 	}
 }
 
@@ -91,17 +108,38 @@ func TestValuesAreNormalisedBeforeHashing(t *testing.T) {
 	}
 }
 
-// TestThreadStability is the property the conversation history depends on across a rebuild.
+// TestThreadStability is the property the conversation history depends on across a rebuild - and the
+// property that was incomplete until the agent joined the input: stability for one agent must not
+// mean sameness across agents.
 func TestThreadStability(t *testing.T) {
-	const thread = "web:7c9f"
-	if Thread(thread) != Thread(thread) {
+	const agent, thread = "sales", "web:7c9f"
+	if Thread(agent, thread) != Thread(agent, thread) {
 		t.Fatal("Thread is not deterministic, so every restart starts a new conversation")
 	}
-	if Thread(thread) == Thread(thread+"2") {
+	if Thread(agent, thread) == Thread(agent, thread+"2") {
 		t.Fatal("two threads share a conversation")
 	}
-	if len(Thread(thread)) != 36 || Thread(thread)[14] != '5' {
-		t.Errorf("Thread produced %q, and conversation_id is a uuid column", Thread(thread))
+	if len(Thread(agent, thread)) != 36 || Thread(agent, thread)[14] != '5' {
+		t.Errorf("Thread produced %q, and conversation_id is a uuid column", Thread(agent, thread))
+	}
+
+	// The assertion whose absence the sales agent's own greeting told us about: three deployed
+	// processes, one tenant, and every web UI posting the same thread string. If the agent is not in
+	// the derivation, this is one conversation between all of them and rehydration mixes the voices.
+	seen := map[string]string{}
+	for _, who := range []string{"customer_service", "inventory", "sales"} {
+		id := Thread(who, thread)
+		if other, dup := seen[id]; dup {
+			t.Errorf("%s and %s share conversation id %s for thread %q: one agent's history would be "+
+				"read back as another agent's", other, who, id, thread)
+		}
+		seen[id] = who
+	}
+	// And the join has to be unambiguous, because "whose" and "which" are two strings and a boundary
+	// that is not marked is a boundary somebody will cross with a role named "s" and a thread named
+	// "alesx".
+	if Thread("s", "ales"+thread) == Thread("sales", thread) {
+		t.Error("part boundaries are not preserved, so an agent and a thread can trade letters")
 	}
 
 	// The kinds are separated by a prefix in the pre-image rather than by separate namespaces, so the

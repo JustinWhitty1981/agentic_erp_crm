@@ -295,6 +295,16 @@ CASES=(
 
 "4_7_cs_agent_surface|append-only is a comment, not a wall|ADR-002|0023_agent_memory"
 "4_7_cs_agent_surface|attaches by census is missing|ADR-002|0023_agent_memory"
+# 4.9 is a finding the review never made, because it needs three deployed agents to exist: the
+# conversation id named a thread and not who was on it. Three rows, because the file tells three
+# different stories and a green harness must not be able to hide any of them. 4.9a's phrase is the
+# detector failing on a planted example, which makes 4.9b's silence worthless; 4.9b's is the real
+# rows; 4.9c's is the derivation itself, and it is the one that goes red the day a writer regresses
+# to ids.Thread with one argument. The KNOWN-OPEN branch is mapped too - a copy database with no
+# chat in it must not read CLOSED, which is 953's lesson about a guard that cannot tell the story.
+"4_9_conversation_identity|detector does not see|4.9|0032_conversation_identity"
+"4_9_conversation_identity|VERDICT ERR 4.9|4.9|0032_conversation_identity"
+"4_9_conversation_identity|VERDICT KNOWN-OPEN 4.9|4.9|0032_conversation_identity"
 )
 
 echo

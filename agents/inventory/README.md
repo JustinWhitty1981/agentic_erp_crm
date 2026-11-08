@@ -130,7 +130,7 @@ Keys this container sets; the shared ones mean what they mean in
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `AGENT_ROLE` | `inventory` | `agent_interactions.bot_id` and `inventory_reservations.reserved_by` when the caller names no one. Two places, one value, resolved once. |
+| `AGENT_ROLE` | `inventory` | `agent_interactions.bot_id` and `inventory_reservations.reserved_by` when the caller names no one, and half of `conversation_id` — the pair `(bot, thread)` is what `Rehydrate` reads history by, so the value is an identity rather than a label. Two places, one value, resolved once; finding 4.9 is what happens when a fork forgets the second place. |
 | `INVENTORY_CHECK_INTERVAL_MINUTES` | `30` | The timer. Non-positive or unparsable falls back to 30 with a warning rather than disabling the schedule — the requirement is that checks run. |
 | `AFPC_PG_APPNAME` | `inventory-agent` | So `pg_stat_activity` can tell these connections from the customer service agent's, which share the role and the tenant. |
 

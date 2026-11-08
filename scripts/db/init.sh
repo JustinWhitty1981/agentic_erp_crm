@@ -154,6 +154,13 @@ if [ -n "$LAN_IP" ]; then
         AGENT_REL="${AGENT_ENV#"$DBROOT"/}"
         if [ -f "$AGENT_ENV" ] && grep -q '^AFPC_PG_HOST=' "$AGENT_ENV"; then
             echo "[3/5] $AGENT_REL already sets AFPC_PG_HOST - left as is"
+        elif [ ! -w "$(dirname "$AGENT_ENV")" ]; then
+            # A directory this user cannot write is not this project's agent to provision - here, the
+            # reference drop under agents/. The redirect below used to fail and set -e ended the whole
+            # run at step 3, so `db up` had been exiting 1 since the drop landed without ever reaching
+            # migrate or seed. Skipping with a line is the honest version of that: the drop is a copy
+            # of somebody else's deployment, and no compose file in this repository starts it.
+            echo "[3/5] $AGENT_REL is not writable by this user - skipped (not a deployed agent)"
         else
             mkdir -p "$(dirname "$AGENT_ENV")"
             { printf '# Written by scripts/db/init.sh; gitignored, because it names a private address on a\n'
