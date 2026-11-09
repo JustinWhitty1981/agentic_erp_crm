@@ -100,8 +100,8 @@ day-one tool and whose ledger bug 0026 found and fixed).
 | Phase | Goal | Status |
 |-------|------|--------|
 | **Alpha** | Core blueprint + 1 working agent | 🟢 Done: the pattern proven in Python (`archive/blueprint/`), and a deployed Go agent behind it |
-| **Alpha++** | A third agent, and the schema it needed | 🟢 Done 2026-11-07: `agents/sales/` on `:4570`, with `0027`-`0031` landed first and the agent second, which is the order ADR-002 asks for |
 | **Alpha+** | A second agent on the same loop, and an acceptance plan that verifies it | 🟢 Done 2026-11-04: `agents/inventory/`, `scripts/agents/tool_testplan.sh` |
+| **Alpha++** | A third agent, and the schema it needed | 🟢 Done 2026-11-07: `agents/sales/` on `:4570`, with `0027`-`0031` landed first and the agent second, which is the order ADR-002 asks for |
 | **Beta** | Tool library + 3 agents + basic registry | 🔵 all three roles deployed; what is left of Beta is the registry, which is a fourth thing and not a third agent |
 | **1.0** | Production-ready with monitoring, security, docs | ⚪ Future — the monitoring half needs an alerting path that does not exist yet |
 
