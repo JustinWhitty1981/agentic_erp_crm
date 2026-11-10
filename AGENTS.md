@@ -61,9 +61,12 @@ Agent First ERP CRM is a database-first AI agent operating system that enables:
   and the line-by-line reconciliation owe
 - **Tool-based architecture** where agents compose functions dynamically
 - **Verbose agent logging**, with every run's trajectory queryable from the database it wrote
-- **Semantic search** using PGVector - *the indexes exist (`0012`) and nothing fills them*: no embedder
-  in the current deployment produces the 1536 dimensions the columns declare. Read
-  `agents/customer_service/README.md`'s "What is not here" before planning around this one
+- **Semantic search** using PGVector - *real for `communications`, empty by decision elsewhere*. 0012
+  built the three hnsw indexes and 0035 built the two doors, the register, and the record of which model
+  filled a column; the customer service agent's keeper is the writer and `search_communications` is the
+  reader. `entities.embedding` and `contacts.embedding` hold nothing, and `vw_embedding_status` says that
+  per table. Read `agents/customer_service/README.md`'s "Semantic search, and the embedding keeper"
+  before planning around the other two
 - **Telegram integration** - *not in any of the three deployed agents*, which serve HTTP and SSE. The reference
   implementation in `archive/blueprint/` and the upstream checkout at `/home/justin/agents/dumb_agent` both
   have working adapters; the transport is a `main.go` change and the loop does not care which is attached
@@ -135,15 +138,16 @@ Start by reading:
 Follow [QUICKSTART.md](QUICKSTART.md) for Docker-based deployment.
 
 ### 3. Understanding Agent Tools
-- The deployed surface is `agents/customer_service/backend_go/pkg/crm/tools.go`: eight CRM tools — three
+- The deployed surface is `agents/customer_service/backend_go/pkg/crm/tools.go`: nine CRM tools — three
   reading `vw_*` views (`vw_customers`, `vw_customer_communications_summary`,
-  `vw_entity_communication_stats`) and five calling stored functions, of which four write
+  `vw_entity_communication_stats`), one reading `communications` by meaning through
+  `search_similar_communications`, and five calling stored functions, of which four write
   (`add_customer`, `update_customer`, `add_communication`, `mark_customer_followup`) and one reads:
   `get_followup_customers` is a function and not a view because it takes `p_days_threshold`, which is the
   ADR-003 boundary in practice — a parameterised answer has a door, and 0022 is what made that argument
   mean what it says
 - Both obey one rule the blueprint did not always: **a write calls a database function and never composes its own INSERT.** `code:cs_writes_through_doors` watches that, and its comment says what the grep had to grow to catch it
-- The same eight tools exist in Python in **[archive/blueprint/tools/](archive/blueprint/tools/)** — read them, and **[archive/blueprint/tools/README.md](archive/blueprint/tools/README.md)**, for the shape of a tool; wire a new one through the Go package above. The blueprint is lineage, not a starting point ([ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md))
+- Eight of the nine exist in Python in **[archive/blueprint/tools/](archive/blueprint/tools/)** — read them, and **[archive/blueprint/tools/README.md](archive/blueprint/tools/README.md)**, for the shape of a tool; wire a new one through the Go package above. The blueprint is lineage, not a starting point ([ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md))
 - Study **[docs/agent_requirements/customer_service/customer_service.md](docs/agent_requirements/customer_service/customer_service.md)** for domain requirements
 - Lineage examples, one part each, in `archive/blueprint/tools/`:
   - `customer_lookup.py` - Customer information retrieval
@@ -156,7 +160,7 @@ Follow [QUICKSTART.md](QUICKSTART.md) for Docker-based deployment.
 ### 4. Database Operations
 - Schema: [db/migrations/](db/migrations/), applied in filename order by `scripts/db/db up`. Nothing else creates tables - `db/README.md` lists the files that used to try
 - The customer functions, the audit log and the interaction log are in `0001` onward; the numbered files under `scripts/database/` are the superseded copies they came from
-- Semantic search: `0012` built the hnsw indexes and nothing writes the vectors. See **What is not here** in `agents/customer_service/README.md`
+- Semantic search: `0012` built the hnsw indexes, `0035` built the doors and the register, and the customer service agent's keeper is what writes the vectors. `vw_embedding_status` is the per-table answer to "is this column searchable", and `embedding_space` is the answer to "by which model" - the second is not bookkeeping: a column holding two models' vectors returns a plausible ranking of garbage
 - **Documentation**: [docs/INTERACTION_LOGGING.md](docs/INTERACTION_LOGGING.md) - How to debug agent behavior
 
 ---
@@ -168,13 +172,14 @@ Follow [QUICKSTART.md](QUICKSTART.md) for Docker-based deployment.
    `db/migrations/NNNN_*.sql` function, so start there and not in the Go file (ADR-002)
 2. Give the migration the next free number. `migrate.sh` rejects a file numbered at or below the highest
    applied, which is why the two planned ones became 0024 and 0025 - see db/MIGRATIONS.md. The highest
-   applied today is **0032** (a re-key rather than a shape change: `conversation_id` had to learn which
-   agent it belonged to, and finding 4.9 is in `docs/INTERACTION_LOGGING.md`), so a new file here is
-   `0033_*`. The two queued items in `PLAN.md` move with it. 0026 took a number rather than the free 0024
-   because a bug fix and a planned feature are not the same queue, and 0032 is the same rule arriving on
-   the day it was needed: `0031` is the grant that let `agents/sales`' keeper run and is the one migration
-   in this set that changes no row, while `0032` changes 430 of them and no row shape
-3. Wire the tool in the domain package of the agent that owns it -
+   applied today is **0035** (the semantic surface: two doors, `embedding_space`, and the register), and
+   0033/0034 are still reserved for the two queued items in `PLAN.md`, which is what "by arrival and not
+   by importance" costs when the arrival is a draft that never landed. So a NEW file here is `0036_*`.
+   Earlier instances of the same rule: 0026 took a number rather than the free 0024 because a bug fix and
+   a planned feature are not the same queue; 0032 is the same rule arriving on the day it was needed; and
+   `0031` is the grant that let `agents/sales`' keeper run and is the one migration in this set that
+   changes no row, while `0032` changes 430 of them and no row shape
+3. Wire the tool in the domain package of the agent that owns it, and **in that package's `tools.go`** -
    `agents/customer_service/backend_go/pkg/crm/tools.go`, `agents/inventory/.../pkg/inventory/tools.go`,
    or `agents/sales/.../pkg/orders/tools.go`: read a `vw_*` view or call the function, send an
    idempotency key if it writes (ADR-005), and record what it touched with `turn.Source`. Two rules live
@@ -378,8 +383,10 @@ that the code contradicts is exactly what the sweep is for. When you change a po
 1. **Database First**: If a rule about persistent state is not in a migration, it is not enforced (ADR-002)
 2. **Tool Composition**: Design tools to be composable and reusable - the six shared tools are the same
    code in all three deployed agents
-3. **Semantic Search**: *Not available.* The columns and hnsw indexes exist and nothing writes them, so
-   design a read against the views and the CHECK'd vocabularies (`vw_domain_vocabulary`) instead
+3. **Semantic Search**: *available for `communications`, and only there.* 0035 built the two doors, the
+   customer service agent's keeper fills the column, and `vw_embedding_status` says per table how much
+   of a corpus a search can actually see. `entities` and `contacts` are empty by decision, so design a
+   read of those against the views and the CHECK'd vocabularies (`vw_domain_vocabulary`) instead
 4. **Audit Everything**: The row trail is the triggers' job and it happens without asking; the agent's
    job is to write through a door so there is a row-change to audit, and to let the loop record the run
 5. **Documentation**: Update the relevant page in the same commit - `check_agent_docs.sh` fails a tool
@@ -491,6 +498,7 @@ Secrets live in the environment, never in a committed file:
 | `costing_methods` | Master data: how an item's cost is derived |
 | `currencies` | Master data: ISO 4217 codes behind the three currency columns, and how many minor units each has; global, so declared in B19 rather than given tenant policies |
 | `currency_rates` | Rate history per currency pair; one open row per pair by partial unique index, gaps and overlaps across closed rows unconstrained; global, and outside 0013's trail because `audit_log.tenant_id` is NOT NULL |
+| `embedding_space` | One row per filled vector column, naming the embedder and the width that produced its vectors. Global, untrailed (0018's reason), and written only by `embed_communications`, which refuses a call naming a different model - the mixed-corpus state no other check can see (`0035`) |
 | `idempotency_keys` | ADR-005 request claims: one row per (tenant, operation, key) with the cached answer, the lease, and the retention deadline |
 | `audit_log` | Row-level change history: append-only by grant, tamper-evident by a sha256 chain segmented per (tenant, month); one trail row per row-change on every tenant-coded table except itself and `idempotency_keys` |
 
@@ -527,9 +535,11 @@ Secrets live in the environment, never in a committed file:
 | `vw_suppliers` | Supplier facts beside the party they describe (`0027`) |
 | `vw_work_centres` | Where operations run, and how many are queued at each |
 | `vw_work_order_plan` | A work order's planned operations, with the line and centre resolved (`0029`) |
+| `vw_embedding_status` | One row per vector column in the catalog: what it declares, whether an hnsw index leads it, how many of its rows carry a vector, which model the stamp credits, and a verdict of EMPTY / PARTIAL / UNSTAMPED / MISMATCH / UNINDEXED / COMPLETE (`0035`) |
+| `vw_unembedded_communications` | The keeper's queue, and the definition of what an embedding of a communication is made from - composed in SQL so the rule has one home (`0035`) |
 | `vw_order_commitments` | One row per order line against the stock held for it - attributed and unattributed counted apart, with a verdict on whether the line's counter and the ledger agree (`0030`) |
 
-See [archive/blueprint/docs/views.md](archive/blueprint/docs/views.md) for complete view reference.
+For every view's columns, read [docs/database/views.md](docs/database/views.md): it is generated from `pg_attribute` by `scripts/docs/gen_schema_docs.sh` and is current as of the last run, which the file's own header dates. `archive/blueprint/docs/views.md` is the *frozen* reference from the lineage - its lists are checked against the catalog by `check_agent_docs.sh` §3b, and nothing is added to it (ADR-006), so a view that arrived after the sweep, like 0035's two, is absent there by policy and not by accident.
 
 ### Database Naming Conventions
 - **SQL Tables**: snake_case (e.g., `entities`, `communications`) — note `entities`, not `customers`:

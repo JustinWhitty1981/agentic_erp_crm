@@ -176,10 +176,16 @@ qualified form resolves only on a machine that ran the old scripts by hand.
 - **Contextual Memory:** Agents remember past interactions without rigid schema constraints.
 - **Hybrid Queries:** Combine structured SQL (`WHERE status = 'open'`) with unstructured semantic search.
 
-Two of the three are honest aspirations. The indexes and the `vector(1536)` columns are there (0012) and
-empty: no embedder in this deployment produces 1536 dimensions — measured, the local models answer 1024
-and 4096. The contextual memory that *is* live is the relational kind: `agent_memories` by key, and
-thread history read back out of `agent_interactions`.
+One of the three is now real and one is still an aspiration. The semantic half was the blocked one: the
+indexes and the `vector(1536)` columns have been there since 0012, and what was missing was an embedder
+that would answer an explicit width — which this deployment has since had (0035: two doors,
+`embedding_space`, and `vw_embedding_status`), so a communication is embedded by the customer service
+agent's keeper and searched by meaning. Two facts about that are load-bearing rather than incidental:
+the width is a *request* and not a contract (measured: the same server gave a 1024-element vector with
+status 200 one hour and a 400 the next, for one question), and a column holding two models' vectors
+answers a similarity query with distances that have no meaning, which is why the model identity is
+schema state and the write door refuses rather than mixes. The contextual memory that *is* live is the
+relational kind: `agent_memories` by key, and thread history read back out of `agent_interactions`.
 
 ## 5. Communication Flow
 
@@ -252,8 +258,11 @@ thread history read back out of `agent_interactions`.
   and `bot_id` is what separates their rows in it.
 - **Database Performance:** indexed views for the reads the agents actually issue (redundancy is
   measurable: `vw_index_redundancy`), BRIN and partitioning still queued as migration 0024.
-- **Honest limit:** PGVector indexes exist and nothing fills them, so "fast semantic search over
-  millions of records" describes a plan, not this deployment.
+- **Honest limit:** `communications` is embedded and searchable by meaning; `entities` and `contacts`
+  are not, and "fast semantic search over millions of records" is still a plan rather than a
+  measurement — the corpus here is 25 rows, and 6_4's own note is that the hnsw preference flip is
+  unprovable below a few thousand. What is proven is that the ANN path is usable and cheaper than the
+  scan it replaces.
 
 ## 9. Development Workflow
 

@@ -1,7 +1,7 @@
 # Database tables - generated
 
 Regenerated from the live catalog by `scripts/docs/gen_schema_docs.sh` (the `make
-docs-schema` target) on 2026-11-07. **Do not edit**: the next run replaces this file. Prose
+docs-schema` target) on 2026-11-10. **Do not edit**: the next run replaces this file. Prose
 about tables belongs in `db/README.md`; the checks over them live in
 `scripts/db/verify.sh`.
 
@@ -23,6 +23,7 @@ costing_methods|table|0|off|Master data: how an item's cost is derived. Referenc
 currencies|table|0|off|ISO 4217 currency codes: the master data behind the three currency columns the baseline put in the inventory model with no table to point at (6.5). Global by decision - a currency is a fact about money, not about a tenant - which is declared in verify.sh's B19 rather than left as an absence, the same exemption units_of_measure and costing_methods carry. Retired with is_active, never deleted: the FKs are RESTRICT (0008), and a balance priced in a currency that has ceased to exist is a history question, not a cleanup. currency_code's shape is CHECKed here and nowhere else: the referencing columns' mechanism is the foreign key, and a rule stated on both sides of a relationship is two rules. Built by 0018.
 currency_rates|table|0|off|One row per currency pair per period: the rate history 6.5 found missing, so that a cost valuation no longer has to assume one rate forever. It does not yet change any valuation - nothing converts (§0's first declined decision): who the base currency of a tenant is, which rate applies to an average built from months of receipts, and whether an inverse is a reciprocal or a stored row are three decisions this file refuses to make as a side effect of a CREATE TABLE. Global by decision like the other master data, so verify.sh's B19 declares it, and outside 0013's trail because audit_log.tenant_id is NOT NULL and no tenant owns a market rate - probe L asserts that boundary rather than leaving it to be noticed. The mechanical promise is one open row per pair; overlaps across closed rows and gaps between them are not constrained, and probe E demonstrates the gap rather than claiming it away.
 document_counters|table|2|on|The allocator behind orders.order_number: one row per (tenant, kind, YYYYMM), advanced by the UPSERT in create_order. The unique key is the lock — a SELECT max()+1 would let two callers compute the same number, which is 0011's race seen from the arithmetic side. Tenant-coded, so it carries the wall and the trail like any other table: every create advances it, and "what was the next number" has to be answerable from the row trail. Nothing deletes from here; a counter is history. Built by 0028.
+embedding_space|table|0|off|One row per vector column that has been filled, naming the model that filled it, the width it declared, and the endpoint it came from. Global by declaration (verify.sh B19) and untrailed for the reason 0018 §2 established for currencies: audit_log.tenant_id is NOT NULL, so a row with no tenant has no trail to write. It exists because a column filled by two models answers a similarity query with distances that have no meaning, and nothing else in this schema can see that. Written only by embed_communications, which refuses any call whose model disagrees with the row. Built by 0035.
 entities|table|2|on|
 entity_relationships|table|2|on|
 followups|table|2|on|

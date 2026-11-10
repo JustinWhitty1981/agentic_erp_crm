@@ -111,7 +111,7 @@ check "A7 auditor sees everything" "0002_access_grants" \
 #
 # The list has grown three times since the review counted 18: 0011's idempotency_keys and 0013's
 # audit_log/audit_summary are tenancy tables the review had never seen, 0023's agent_memories is a
-# table no finding asked for, and 0027's suppliers is a table no finding asked for either — the
+# table no finding asked for, and 0027's suppliers is a table no finding asked for either - the
 # orders programme needed a supplier and the review predates both. They are here because they carry
 # the column, not because a document mentioned them - the same reason 0010's scope grew. A
 # tenant-coded table that is absent from this list is a table whose tenancy nobody checks, and
@@ -281,7 +281,8 @@ check "B19 5.7 global tables declared" "0009_rls_enforcement" \
                            AND a.attnum>0 AND NOT a.attisdropped)
         AND c.relname NOT IN ('schema_migrations','_schema_graph',
                               'units_of_measure','costing_methods',
-                              'currencies','currency_rates','order_lifecycle')" \
+                              'currencies','currency_rates','order_lifecycle',
+                              'embedding_space')" \
     "tables outside the tenant model that nothing has declared global"
 
 # 5.7's third failure was a policy keyed off a setting no code sets. The general form of that
@@ -568,6 +569,65 @@ check "B30 6.1  the sweep keeper's grant is the narrow one 0031 argued" "0031_sw
                   THEN 1 ELSE 0 END)
        FROM f" \
     "afpc_app cannot sweep, or the sweep is no longer the tenant-scoped INVOKER call 0031's §3 measured"
+
+# 6.4's other half, and the reason 0012's indexes stopped being scoreboard-only. This is a grant-and-
+# shape check, in the B28/B30 register, because everything that makes semantic search SAFE to write
+# through is a privilege or a type: the door that fills the column, the door that reads it, the width
+# the stamp claims, and the two premises the refusal rests on.
+#
+# The term that matters most is the last one. A column holding vectors and a stamp naming no model is
+# the mixed-corpus state 0035 §1 exists to prevent, and it is reachable without anyone calling
+# embed_communications at all - a hand-run UPDATE, a restored dump, a keeper pointed at a different
+# endpoint after someone deleted the stamp row. Nothing else in the schema can see it, so here it is.
+check "B31 6.4 the semantic surface is installed and its space is stamped" "0035_semantic_search" \
+    "WITH doors AS (
+        SELECT to_regprocedure('embed_communications(jsonb,text,text,uuid)')    AS woid,
+               to_regprocedure('search_similar_communications(vector,integer,integer)') AS roid
+     ), col AS (
+        SELECT CASE a.atttypmod WHEN -1 THEN NULL ELSE a.atttypmod END AS dims,
+               c.oid AS coloid
+          FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
+         WHERE c.relname = 'communications' AND a.attname = 'embedding'
+     )
+     SELECT
+        -- The two doors exist.
+          (CASE WHEN d.woid IS NULL THEN 1 ELSE 0 END)
+        + (CASE WHEN d.roid IS NULL THEN 1 ELSE 0 END)
+        -- Closed to the cluster, open to the runtime role (0009 §D's pair, and the reason B22 alone
+        -- would pass on a door nobody in the deployment can call).
+        + (CASE WHEN d.woid IS NOT NULL AND NOT has_function_privilege('afpc_app', d.woid, 'EXECUTE')
+                THEN 1 ELSE 0 END)
+        + (CASE WHEN d.roid IS NOT NULL AND NOT has_function_privilege('afpc_app', d.roid, 'EXECUTE')
+                THEN 1 ELSE 0 END)
+        + (CASE WHEN d.woid IS NOT NULL AND EXISTS (SELECT 1 FROM aclexplode((SELECT proacl FROM pg_proc WHERE oid = d.woid)) x
+                                    WHERE x.grantee = 0 AND x.privilege_type = 'EXECUTE') THEN 1 ELSE 0 END)
+        + (CASE WHEN d.roid IS NOT NULL AND EXISTS (SELECT 1 FROM aclexplode((SELECT proacl FROM pg_proc WHERE oid = d.roid)) x
+                                    WHERE x.grantee = 0 AND x.privilege_type = 'EXECUTE') THEN 1 ELSE 0 END)
+        -- INVOKER, which is what makes the ANN top-k the caller's rather than the owner's (0011's
+        -- argument, applied to a read for the first time).
+        + (CASE WHEN d.roid IS NOT NULL AND (SELECT prosecdef FROM pg_proc WHERE oid = d.roid)
+                THEN 1 ELSE 0 END)
+        -- The stamp's width and the column's declared width are one number in two places, and both
+        -- halves of 0035 §1's CHECK depend on that staying true.
+        + (CASE WHEN EXISTS (SELECT 1 FROM embedding_space WHERE dimensions IS DISTINCT FROM col.dims)
+                THEN 1 ELSE 0 END)
+        -- The register lists one row per vector column the catalog has. An empty register is the worst
+        -- shape a check over a register can have, so this counts the disagreement, not the emptiness.
+        + (CASE WHEN (SELECT count(*) FROM vw_embedding_status) <>
+                     (SELECT count(*) FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
+                        JOIN pg_namespace n ON n.oid = c.relnamespace
+                       WHERE n.nspname = 'public' AND c.relkind = 'r' AND a.attnum > 0
+                         AND NOT a.attisdropped AND a.atttypid = 'vector'::regtype)
+                THEN 1 ELSE 0 END)
+        -- Vectors somewhere in the schema with no stamp naming the model that produced them. Read from
+        -- the register rather than restated here, for the reason 0022 states for its own horizon: the
+        -- same rule in two places is the rule that eventually disagrees with itself. The first rehearsal
+        -- of this check had the predicate written against communications only, and a vector planted in
+        -- entities walked past it - which is the finding, and why the term is the view's verdict.
+        + (CASE WHEN EXISTS (SELECT 1 FROM vw_embedding_status WHERE verdict LIKE 'UNSTAMPED%')
+                THEN 1 ELSE 0 END)
+       FROM doors d, col" \
+    "the semantic doors are missing or misgranted, the stamp disagrees with the column, or a vector column holds rows no model is credited for"
 
 # ---------- C. live inventory ----------------------------------------------------
 # Domain objects only. Extension-owned functions/views would swamp the signal: 194

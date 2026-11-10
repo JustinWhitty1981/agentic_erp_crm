@@ -30,6 +30,7 @@ appears here and not in the code, or in the code and not here.
 | `get_customer_communications` | read | One customer's recent interactions, newest first, with outcome, sentiment, and the `entity_id`/`contact_id` a later write needs. |
 | `get_entity_stats` | read | Per-customer counts: resolved, pending, escalated, sentiment, first and last contact. |
 | `get_followup_customers` | read | Who needs contact, and which of the three reasons says so. |
+| `search_communications` | read | Recorded conversations **by meaning**, closest-first, with the customer named on each row. Registered only when `EMBEDDING_MODEL` is set — see [Semantic search](#semantic-search-and-the-embedding-keeper). |
 | `add_customer` | write | Create an entity, a contact, their relationship, and an address. |
 | `update_customer` | write | Change the fields of an existing customer, selected by name plus a contact point. |
 | `add_communication` | write | Log one interaction. The only door that writes to `communications`. |
@@ -48,6 +49,10 @@ Two properties are worth knowing before you change the surface:
   (`pkg/ids`). A model that reissues a call after a timeout gets the first call's answer instead of a
   second row. Across runs the keys differ, because two conversations that mention the same customer
   are two events. See `ARCHITECTURE_DECISION_RECORDS/ADR-005`.
+  `GET /api/tools` reports which tools do this in `claims_idempotency`, and that field is a property
+  set beside the call that sends the key, not a guess from the tool's name: it used to be derived by
+  matching against `add_`/`save_`, which was right here by luck and wrong on `agents/sales` for seven
+  of its eight writers. `TestPolicyClaimsMatchesTheKeyActuallySent` is what keeps the two together.
 - **`agent_id` and `bot_id` come from `AGENT_ROLE`, not from a tool argument.** The audit columns are
   what make "which agent did this" answerable, and a value the model can type is a value the model can
   be asked to type.
@@ -80,6 +85,36 @@ two ways that happens is visible in `/api/health`: `not configured` (200 — the
 machine that has no database, chosen rather than broken) versus `configured but never connected`
 (503 — the same environment's database refusing, which is what a monitor should page on).
 
+### Semantic search, and the embedding keeper
+
+Set `EMBEDDING_MODEL` and this agent gains a ninth CRM tool and a scheduled sweep; leave it unset and
+it has neither, says so once at startup, and `/api/health` reports `"embedding": "not configured"`.
+That is the whole switch: an unconfigured deployment is not broken, it has an unsearchable corpus,
+which is a different sentence and the one `vw_embedding_status` prints per table.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `EMBEDDING_MODEL` | *(unset — semantic search off)* | The model that turns text into the 1536-dimension vectors `communications.embedding` declares. On this server it is `qwen3-embedding:latest` behind LiteLLM; asked for `dimensions: 1536` it answers exactly 1536 floats at norm 1.000000, which is what `vector_cosine_ops` wants. **This value is a fact about the data, not just the deployment**: 0035's `embedding_space` records which model filled the column, and `embed_communications` refuses any write naming a different one, because a distance between two models' vectors is not a distance and nothing else in the schema could ever notice. |
+| `EMBEDDING_BASE_URL` | `$VLLM_BASE_URL` | Where that model is served. Falls back to the chat endpoint, because one OpenAI-compatible server doing both jobs is the common case and saying the URL twice is two chances to be wrong. |
+| `EMBEDDING_API_KEY` | `$VLLM_API_KEY` | The bearer for that endpoint. Same two-name resolution as the base URL. |
+| `EMBEDDING_INTERVAL_MINUTES` | `60` | How often the keeper runs. `30` is the inventory fork's own default; the name is shared across the three timers deliberately, and a value that does not parse keeps and *names* this default rather than pretending to a schedule that is not running. |
+| `EMBEDDING_ROWS_PER_TICK` | `500` | The gap one tick drains. It is a cap so the first tick on a year of history cannot overrun the tick's own deadline; the backlog continues next hour, and the tick's trajectory row says how much is left. |
+| `EMBEDDING_BATCH_SIZE` | `8` | Texts per request. Measured at 284 ms warm on this server for eight. Capped at 64. |
+| `EMBEDDING_DIMENSIONS` | *(ignored)* | Read only to complain: a value other than 1536 is logged as an error and **discarded**, because the width is 0001's DDL, 0035's CHECK and B31's business, not a deployment's. Changing it is a migration. |
+
+Two things follow from running the sweep at all:
+
+- **A row is searchable after the next tick, not the moment it is written.** Nothing embeds on write —
+  a trigger that called a model server would make every CRM write as available as a GPU three machines
+  away, and 0021's door is not built to fail that way. `vw_embedding_status`'s `newest_embedded_at` is
+  the number that makes that gap a fact rather than a rumour, and `search_communications` reads the
+  register before it says "nothing matched" so that an empty corpus cannot be mistaken for an empty
+  answer.
+- **The keeper is a run like any other.** Each tick files an `agent_interactions` row with no model
+  turn in it, so "did the sweep run" is `WHERE bot_id = 'customer_service'` and a *missing* row is an
+  outage. `0031` is the file that learned a keeper needs its grant; the sweep's own door is granted in
+  0035 §6 and watched by B31.
+
 ### Model
 
 | Variable | Default | Meaning |
@@ -87,6 +122,8 @@ machine that has no database, chosen rather than broken) versus `configured but 
 | `LLM_PROVIDER` | `local` | `local` for an OpenAI-compatible endpoint; `azure_gcc_high` for Azure. |
 | `VLLM_BASE_URL` | `http://192.168.0.42:18300/v1` | |
 | `VLLM_MODEL` | `qwen3.8-flash-next` | |
+| `LITELLM_API_KEY` | *(unset)* | The credential for a model server that authenticates, and the name all three agents read as the last fallback — see `pkg/embed`'s `EnvServerKey`. It lives in `dev/.env` with the database passwords, once, because it is one proxy three processes talk to and a secret in three files is wrong in two of them. It is **not** interpolated by any compose file on purpose: `${...}` in an `environment:` entry reads the project `.env` and not the `env_file:` list, so the obvious `- VLLM_API_KEY=${LITELLM_API_KEY}` line expands to nothing and the agent starts unauthenticated while the key sits one file away. Unset means no header is sent, which is exactly what a bare vLLM expects and what every deployment here did until a proxy was added. |
+| `VLLM_API_KEY` | *(unset — no header sent)* | The bearer on the local path. Unset means the request carries no `Authorization` header at all, which is exactly what a bare vLLM on a private address expects and what every deployment here ran with until a proxy was added in front of the models. Set it when the endpoint is LiteLLM: a proxy answers `401` before the model is consulted, and that failure is indistinguishable from a model server that is down. |
 | `LLM_STREAM` | `true` | Set to `false` behind a proxy that buffers SSE — with buffering on, a streaming turn hangs for the whole timeout. |
 | `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_VERSION`, `AZURE_OPENAI_BASE`, `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_DEPLOYMENT_NAME`, `SEGMENT`, `ENVIRONMENT` | *(Azure only)* | Read on the `azure_gcc_high` path. The reference implementation's defaults name its own deployment; this one does not deploy there. `AZURE_OPENAI_BASE` overrides the authority the OAuth token request is sent to, which is the knob for a sovereign cloud that is not `azure.us`. |
 
@@ -220,12 +257,19 @@ oversight:
 - **Telegram.** The reference drop has a working adapter in the upstream checkout at
   `/home/justin/agents/dumb_agent`. This deployment starts with HTTP and the UI; the transport is a
   main.go change and nothing in the loop depends on which one is attached.
-- **Semantic search.** `communications.embedding` and `contacts.embedding` exist and are empty.
-  0012 built the hnsw indexes; nothing fills the vectors, because no embedder in this deployment
-  produces the 1536 dimensions those columns declare — measured, the local models answer 1024 and
-  4096. Requirement 1's "find customers who complained about shipping last week" is therefore
-  unimplemented rather than approximated. A keyword-search tool was also left out: `communications.summary`
-  has no trigram index, so it would be a `_seq scan` behind a tool the agent calls constantly.
+- **Semantic search over entities and contacts.** `search_communications` works: 0035 installed the
+  two doors, the keeper fills `communications.embedding`, and requirement 1's "find customers who
+  complained about shipping last week" is a query rather than a plan. What is *not* here is the other
+  two vector columns. `entities.embedding` and `contacts.embedding` exist, are indexed (0012), and are
+  still empty by decision — the requirement is a question about what was **said**, and a customer's own
+  vector would embed a name and an address, which is what `vw_customers` and a WHERE clause are for.
+  `vw_embedding_status` lists all three columns and names the two nothing writes, so the scope of the
+  claim is a row and not a paragraph. Changing that means a second door and a reason; the index is
+  already paid for.
+- **Keyword search.** Still left out, still for the measured reason: `communications.summary` has no
+  trigram index, so a keyword tool would be a sequential scan behind a call the agent makes constantly,
+  and `pg_trgm` is installed and unused. A similarity query that finds nothing because the corpus is
+  unsearchable is a worse failure than one that says so, which is what the register is for.
 - **The follow-up task table.** `add_communication` sets `follow_up_required` and `follow_up_date` on
   the interaction and deliberately creates no `followups` row — that table has no writer anywhere in
   the schema, and `vw_pending_followups` reads it. 0021's §5 hands the decision to whoever owns it.

@@ -140,8 +140,12 @@ Keys this container sets; the shared ones mean what they mean in
   components this deployment does not have; alerts are database-readable instead. Both live in
   that doc's "What is not here yet" with their real status.
 - **No movement, receipt, or write-off.** One write tool exists; see the table for why.
-- **No embedding search.** The item reads are exact-sku and ILIKE-name against the views, like
-  everything else on this server until an embedder fills the 0012 indexes.
+- **No embedding search here.** The item reads stay exact-sku and ILIKE-name against the views. That is
+  no longer because the indexes have no embedder behind them - `0035` settled that, and
+  `communications` is filled and searched by the customer service agent's keeper - it is because no item
+  text has ever been written to a vector column. `vw_embedding_status` lists `entities` and `contacts`
+  as EMPTY and says who decided it; item descriptions would need their own door pair and their own row
+  in `embedding_space`, since that table keys on the column and not on the deployment.
 - **The check does not use the model.** Deliberate — see *The schedule*. If a tick's findings
   deserve prose, a human asks for them, and the chat turn pays for the tokens, not the service
   window.

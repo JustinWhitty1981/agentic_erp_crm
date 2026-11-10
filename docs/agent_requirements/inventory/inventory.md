@@ -137,9 +137,12 @@ the same view, which is how a reader re-runs the alert's arithmetic anyway.
 - **Auto-reorder via `execute_inventory_movement`.** The door is built, probed (`4_1`, `4_3`), and
   used by the seed to create demo history. Registering it as a tool is an explicit decision —
   see Safety.
-- **Semantic product search.** The pgvector indexes exist (0012) and no embedder in this
-  deployment fills them; `get_item_availability` matches on sku/name via the view, which is
-  honest and limited.
+- **Semantic product search.** The indexes exist (0012) and `0035` proved an embedder is available, but
+  no item text is embedded: `get_item_availability` matches on sku/name through the view, which is
+  honest and limited. Item descriptions are the natural next corpus, and they would need their own door
+  pair rather than a reuse of the communications one - `embedding_space` keys on the column, so a second
+  filled column is a second row and a second refusal, and `vw_embedding_status` would then list four
+  columns and say what each holds.
 
 ## Decided later (open questions, tracked nowhere but here, so here)
 

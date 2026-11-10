@@ -137,6 +137,15 @@ func TestReserveSendsTheDoorsFullArityAndTheClaimLast(t *testing.T) {
 	if !ok || len(k) != 36 || k == strings.ToLower(itemA) {
 		t.Errorf("the final argument should be a derived claim uuid, got %v", args[7])
 	}
+	// The same slot read as a policy question. /api/tools used to answer "does this tool claim" by
+	// matching its NAME against two prefixes, which is a fact about vocabulary and not about retries;
+	// this line is what keeps the field tied to the argument the tool actually sent.
+	for _, d := range Tools(f) {
+		if d.Name == "reserve_inventory" && !d.Policy.Claims {
+			t.Error("reserve_inventory sent a claim in position 8 and its Policy says it does not, so " +
+				"the endpoint contradicts the argument list")
+		}
+	}
 
 	// And the same call outside any run: no key, and no constant pretending to be one.
 	f2 := &fake{callRows: f.callRows}

@@ -27,6 +27,7 @@
     - Fetch: Name, Address, Phone, Email, Status, and Recent Notes.
     - Use `get_customer_info` tool with fuzzy name matching.
     - Support semantic search via PGVector: "Find customers who complained about shipping last week."
+      Implemented 2026-11-09 by 0035 and `search_communications`; see requirement 1's row below.
 2.  **Update Customer Info:**
     - Update: Name, Address, Phone, Email, Status, and Recent Notes.
     - Use the `update_customer` tool, whose door is the stored function of the same name
@@ -109,7 +110,7 @@ Two implementations exist, and they share the requirements and the rules:
 
 | # | Requirement | Status | Where the gap is, if there is one |
 |---|---|---|---|
-| 1 | Retrieve customer info | Structured half done | **Semantic search is not implemented.** The hnsw indexes exist (`0012`) and nothing writes the vectors: no embedder in this deployment produces the 1536 dimensions the columns declare (measured: 1024 and 4096). "Find customers who complained about shipping last week" is therefore unimplemented rather than approximated, and a keyword tool was declined too - `communications.summary` has no trigram index, so it would be a sequential scan behind a call the agent makes constantly |
+| 1 | Retrieve customer info | **Done, both halves** | The structured half is `get_customer_info`. The semantic half landed 2026-11-09: `0035` installed `search_similar_communications` and `embed_communications`, the agent's keeper fills `communications.embedding`, and `search_communications` reads it - so "find customers who complained about shipping last week" is a query, and acceptance case 38 is that sentence asked of a running process. Two properties are worth knowing before you rely on it. **A row is searchable after the next tick, not the moment it is written** - nothing embeds on write, because a trigger that called a model server would make every CRM write as available as a GPU three machines away; `vw_embedding_status.newest_embedded_at` is that gap as a number. And **an empty answer is two different facts**: the tool reads the register before it says "nothing matched", so "nothing is embedded yet" cannot be mistaken for "nobody complained", which is the failure mode this requirement would otherwise have shipped with. A keyword tool stays declined: `pg_trgm` is installed and `communications.summary` has no trigram index, so it would still be a sequential scan behind a call the agent makes constantly |
 | 2 | Update customer info | Done, with one hole | `update_customer` changes name, contact points, address and `status`. It cannot change `entity_type`, so `prospect` - a documented member of that vocabulary - has no door. That is **T2** in `db/MIGRATIONS.md`, and `code:vw_customers_filter` is the marker that keeps it visible |
 | 3 | Communication history | Done | Five most recent, per the requirement. The `vw_*` read is `security_invoker`, so what "recent" can show is what row security lets the caller see |
 | 4 | Entity statistics | Done | `vw_entity_communication_stats`, and it counts what the `communications` table holds rather than what a session remembers |

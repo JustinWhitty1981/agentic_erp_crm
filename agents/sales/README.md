@@ -230,8 +230,11 @@ Keys this container sets; the shared ones mean what they mean in `agents/custome
 - **No auto-replenishment.** `vw_low_stock_alerts` and `vw_suppliers.lead_time_days` are enough to
   *compute* a purchase order and nothing here does it. An agent that raises orders on a timer is a
   decision about who funds them; this timer files rows, it does not place orders.
-- **No embedding search.** The pgvector indexes exist (`0012`) and no embedder in this deployment fills
-  them, so `get_orders`' filters are the indexed columns and `notes` is not one of them.
+- **No embedding search here.** `communications` is embedded now (`0035`, by the customer service
+  agent's keeper) and this process registers no tool over it: a purchase order's `notes` is not a
+  conversation, and `get_orders`' filters are the indexed columns, of which `notes` is not one. Sharing
+  the search tool across forks is a one-line registration, and one keeper only - two sweeps over one
+  column would be two writers of the same fact.
 - **No Telegram, no CAO, no push transport.** Alerts land in `agent_interactions` and `agent_memories`.
 
 ## Debugging

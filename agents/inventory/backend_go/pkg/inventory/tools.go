@@ -351,7 +351,7 @@ func reserveInventory(q Querier) tools.ToolDefinition {
 			"reserved_by should name who the hold is for. Releasing a hold is not this tool's job and " +
 			"no longer needs to be nobody's: cancel_inventory_reservation is 0030's door and the sales " +
 			"agent registers it.",
-		Policy: tools.ToolPolicy{ReadOnly: false},
+		Policy: tools.ToolPolicy{ReadOnly: false, Claims: true},
 		Parameters: func() map[string]any {
 			p := object(map[string]any{
 				"item_id":      text("The item's uuid, from get_item_availability or get_low_stock_items. Required."),

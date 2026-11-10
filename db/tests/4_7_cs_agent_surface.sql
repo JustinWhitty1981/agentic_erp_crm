@@ -277,4 +277,352 @@ EXCEPTION WHEN OTHERS THEN
 END
 $$;
 
+-- ---------------------------------------------------------------------------
+-- 7d. the semantic surface: 0035's two doors, the space that remembers which
+--     model filled the column, and the two registers that say how much of the
+--     corpus is searchable.
+-- ---------------------------------------------------------------------------
+-- This is the block 0012 deferred when it built the indexes and declined the read path
+-- ("wiring a semantic-search tool is Phase 5 code work"), so it is the check that keeps
+-- 6_4_vectors.sql honest. That probe proves the ANN path is usable and cheaper, on 500 rows of
+-- random()::real, which is a statement about an index and not about a feature. What is asserted
+-- below is the other half: the rules that could each stop being true without anything else
+-- noticing.
+--
+-- Every vector here is ONE-HOT: a 1 in slot 1 or slot 2, and 0 in the other 1534. That is
+-- deliberate, and the reason is that cosine ignores magnitude. "All 0.001" and "all 0.002" are
+-- the same direction and score 1.0 apart, so the obvious way to synthesise a fake embedding makes
+-- every near and far fixture identical to every other and vacates each ordering assertion.
+-- One-hot gives distances that are exact and interpretable: 1.0 for the same slot, 0.0 for a
+-- different one, with no floating point luck in between.
+--
+-- The index is not what these blocks test. At this row count the planner will seq-scan, and 6_4
+-- is where the hnsw path is proven. What is proven here is the SQL's semantics, which no plan
+-- shape changes.
+--
+-- All of it is inside the file's BEGIN ... ROLLBACK, including the probe's own stamp of
+-- embedding_space, so nothing is cleaned up by hand. That is 6_4's convention rather than an
+-- oversight: a fixture vector left in the column under the model name this block used would make
+-- the keeper's first real tick a refusal, and the rollback is what makes that state unreachable.
+
+DO $$
+DECLARE
+    v_sig text;
+BEGIN
+    IF to_regclass('public.vw_embedding_status') IS NULL THEN
+        RAISE NOTICE 'VERDICT KNOWN-OPEN 6.4 | there is no semantic surface at all: no door writes '
+                     'a vector and no register says how many there are';
+        RETURN;
+    END IF;
+
+    SELECT string_agg(p.proname, ',' ORDER BY p.proname) INTO v_sig
+      FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'public'
+       AND p.proname IN ('embed_communications', 'search_similar_communications');
+    IF v_sig IS NULL OR v_sig NOT LIKE '%embed_communications%' THEN
+        RAISE NOTICE 'VERDICT KNOWN-OPEN 6.4 | no door writes a vector, so the indexes 0012 built '
+                     'are still a scoreboard and not a feature';
+        RETURN;
+    END IF;
+    IF v_sig NOT LIKE '%search_similar_communications%' THEN
+        RAISE NOTICE 'VERDICT ERR 6.4 | vectors can be written and never read, which is 6.4 again '
+                     'in a different file: an index with no reader is a cost and not a capability';
+        RETURN;
+    END IF;
+
+    -- Closed to the cluster, open to the runtime role. Asserted behaviourally, because "the grant
+    -- is in the file" and "the role can open the door" are two statements, and 0031 is the record
+    -- of a keeper that could not tell them apart while reporting a clean zero every hour.
+    IF has_function_privilege('afpc_app', 'embed_communications(jsonb,text,text,uuid)', 'EXECUTE')
+       AND has_function_privilege('afpc_app',
+               'search_similar_communications(vector,integer,integer)', 'EXECUTE')
+       AND NOT has_function_privilege('public',
+               'embed_communications(jsonb,text,text,uuid)', 'EXECUTE')
+    THEN
+        RAISE NOTICE 'VERDICT OK 0035 | both semantic doors are installed, closed to PUBLIC, and '
+                     'openable by the role the keeper runs as';
+    ELSE
+        RAISE NOTICE 'VERDICT ERR 0035 | the semantic doors are installed and the grants are not the '
+                     'pair 0035 §6 wrote: afpc_app=% PUBLIC=%',
+            has_function_privilege('afpc_app', 'embed_communications(jsonb,text,text,uuid)',
+                                   'EXECUTE'),
+            has_function_privilege('public', 'embed_communications(jsonb,text,text,uuid)',
+                                   'EXECUTE');
+    END IF;
+END
+$$;
+
+DO $$
+DECLARE
+    v_q     text;
+    v_near  text;
+    v_far   text;
+    v_ent   bigint;
+    v_old   bigint;
+    v_new   bigint;
+    v_other uuid;
+    v_mine  uuid;
+    v_r      record;
+    v_found  integer;
+    v_stale  integer;
+    v_model  text;
+BEGIN
+    v_q    := '['||(SELECT string_agg(CASE WHEN g = 1 THEN '1' ELSE '0' END, ',')
+                      FROM generate_series(1, 1536) g)||']';
+    v_far  := '['||(SELECT string_agg(CASE WHEN g = 2 THEN '1' ELSE '0' END, ',')
+                      FROM generate_series(1, 1536) g)||']';
+    v_near := v_q;
+    v_mine := afpc_current_tenant();
+
+    --------------------------------------------------------------------------
+    -- 7d-a. what an embedding is MADE FROM is the view's decision. 4.5's lesson, one
+    --        column type away: a rule stated in a client and enforced in the schema is
+    --        the rule that eventually disagrees with itself, and a vector is a rule
+    --        about text. If this composition ever moves into pkg/crm, the day it drifts
+    --        the corpus stops meaning one thing and no search would say so.
+    --------------------------------------------------------------------------
+    IF to_regclass('public.vw_unembedded_communications') IS NULL THEN
+        RAISE NOTICE 'VERDICT KNOWN-OPEN 6.4 | there is no queue view, so whatever gets embedded is '
+                     'whatever a Go string decided';
+        RETURN;
+    END IF;
+
+    INSERT INTO entities (name, entity_type, status)
+         VALUES ('4_7 probe customer', 'customer', 'active') RETURNING id INTO v_ent;
+    INSERT INTO communications (entity_id, communication_type, direction, subject, summary,
+                                full_content, started_at)
+         VALUES (v_ent, 'call', 'inbound', E'  Shipping\tissues  ',
+                 E'the pallet arrived   late,\nagain', 'and   wet', now())
+      RETURNING id INTO v_new;
+
+    SELECT embeddable_text, truncated, nothing_to_embed INTO v_r
+      FROM vw_unembedded_communications WHERE communication_id = v_new;
+    IF v_r.embeddable_text IS NULL THEN
+        RAISE NOTICE 'VERDICT ERR 6.4 | a fresh communication never reaches the queue, so the keeper '
+                     'has no way to see it';
+        RETURN;
+    END IF;
+    IF v_r.embeddable_text <> 'Shipping issues the pallet arrived late, again and wet' THEN
+        RAISE NOTICE 'VERDICT ERR 6.4 | the queue composes % from subject, summary and body: the '
+                     'collapse rule lives somewhere other than the view',
+            quote_literal(v_r.embeddable_text);
+        RETURN;
+    END IF;
+    IF v_r.truncated OR v_r.nothing_to_embed THEN
+        RAISE NOTICE 'VERDICT ERR 6.4 | a short complete row reports truncated=% nothing_to_embed=%',
+            v_r.truncated, v_r.nothing_to_embed;
+        RETURN;
+    END IF;
+
+    -- A row with nothing in any of its three text columns must be FLAGGED and not quietly queued.
+    -- An empty string embeds to a valid unit-norm vector, and every such vector is near every
+    -- other one's, so the corpus fills with rows that match each other and nothing else.
+    INSERT INTO communications (entity_id, communication_type, direction, subject, summary,
+                                full_content, started_at)
+         VALUES (v_ent, 'note', 'internal', '  ', '', NULL, now())
+      RETURNING id INTO v_old;
+    SELECT nothing_to_embed INTO v_r FROM vw_unembedded_communications WHERE communication_id = v_old;
+    IF NOT v_r.nothing_to_embed THEN
+        RAISE NOTICE 'VERDICT ERR 6.4 | a row with nothing to say is embeddable, which is how a '
+                     'ranking gets poisoned by arithmetic that is correct';
+        RETURN;
+    END IF;
+    RAISE NOTICE 'VERDICT OK 0035 | the queue states once what an embedding of a communication means';
+
+    --------------------------------------------------------------------------
+    -- 7d-b. the horizon is INSIDE the ANN top-k. This is the case where the position of a
+    --        predicate changes the answer and not merely the row count: with p_limit of 1,
+    --        filtering after limiting returns nothing at all, and nothing reads to a human
+    --        exactly like "nobody complained about shipping".
+    --
+    --        Fixture: the OLD row is the one that matches the question, the recent row is
+    --        deliberately unrelated to it.
+    --------------------------------------------------------------------------
+    SELECT model INTO v_model FROM embedding_space WHERE space_key = 'communications';
+    IF v_model IS NULL THEN
+        INSERT INTO embedding_space (space_key, model, dimensions, served_by)
+             VALUES ('communications', '4_7-probe-model', 1536, 'the probe');
+        v_model := '4_7-probe-model';
+    END IF;
+
+    -- The old fixture is the one that MATCHES the question and is 400 days out; the recent one is
+    -- in the window and matches nothing about it. Two assertions follow, and neither depends on
+    -- what else the corpus holds, which is what makes this block runnable against a populated
+    -- database rather than only against a fresh one.
+    UPDATE communications SET embedding = v_near::public.vector,
+                              started_at = now() - interval '400 days'
+      WHERE id = v_old;
+    UPDATE communications SET embedding = v_far::public.vector WHERE id = v_new;
+
+    -- With no window, the nearest row is the old one, and its similarity is exactly 1.0 because
+    -- the vectors are the same one-hot direction. Anything else here would mean the distance is
+    -- not the cosine vector_cosine_ops promises the index is built for.
+    SELECT count(*) INTO v_found FROM search_similar_communications(v_q::public.vector(1536),
+                                                                   NULL, 1)
+     WHERE communication_id = v_old;
+    IF v_found <> 1 THEN
+        RAISE NOTICE 'VERDICT ERR 6.4 | an unhorizoned top-1 did not return the exact match, so the '
+                     'ranking is not by the cosine the index is built on';
+        RETURN;
+    END IF;
+
+    -- The discriminating one. A window applied INSIDE the scan keeps walking past the excluded old
+    -- row and answers with something in the window: one row. A window applied AFTER the limit takes
+    -- the nearest row overall (the old one), filters it, and answers with ZERO rows, which is a
+    -- wrong answer that reads to a human as "nobody has complained in the last month".
+    SELECT count(*) INTO v_found FROM search_similar_communications(v_q::public.vector(1536), 30, 1);
+    SELECT count(*) INTO v_stale
+      FROM search_similar_communications(v_q::public.vector(1536), 30, 1)
+     WHERE communication_id = v_old;
+    IF v_found = 0 THEN
+        RAISE NOTICE 'VERDICT ERR 6.4 | a windowed search with a limit of 1 answered no rows at all '
+                     'although the window has rows in it: the horizon is applied AFTER the LIMIT, so '
+                     '"last week" filters whatever happened to be nearest instead of searching '
+                     'last week';
+        RETURN;
+    ELSIF v_stale <> 0 THEN
+        RAISE NOTICE 'VERDICT ERR 6.4 | the windowed search still returned the 400-day-old row, so '
+                     'p_days is not the clause 0035 §4 says it is';
+        RETURN;
+    END IF;
+    RAISE NOTICE 'VERDICT OK 0035 | the window is inside the scan: a top-k of 1 finds a row in the '
+                 'window even though the nearest thing in the corpus is outside it';
+
+    --------------------------------------------------------------------------
+    -- 7d-c. row security on the ANN path, in both directions. The hnsw graph is shared, so a
+    --        nearer foreign row is a leak of someone else''s history and a top-k starved by
+    --        foreign rows is the same defect pointed back at the caller: an empty answer about
+    --        rows the caller owns and could see.
+    --
+    --        Run as afpc_app on purpose. The harness connects as a superuser, and a superuser
+    --        walks past row security whatever FORCE says, so measured as itself the finding would
+    --        be invisible and this block would pass on any schema.
+    --------------------------------------------------------------------------
+    INSERT INTO tenants (slug, name) VALUES ('4-7-semantic-probe', 'cross-tenant ANN probe')
+     ON CONFLICT DO NOTHING;
+    INSERT INTO entities (name, entity_type, status, tenant_id)
+         VALUES ('4_7 probe other tenant', 'customer', 'active',
+                 (SELECT tenant_id FROM tenants WHERE slug = '4-7-semantic-probe'))
+      RETURNING id INTO v_old;
+    INSERT INTO communications (entity_id, communication_type, direction, summary, started_at,
+                                embedding, tenant_id)
+         VALUES (v_old, 'call', 'inbound', 'their nearest row', now(), v_near::public.vector,
+                 (SELECT tenant_id FROM tenants WHERE slug = '4-7-semantic-probe'));
+
+    BEGIN
+        EXECUTE 'SET LOCAL ROLE afpc_app';
+        PERFORM set_config('app.tenant_id', v_mine::text, true);
+        SELECT count(*) INTO v_found
+          FROM search_similar_communications(v_q::public.vector(1536), NULL, 20)
+         WHERE customer_name = '4_7 probe other tenant';
+        IF v_found <> 0 THEN
+            RAISE NOTICE 'VERDICT ERR 0035 | a similarity query returned another tenant''s row: 5.7 '
+                         'with a cosine attached';
+        ELSIF (SELECT count(*) FROM search_similar_communications(v_q::public.vector(1536), NULL, 20))
+              < 1 THEN
+            RAISE NOTICE 'VERDICT ERR 0035 | the caller sees no rows although its own tenant has '
+                         'vectors: the top-k was drawn from rows this connection cannot read';
+        ELSE
+            RAISE NOTICE 'VERDICT OK 0035 | the ANN path answers under row security in both '
+                         'directions';
+        END IF;
+    EXCEPTION WHEN OTHERS THEN
+        RAISE NOTICE 'VERDICT ERR 0035 | the cross-tenant ANN probe raised % - %',
+            SQLSTATE, left(SQLERRM, 110);
+    END;
+    -- RESET ROLE and not waiting for the transaction: the file has more blocks to run and they
+    -- belong to the owner. set_config with is_local=true would revert on its own at ROLLBACK, so
+    -- only the role needs putting back by hand.
+    EXECUTE 'RESET ROLE';
+    PERFORM set_config('app.tenant_id', v_mine::text, true);
+
+    --------------------------------------------------------------------------
+    -- 7d-d. the model swap, behaviourally, on a column that already has vectors in it. The
+    --       existence of embedding_space is not the finding; a door that refuses it is.
+    --------------------------------------------------------------------------
+    BEGIN
+        PERFORM * FROM embed_communications('[]'::jsonb, 'a/model/that/is/not/the/one/in/the/column');
+        RAISE NOTICE 'VERDICT ERR 0035 | a second embedder was accepted into a column filled by a '
+                     'first. Distances across the two are not distances, and nothing else in this '
+                     'schema could ever notice';
+    EXCEPTION
+        WHEN check_violation THEN
+            IF SQLERRM LIKE '%was filled by%' THEN
+                RAISE NOTICE 'VERDICT OK 0035 | the second model is refused in SQL, by name';
+            ELSE
+                RAISE NOTICE 'VERDICT ERR 0035 | the refusal came from a constraint and not from the '
+                             'door''s reasoning: %', left(SQLERRM, 90);
+            END IF;
+        WHEN OTHERS THEN
+            RAISE NOTICE 'VERDICT ERR 0035 | a second embedder produced % - %',
+                SQLSTATE, left(SQLERRM, 90);
+    END;
+
+    --------------------------------------------------------------------------
+    -- 7d-e. the register agrees with the catalog about how many vector columns exist, and
+    --       names the ones nobody writes.
+    --------------------------------------------------------------------------
+    IF (SELECT count(*) FROM vw_embedding_status) <>
+       (SELECT count(*) FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname = 'public' AND c.relkind = 'r' AND a.attnum > 0
+           AND NOT a.attisdropped AND a.atttypid = 'vector'::regtype) THEN
+        RAISE NOTICE 'VERDICT ERR 0035 | the register and the catalog disagree about how many vector '
+                     'columns exist, which is a scoreboard that has stopped counting';
+    ELSIF (SELECT verdict FROM vw_embedding_status WHERE table_name = 'contacts') NOT LIKE 'EMPTY%' THEN
+        RAISE NOTICE 'VERDICT ERR 0035 | contacts, which 0035 leaves alone by decision, is reported '
+                     'as %. The scope of a claim is part of the claim',
+            (SELECT verdict FROM vw_embedding_status WHERE table_name = 'contacts');
+    ELSE
+        RAISE NOTICE 'VERDICT OK 0035 | the register lists the whole catalog and says which columns '
+                     'nothing writes';
+    END IF;
+
+    --------------------------------------------------------------------------
+    -- 7d-f. the column census, in 7_1 §8h's form: the names pkg/crm's coverage() selects are
+    --       the names this view carries. A rename on either side is otherwise a Go read that
+    --       answers zero, which is 0031's zero-shaped bug arriving as a missing column.
+    --------------------------------------------------------------------------
+    SELECT count(*) INTO v_found
+      FROM unnest(ARRAY['table_name','rows_total','rows_embedded','verdict','embedded_by',
+                        'served_by','newest_embedded_at']) AS want(c)
+     WHERE NOT EXISTS (SELECT 1 FROM pg_attribute a
+                        WHERE a.attrelid = 'vw_embedding_status'::regclass
+                          AND a.attname = want.c AND a.attnum > 0);
+    IF v_found <> 0 THEN
+        RAISE NOTICE 'VERDICT ERR 0035 | vw_embedding_status lacks % of the columns pkg/crm reads by '
+                     'name, and a reader that finds nothing reports a healthy corpus', v_found;
+    ELSE
+        RAISE NOTICE 'VERDICT OK 0035 | the register''s columns are the ones the keeper reads';
+    END IF;
+
+    --------------------------------------------------------------------------
+    -- 7d-g. a wrong width is refused by the door and not by a cast, whatever the embedder
+    --       answered. Measured twice, differently, an hour apart on this server.
+    --------------------------------------------------------------------------
+    BEGIN
+        PERFORM * FROM embed_communications(
+            jsonb_build_array(jsonb_build_object('communication_id', v_new, 'embedding',
+                '['||(SELECT string_agg('0.001', ',') FROM generate_series(1, 1024))||']')),
+            v_model);
+        RAISE NOTICE 'VERDICT ERR 0035 | a 1024-dimension vector reached a vector(1536) column, '
+                     'which is the answer one of the two models here gives when asked for 1536';
+    EXCEPTION
+        WHEN OTHERS THEN
+            -- 22023 is invalid_parameter_value, and not raise_exception, which is P0001. A handler
+            -- written for the wrong name silently misses every refusal the door makes, and reports
+            -- the finding as the trap 0022 found in get_followup_customers: an assertion whose test
+            -- can only take the other branch.
+            IF SQLSTATE::text = '22023' AND SQLERRM LIKE '%not 1536 dimensions%' THEN
+                RAISE NOTICE 'VERDICT OK 0035 | a short vector is refused by name before anything is '
+                             'written, whatever the embedder answered';
+            ELSE
+                RAISE NOTICE 'VERDICT ERR 0035 | a 1024-dimension vector reached a vector(1536) '
+                             'column and produced % - % instead of the door''s refusal by width',
+                    SQLSTATE, left(SQLERRM, 90);
+            END IF;
+    END;
+END
+$$;
+
 ROLLBACK;

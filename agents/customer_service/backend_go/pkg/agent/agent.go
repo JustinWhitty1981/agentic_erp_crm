@@ -701,6 +701,25 @@ func (am *AgentManager) complete(ctx context.Context, client *http.Client, endpo
 
 func (am *AgentManager) authorize(req *http.Request) {
 	if am.LLMProvider != "azure_gcc_high" {
+		// The local path used to send no credential at all, which was right for the one server it
+		// was written against: a vLLM instance on a private address that authenticates nobody.
+		// Routing the same calls through a proxy is the same HTTP with one addition, and the
+		// addition is a bearer token - without it LiteLLM answers 401 before the model is
+		// consulted, and the failure looks exactly like a model server that is down.
+		//
+		// Unset means no header, so a deployment on the direct endpoint behaves precisely as it
+		// did before this line existed. The name is shared with pkg/embed's fallback of the same
+		// name: one server serving both jobs needs the key said once.
+		// Three names, one value: VLLM_API_KEY for a deployment that means the chat endpoint,
+		// LITELLM_API_KEY for the one that set it once in dev/.env and let every process read it.
+		// The middle form is what pkg/embed documents, and for the same compose reason.
+		k := strings.TrimSpace(os.Getenv("VLLM_API_KEY"))
+		if k == "" {
+			k = strings.TrimSpace(os.Getenv("LITELLM_API_KEY"))
+		}
+		if k != "" {
+			req.Header.Set("Authorization", "Bearer "+k)
+		}
 		return
 	}
 	if k := strings.TrimSpace(os.Getenv("AZURE_OPENAI_API_KEY")); k != "" {

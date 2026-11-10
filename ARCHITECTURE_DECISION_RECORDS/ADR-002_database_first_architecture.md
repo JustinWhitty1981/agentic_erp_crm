@@ -38,6 +38,13 @@ We will use **PostgreSQL as the single source of truth** for all agent state, kn
   communications rows have an embedding, because no embedder in this deployment produces 1536 dimensions
   (measured: the local models answer 1024 and 4096). Read "hybrid queries" in this ADR as planned. The
   queue item, with the two options, is `PLAN.md`'s first section.
+  *Amended 2026-11-09, and the amendment is this ADR's own argument working.* The queue item closed:
+  `0035` added the two doors and put the model identity in a table, and the customer service agent's
+  keeper fills `communications.embedding`. The pillar is delivered for that table and deferred for the
+  other two. Where the rule about which vectors are comparable now lives - a migration function and a
+  row, not a client - is exactly what this decision predicts, and it is the only reason a swapped
+  embedder is a refusal today rather than a corrupted column. The measured blocker named above was
+  never a type-system fact; it was one absent endpoint.
 - One promise this ADR's wording implied and the schema settled differently: an agent does not get
   "full database access". It gets `afpc_app`, whose reach is DML plus `EXECUTE` on the doors, under
   forced row-level security - which is a stronger version of the same idea.

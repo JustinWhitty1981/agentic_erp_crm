@@ -16,8 +16,8 @@ Before starting work, AI agents should review:
 ✅ **Blueprint complete** - `archive/blueprint/bot.py`, the pattern in one Python file — lineage since
    [ADR-006](ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md) made the Go
    backends the runtime
-✅ **Three agents deployed** - `agents/customer_service/` (`:4550`, 14 tools), `agents/inventory/` (`:4560`, 11 tools and a 30-minute check timer), `agents/sales/` (`:4570`, 18 tools and an hourly keeper)
-✅ **Schema enforced, not documented-only** - 29 applied migrations; `./scripts/db/verify.sh` reports 38 structural checks green, `./scripts/db/test-functions.sh` runs 89 mapped cases against one probe per review finding, no residue
+✅ **Three agents deployed** - `agents/customer_service/` (`:4550`, 15 tools and an hourly embedding keeper), `agents/inventory/` (`:4560`, 11 tools and a 30-minute check timer), `agents/sales/` (`:4570`, 18 tools and an hourly keeper)
+✅ **Schema enforced, not documented-only** - 30 applied migrations; `./scripts/db/verify.sh` reports 39 structural checks green, `./scripts/db/test-functions.sh` runs 126 mapped cases against one probe per review finding, no residue
 ✅ **Orders in the schema, of all three kinds, and driven by an agent** - `0027`-`0031` landed 2026-11-07: `orders`/`order_items` for SALES, PURCHASE and WORK, suppliers as a party extension, a work order's operation plan, the four fulfilment doors that finally release what `0015` started holding, and the one grant that let the keeper keep. Behavioural probes inside those files, `verify.sh` 37/0, `test-functions.sh` closed with no residue, and a clean from-zero lineage rebuilt twice to prove the order of it. `agents/sales/` registers twelve of the surface, declines two doors with reasons in its README, and its first hour of ticks is what found 0031
 ✅ **The backends read a row as the database means it** - fixed 2026-11-07, in all three forks, and the
    fix was found only by an agent's own sentence disagreeing with a view. Two shapes: pgx hands a
@@ -35,13 +35,36 @@ Before starting work, AI agents should review:
 ✅ **A method that catches itself** - `scripts/agents/tool_testplan.sh` prompts every registered tool of all three agents through the real endpoint and verifies the answer against the database (25 verdicts green 2026-11-04, 40 since the third agent landed); `scripts/docs/check_agent_docs.sh` fails when a README describes a tool or a view that is not there
 ⚠️ **`_schema_graph` exists and holds zero rows** - measured, not inferred. The older prose in this repository calls it "a knowledge graph of the entire schema for AI agent understanding", which describes the superseded loader that would have filled it and not this database. The graph an agent can actually query is the `vw_*` set plus `vw_domain_vocabulary`, `vw_rls_status`, `vw_audit_coverage` and `vw_idempotency_status`, all four derived from the catalog rather than maintained by hand. The documentation sweep of 2026-11-04/05 is what found the claim, which is the argument for the checks over the graph
 
-## Now: the known-open defect on the deployed surface, and one that closed today
+## Now: one closed defect, and the two things its closing found
 
-### 1. Semantic search is indexes without vectors
-- [ ] Choose or build an embedder that emits the 1536 dimensions `communications.embedding` and `contacts.embedding` declare (measured: the local models answer 1024 and 4096) — or change the columns, which is a migration with a reindex in it
-- [ ] Decide the backfill for existing rows, and who runs it: an `UPDATE` in a migration is a lock on a table the agents are reading
-- [ ] Add the tool that reads them, and its case in `docs/agent_requirements/agent_test_plan.md`
-- Blocked on: a model choice, not a code change. Requirement 1's "find customers who complained about shipping last week" stays unimplemented until then.
+### 1. Semantic search — **closed 2026-11-09**
+- [x] The embedder question resolved itself rather than being answered. An endpoint that accepts an
+      explicit `dimensions` argument emits exactly the 1536 the columns declare, at norm 1.000000, on a
+      Matryoshka truncation of a wider model. Measured before any code was written, on four texts: a
+      near-paraphrase pair scores 0.811 native and 0.816 truncated; two unrelated texts 0.380/0.234 and
+      0.411/0.251. Nothing about the shape of the answer got worse, so no column was changed, no index
+      was rebuilt, and the "or change the columns" branch of this bullet was never needed.
+- [x] `0035_semantic_search`: `embed_communications` (fills gaps, never re-derives a value that is
+      already there, takes a claim), `search_similar_communications` (the ANN read, with the horizon
+      **inside** the top-k), `vw_unembedded_communications` (the queue, and the composition rule in SQL
+      rather than in a client), `vw_embedding_status` (the register), `embedding_space` (which model
+      filled the column). Grants in §6, seven behavioural probes in §7, B31 in `verify.sh`.
+- [x] The backfill question was settled by the same measurement that settled the rest: 25 rows, which
+      the keeper drains in 1.1 s. It is a timer and not a migration, which also disposes of the second
+      half of the old bullet - no `UPDATE` in a file, so no lock on a table the agents are reading.
+- [x] The tool and its case: `search_communications`, acceptance case 38, and probe block `7d` in
+      `db/tests/4_7_cs_agent_surface.sql` with 14 mapped CASES rows.
+- **The finding worth keeping is not "add an embedder".** It is that the blocker was described, in four
+      pages and one column comment, as a fact about models ("no embedder produces 1536; measured 1024
+      and 4096") when it was a fact about one absent endpoint - the same model answers 1536 when asked.
+      A measurement stated without the question it was answering turns into a constraint nobody re-tests,
+      and this one sat in a COMMENT ON COLUMN where it was the first thing a reader met.
+- **And two things that were not knowable from the documentation.** The width is a request and not a
+      contract: the same request answered `400 dimensions exceed embedding length 1024` and, an hour
+      earlier, `200 OK` with 1024 floats. And a column holding two models' vectors is a silent
+      corruption no index, constraint or structural check can see, because both are 1536 numbers long.
+      Which is why the schema now remembers which model filled it and the write door refuses rather than
+      mixes. Both are asserted in SQL, not in prose: `db/tests/4_7_cs_agent_surface.sql` 7d-g and 7d-d.
 
 ### 2. `idempotency_sweep`'s keeper — **closed 2026-11-07**, and it paid a toll
 - [x] Called by a container's timer: `agents/sales`' `runHousekeeping`, `runInventoryCheck`'s shape, hourly, every tick a trajectory row.
@@ -187,7 +210,7 @@ Both were planned as `0019`/`0020` and moved — see "Why the two planned migrat
 - **Schema:** `verify.sh` 38 green, `test-functions.sh` reporting no REGRESSION and only documented KNOWN-OPEN rows, no residue
 - **Reliability:** the inventory timer's ticks have no gaps in `agent_interactions`; a missing row is an outage, not a log search
 - **Response Time:** under 30 seconds for a typical single-tool turn on the local model; the plan's runs are the measurement
-- **Honesty:** `scripts/docs/check_agent_docs.sh` green, and no page in this repository claiming semantic search works
+- **Honesty:** `scripts/docs/check_agent_docs.sh` green, and no page claiming a capability the code does not have in this deployment. The 2026-11-09 pass is the test case for the rule in both directions: four pages and a column comment asserted semantic search was impossible, on the strength of a measurement that had stopped being true, and a fifth would now assert it works for every vector column when it works for one
 
 ---
 

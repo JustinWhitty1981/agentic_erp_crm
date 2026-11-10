@@ -42,8 +42,8 @@ import (
 	"time"
 
 	"jada-backend/pkg/agent"
-	"jada-backend/pkg/inventory"
 	"jada-backend/pkg/db"
+	"jada-backend/pkg/inventory"
 	"jada-backend/pkg/logging"
 	"jada-backend/pkg/mcp"
 	"jada-backend/pkg/memory"
@@ -702,8 +702,7 @@ func toolsHandler(am *agent.AgentManager) http.HandlerFunc {
 				// asking whether it writes. It belongs in this response because the difference between
 				// "the agent will not retry" and "the agent cannot retry safely" is invisible
 				// anywhere else.
-				"claims_idempotency": strings.HasPrefix(t.Name, "reserve_") ||
-					strings.HasPrefix(t.Name, "save_"),
+				"claims_idempotency": t.Policy.Claims,
 			})
 		}
 		writeJSON(w, http.StatusOK, map[string]any{

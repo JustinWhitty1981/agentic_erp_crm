@@ -185,6 +185,17 @@ func TestEveryDoorSendsItsFullArityAndTheClaimLast(t *testing.T) {
 		// The last slot is the claim, and the second-to-last is a door parameter, for every one of
 		// these doors: append(key(...)) rather than key(...), nil is the "no run id" path and still
 		// the right shape.
+		// The same slot, read as a policy question: this test has just proved the tool SENT a claim,
+		// so Policy.Claims must say so, because that field is what /api/tools answers "can this be
+		// retried safely" with. It used to be derived from the tool's NAME by a pair of HasPrefix
+		// calls, which for this fork meant seven of its eight writers were reported as unguarded
+		// retries while the code appended a key to every one of them.
+		for _, d := range Tools(f) {
+			if d.Name == c.tool && !d.Policy.Claims {
+				t.Errorf("%s: sent a claim in position %d and its Policy says it does not, so the "+
+					"endpoint contradicts the argument list", c.tool, len(got))
+			}
+		}
 		switch k := got[len(got)-1].(type) {
 		case string:
 			if len(k) != 36 {

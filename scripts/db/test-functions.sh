@@ -295,6 +295,23 @@ CASES=(
 
 "4_7_cs_agent_surface|append-only is a comment, not a wall|ADR-002|0023_agent_memory"
 "4_7_cs_agent_surface|attaches by census is missing|ADR-002|0023_agent_memory"
+# 0035's surface, one row per thing the semantic-search programme promises. 6.4 is the finding:
+# 0012 closed the index half of it and left the read path, so the migration that closes the rest
+# gets credited against the same number rather than a new one.
+"4_7_cs_agent_surface|no door writes a vector|6.4|0035_semantic_search"
+"4_7_cs_agent_surface|vectors can be written and never read|6.4|0035_semantic_search"
+"4_7_cs_agent_surface|the grants are not the pair|6.4|0035_semantic_search"
+"4_7_cs_agent_surface|the collapse rule lives somewhere other than the view|6.4|0035_semantic_search"
+"4_7_cs_agent_surface|a row with nothing to say is embeddable|6.4|0035_semantic_search"
+"4_7_cs_agent_surface|the window is applied AFTER the LIMIT|6.4|0035_semantic_search"
+"4_7_cs_agent_surface|the horizon is not the clause|6.4|0035_semantic_search"
+"4_7_cs_agent_surface|5.7 with a cosine attached|6.4|0035_semantic_search"
+"4_7_cs_agent_surface|the top-k was drawn from rows this connection cannot read|6.4|0035_semantic_search"
+"4_7_cs_agent_surface|a second embedder was accepted|6.4|0035_semantic_search"
+"4_7_cs_agent_surface|the register and the catalog disagree|6.4|0035_semantic_search"
+"4_7_cs_agent_surface|a scoreboard that has stopped counting|6.4|0035_semantic_search"
+"4_7_cs_agent_surface|a reader that finds nothing reports a healthy corpus|6.4|0035_semantic_search"
+"4_7_cs_agent_surface|reached a vector(1536) column and produced|6.4|0035_semantic_search"
 # 4.9 is a finding the review never made, because it needs three deployed agents to exist: the
 # conversation id named a thread and not who was on it. Three rows, because the file tells three
 # different stories and a green harness must not be able to hide any of them. 4.9a's phrase is the

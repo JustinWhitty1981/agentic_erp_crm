@@ -14,12 +14,29 @@ import (
 	"jada-backend/pkg/turn"
 	"sort"
 	"strconv"
+
+	"jada-backend/pkg/memory"
 )
 
 // TestMain quiets the package's logging: these tests exercise write paths, and each one logs its
 // outcome by design, so without this the report buries its own failures in INFO lines.
+//
+// It also sends the memory store to a temp directory. pkg/memory falls back to a FILE store rooted at
+// the process's working directory when no database Caller is installed, and the embedding keeper's
+// tests reach it through remember() - so a package test run inside the build container wrote
+// pkg/crm/memory_store/*.md into the source tree and left it there, owned by root. A test that writes
+// into the tree it is testing is a residue generator, and the residue looks like a feature.
 func TestMain(m *testing.M) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	dir, err := os.MkdirTemp("", "afpc-crm-tests")
+	if err != nil {
+		// Worse than a temp dir in the tree: without this the tests would write straight back into
+		// it, which is the residue this exists to stop.
+		panic("could not make a temp directory for the memory store: " + err.Error())
+	}
+	os.Setenv(memory.EnvDir, dir)
+	os.Setenv(memory.EnvDriver, memory.DriverFile)
+	os.Chdir(dir) // nothing in this package should be able to write beside the sources
 	os.Exit(m.Run())
 }
 
@@ -91,7 +108,7 @@ func TestWriteToolsSendTheirOwnParamCount(t *testing.T) {
 			f.rows = []map[string]any{{"mark_customer_followup": "marked"}}
 		}
 		var found bool
-		for _, d := range Tools(f) {
+		for _, d := range Tools(f, nil) {
 			if d.Name != tc.tool {
 				continue
 			}
@@ -127,7 +144,7 @@ func TestClaimsAreLastPosition(t *testing.T) {
 		{"add_communication", 20},
 	} {
 		f := &fake{rows: []map[string]any{{"success": true}}}
-		for _, d := range Tools(f) {
+		for _, d := range Tools(f, nil) {
 			if d.Name != tc.tool {
 				continue
 			}
@@ -155,7 +172,7 @@ func TestClaimsAreLastPosition(t *testing.T) {
 // to 0011.
 func TestClaimAbsentWithoutARun(t *testing.T) {
 	f := &fake{rows: []map[string]any{{"success": true}}}
-	for _, d := range Tools(f) {
+	for _, d := range Tools(f, nil) {
 		if d.Name != "add_customer" {
 			continue
 		}
@@ -181,7 +198,7 @@ func TestKeyStableAcrossSpellings(t *testing.T) {
 
 	f := &fake{rows: []map[string]any{{"success": true, "communication_id": 7}}}
 	call := func(args map[string]any) string {
-		for _, d := range Tools(f) {
+		for _, d := range Tools(f, nil) {
 			if d.Name != "add_communication" {
 				continue
 			}
@@ -246,7 +263,7 @@ func TestSelectNeverInterpolated(t *testing.T) {
 	// Each tool is called with values for every property IT declares, because a tool that accepts one
 	// name at a time refuses the others - correctly - and a test that ignored that would be reporting
 	// refusals rather than checking statements.
-	for _, d := range Tools(&fake{}) {
+	for _, d := range Tools(&fake{}, nil) {
 		props, _ := d.Parameters["properties"].(map[string]any)
 		args := map[string]any{}
 		for name := range props {
@@ -255,7 +272,7 @@ func TestSelectNeverInterpolated(t *testing.T) {
 
 		f := &fake{rows: nil}
 		var def tools.ToolDefinition
-		for _, c := range Tools(f) {
+		for _, c := range Tools(f, nil) {
 			if c.Name == d.Name {
 				def = c
 			}
@@ -300,7 +317,7 @@ func probeValue(name string) any {
 
 func TestReadToolsRefuseAnEmptyQuestion(t *testing.T) {
 	f := &fake{rows: nil}
-	for _, d := range Tools(f) {
+	for _, d := range Tools(f, nil) {
 		if d.Name != "get_customer_info" && d.Name != "get_customer_communications" {
 			continue
 		}
@@ -312,7 +329,7 @@ func TestReadToolsRefuseAnEmptyQuestion(t *testing.T) {
 
 func TestEmptyResultSaysSo(t *testing.T) {
 	f := &fake{rows: nil}
-	for _, d := range Tools(f) {
+	for _, d := range Tools(f, nil) {
 		if d.Name != "get_customer_info" {
 			continue
 		}
@@ -335,7 +352,7 @@ func TestEmptyResultSaysSo(t *testing.T) {
 // answer instead of a visible error.
 func TestLimitIsBounded(t *testing.T) {
 	f := &fake{rows: nil}
-	for _, d := range Tools(f) {
+	for _, d := range Tools(f, nil) {
 		if d.Name != "get_customer_info" {
 			continue
 		}
@@ -363,7 +380,7 @@ func TestAgentIDComesFromTheEnvironment(t *testing.T) {
 	}
 
 	f := &fake{rows: []map[string]any{{"success": true}}}
-	for _, d := range Tools(f) {
+	for _, d := range Tools(f, nil) {
 		if d.Name == "add_communication" {
 			d.ExecuteContext(context.Background(), map[string]any{
 				"customer_name": "Acme", "summary": "s", "agent_id": "someone else"})
@@ -379,7 +396,7 @@ func TestAgentIDComesFromTheEnvironment(t *testing.T) {
 // an instant, whose day would depend on the server's zone.
 func TestDateArgumentIsADate(t *testing.T) {
 	f := &fake{rows: []map[string]any{{"success": true}}}
-	for _, d := range Tools(f) {
+	for _, d := range Tools(f, nil) {
 		if d.Name == "add_communication" {
 			if _, err := d.ExecuteContext(context.Background(), map[string]any{
 				"entity_id": float64(1), "summary": "s",
@@ -466,7 +483,7 @@ func TestBareTimestampIsAnchoredLocally(t *testing.T) {
 func TestTimestampForms(t *testing.T) {
 	f := &fake{rows: []map[string]any{{"success": true}}}
 	call := func(v string) error {
-		for _, d := range Tools(f) {
+		for _, d := range Tools(f, nil) {
 			if d.Name == "add_communication" {
 				_, err := d.ExecuteContext(context.Background(), map[string]any{
 					"entity_id": float64(1), "summary": "s", "started_at": v})
@@ -496,7 +513,7 @@ func TestTimestampForms(t *testing.T) {
 // with an empty description is one the model fills by guessing, and a guess for p_follow_up_date or
 // p_direction is a refusal the agent then has to work around.
 func TestEveryPropertyIsDocumented(t *testing.T) {
-	for _, d := range Tools(&fake{}) {
+	for _, d := range Tools(&fake{}, nil) {
 		if d.Description == "" || len(d.Description) < 40 {
 			t.Errorf("%s has no usable description (%d characters)", d.Name, len(d.Description))
 		}
@@ -598,7 +615,7 @@ func TestEveryDoorKeyIsReadableFromARead(t *testing.T) {
 	q := &fake{rows: []map[string]any{}}
 	readable := map[string]bool{}
 	sent := 0
-	for _, d := range Tools(q) {
+	for _, d := range Tools(q, nil) {
 		if !d.Policy.ReadOnly {
 			continue
 		}
@@ -710,7 +727,7 @@ func sortedKeys(m map[string]bool) []string {
 // three backends, and this is what keeps a filter added in this one from arriving as a read that
 // Postgres refuses whole.
 func TestNoQuerySendsAParameterItsSQLNeverNames(t *testing.T) {
-	for _, d := range Tools(&fake{}) {
+	for _, d := range Tools(&fake{}, nil) {
 		if !d.Policy.ReadOnly {
 			continue
 		}

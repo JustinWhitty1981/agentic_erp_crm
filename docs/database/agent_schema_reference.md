@@ -160,9 +160,12 @@ LIMIT 50;
 ## Important Notes
 
 1. **Vector Embeddings**: `entities`, `contacts` and `communications` declare `vector(1536)` columns,
-   and 0012 built their hnsw indexes. **Nothing writes them** - no embedder in this deployment
-   produces 1536 dimensions (measured: the local models answer 1024 and 4096), so semantic search is
-   not available and no query here should depend on it
+   and 0012 built their hnsw indexes. Since `0035` one of the three has a writer and a reader: the
+   customer service agent's keeper fills `communications.embedding` and `search_communications` reads
+   it. `entities` and `contacts` are empty **by decision**, not by the old blocker, which was a missing
+   endpoint rather than a limit of the type system. `vw_embedding_status` is the machine-readable answer
+   to which column holds what, and it is the thing to consult before writing a query that depends on a
+   vector being there
 2. **Row Level Security**: this line used to single out two tables, which was the pre-0009 state. Since
    0009 RLS is `FORCED` on **every** tenant-coded table - 21 today, with 42 policies, and the five
    global tables and one build ledger declared exempt rather than forgotten. `vw_rls_status` publishes

@@ -201,8 +201,11 @@ to guess which branch it was in.
 - **Auto-replenishment.** `vw_low_stock_alerts` and `vw_suppliers.lead_time_days` are enough to *compute*
   a purchase order and nothing here does it: an agent that raises orders on a timer is a decision about
   who funds them, and the timer this agent has files rows, it does not place orders.
-- **Semantic search.** The pgvector indexes exist (`0012`) and no embedder in this deployment fills
-  them; `get_orders`' filters are the indexed columns above, and `notes` is not one of them.
+- **Semantic search.** The indexes exist (`0012`), `0035` gave `communications` a writer and a reader,
+  and no order text has either: `get_orders`' filters are the indexed columns above, and `notes` is not
+  one of them. Registering `search_communications` in this agent is a change to `registerTools` and one
+  README row if a sales question ever needs the conversation history - the door, the corpus and the
+  keeper already exist elsewhere.
 - **Telegram, and any push transport.** Alerts land in `agent_interactions` and `agent_memories`.
 
 ## Decided later (open questions, tracked here so they are not lost)

@@ -187,7 +187,7 @@ func TestHealthTellsNoDatabaseFromABlindProcess(t *testing.T) {
 		{"file-backed on purpose", false, http.StatusOK, "not configured"},
 		{"configured and blind", true, http.StatusServiceUnavailable, "configured but never connected"},
 	} {
-		h := healthHandler(am, nil, nil, tc.configured)
+		h := healthHandler(am, nil, nil, tc.configured, nil, 0)
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/health", nil))
 

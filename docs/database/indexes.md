@@ -1,7 +1,7 @@
 # Database indexes - generated
 
 Regenerated from the live catalog by `scripts/docs/gen_schema_docs.sh` (the `make
-docs-schema` target) on 2026-11-07. **Do not edit**: the next run replaces this file. Prose
+docs-schema` target) on 2026-11-10. **Do not edit**: the next run replaces this file. Prose
 about indexes belongs in `db/README.md`; the checks over them live in
 `scripts/db/verify.sh`.
 
@@ -71,6 +71,7 @@ currency_rates :: CREATE INDEX idx_rates_pair_from ON public.currency_rates USIN
 currency_rates :: CREATE INDEX idx_rates_to ON public.currency_rates USING btree (to_currency, valid_from DESC)
 currency_rates :: CREATE UNIQUE INDEX uq_rates_one_current ON public.currency_rates USING btree (from_currency, to_currency) WHERE (valid_to IS NULL)
 document_counters :: CREATE UNIQUE INDEX document_counters_pkey ON public.document_counters USING btree (tenant_id, doc_type, period)
+embedding_space :: CREATE UNIQUE INDEX embedding_space_pkey ON public.embedding_space USING btree (space_key)
 entities :: CREATE UNIQUE INDEX entities_pkey ON public.entities USING btree (id)
 entities :: CREATE UNIQUE INDEX entities_tenant_id_key ON public.entities USING btree (tenant_id, id)
 entities :: CREATE INDEX idx_entities_embedding ON public.entities USING hnsw (embedding vector_cosine_ops)

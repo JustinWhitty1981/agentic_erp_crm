@@ -47,6 +47,21 @@ services:
       - VLLM_MODEL=${VLLM_MODEL:-qwen3.8-flash-next}
       - LLM_STREAM=${LLM_STREAM:-true}
 
+      # --- the embedder, and the keeper that calls it ------------------------
+      # Semantic search is off unless EMBEDDING_MODEL is set, and it is set here rather than in
+      # dev/.env because it is a decision about what this agent does rather than a credential.
+      # The interpolation is from the PROJECT .env (agents/customer_service/.env), which is the file
+      # scripts/db/init.sh owns and the only one compose expands ${...} from - the same rule that
+      # makes AFPC_PG_HOST work below, and the reason the key is NOT translated here: a line like
+      # `VLLM_API_KEY=${LITELLM_API_KEY}` expands to nothing when the value lives in an env_file,
+      # so the process reads LITELLM_API_KEY itself, from dev/.env, by name. pkg/embed's
+      # EnvServerKey comment is the record of that.
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-}
+      - EMBEDDING_BASE_URL=${EMBEDDING_BASE_URL:-}
+      - EMBEDDING_BATCH_SIZE=${EMBEDDING_BATCH_SIZE:-8}
+      - EMBEDDING_ROWS_PER_TICK=${EMBEDDING_ROWS_PER_TICK:-500}
+      - EMBEDDING_INTERVAL_MINUTES=${EMBEDDING_INTERVAL_MINUTES:-60}
+
       # --- which tenant this process answers as ------------------------------
       # Resolved once at startup and set on every pooled connection. It is not a request parameter
       # because a per-request tenant with a single pooled identity is exactly the masquerading shape

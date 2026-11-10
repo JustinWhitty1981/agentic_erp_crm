@@ -464,7 +464,7 @@ func createOrder(q Querier) tools.ToolDefinition {
 			"DRAFT: there is no argument that creates one further along, because a status is a position" +
 			"in a lifecycle and every lifecycle begins at DRAFT. Lines come next, with add_order_line -" +
 			"an order with no lines is a promise with nothing in it.",
-		Policy: tools.ToolPolicy{ReadOnly: false},
+		Policy: tools.ToolPolicy{ReadOnly: false, Claims: true},
 		Parameters: func() map[string]any {
 			p := object(map[string]any{
 				"order_type":  text("SALES, PURCHASE or WORK. Required."),
@@ -556,7 +556,7 @@ func addOrderLine(q Querier) tools.ToolDefinition {
 			"a line_type the document kind cannot hold: COMPONENT and PRODUCT are a work order's" +
 			"vocabulary for what it consumes and what it yields, and on a sales or purchase line STANDARD" +
 			"is the answer.",
-		Policy: tools.ToolPolicy{ReadOnly: false},
+		Policy: tools.ToolPolicy{ReadOnly: false, Claims: true},
 		Parameters: func() map[string]any {
 			p := object(map[string]any{
 				"order_id": text("The document to add to. Required."),
@@ -653,7 +653,7 @@ func transitionOrder(q Querier) tools.ToolDefinition {
 			"being told its move was backwards. CANCELLED is exempt from the forward-only rule, because" +
 			"turning an agreement off is not a step backwards in it. reason is asked for and kept," +
 			"because a status change nobody can explain later is a rumour.",
-		Policy: tools.ToolPolicy{ReadOnly: false},
+		Policy: tools.ToolPolicy{ReadOnly: false, Claims: true},
 		Parameters: func() map[string]any {
 			p := object(map[string]any{
 				"order_id":         text("The document. Required."),
@@ -714,7 +714,7 @@ func addSupplier(q Querier) tools.ToolDefinition {
 			"a vocabulary nothing could enforce it against. lead_time_days is the number a replenishment" +
 			"decision reads; leaving it out says nobody has measured it, which is a different sentence" +
 			"from zero.",
-		Policy: tools.ToolPolicy{ReadOnly: false},
+		Policy: tools.ToolPolicy{ReadOnly: false, Claims: true},
 		Parameters: func() map[string]any {
 			p := object(map[string]any{
 				"supplier_code":  text("The tenant-unique code. Required."),
@@ -778,7 +778,7 @@ func shipSalesOrder(q Querier) tools.ToolDefinition {
 			"ledger refuses and says how much was available across how many bins: reserve it or restock," +
 			"and do not retry a precise answer unchanged. warehouse_id overrides the document's own when" +
 			"the stock leaves from somewhere else.",
-		Policy: tools.ToolPolicy{ReadOnly: false},
+		Policy: tools.ToolPolicy{ReadOnly: false, Claims: true},
 		Parameters: func() map[string]any {
 			p := object(map[string]any{
 				"order_id":     text("The sales order. Required."),
@@ -830,7 +830,7 @@ func receivePurchaseOrder(q Querier) tools.ToolDefinition {
 			"not a non-terminal PURCHASE order, refuses one that names no warehouse to receive into, and" +
 			"refuses when nothing is outstanding. Like shipping, it is a document event and not a line" +
 			"event, because a delivery note says what came off the truck against the order.",
-		Policy: tools.ToolPolicy{ReadOnly: false},
+		Policy: tools.ToolPolicy{ReadOnly: false, Claims: true},
 		Parameters: func() map[string]any {
 			p := object(map[string]any{
 				"order_id":     text("The purchase order. Required."),
@@ -884,7 +884,7 @@ func cancelReservation(q Querier) tools.ToolDefinition {
 			"would take stock the document never promised; and a release larger than what is open, where" +
 			"the hint says shipped units are consumed by the ship door and not cancelled here. This does" +
 			"not cancel the ORDER: whether the agreement is off is transition_order's decision.",
-		Policy: tools.ToolPolicy{ReadOnly: false},
+		Policy: tools.ToolPolicy{ReadOnly: false, Claims: true},
 		Parameters: func() map[string]any {
 			p := object(map[string]any{
 				"reservation_id": text("The commitment to release. Required."),

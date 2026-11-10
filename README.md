@@ -48,9 +48,11 @@ A **Database-First, Agent-Native** business operating system.
   verdicts, all green as of 2026-11-04).
 
 ### What's Under Construction
-- **Semantic search:** the hnsw indexes exist (`0012`) and nothing writes the vectors, because no
-  embedder in this deployment produces the dimensions the columns declare — measured, the local models
-  answer 1024 and 4096. "Find customers who complained about shipping last week" is not implemented.
+- **Semantic search:** implemented for `communications`. An embedder behind the local LiteLLM server
+  answers the 1536 dimensions the columns declare (asked for 1536, it returns 1536 at norm 1.0),
+  `0035` built the two doors and the register, and the customer service agent's keeper fills the column
+  on a schedule. "Find customers who complained about shipping last week" is a query. `entities` and
+  `contacts` are still empty by decision, and `vw_embedding_status` says so per table.
 - **Agent registry:** no versioning, dependency resolution, or discovery. An agent is a process with an
   `AGENT_ROLE` and a set of grants, not a row in a table — `agents` is not a table and nothing pretends
   otherwise.

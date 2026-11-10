@@ -2,6 +2,7 @@ package crm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"jada-backend/pkg/embed"
 	"jada-backend/pkg/ids"
 	"jada-backend/pkg/tools"
 	"jada-backend/pkg/turn"
@@ -65,11 +67,22 @@ const (
 // Memory tools are not here. They are pkg/memory's own three, and they reach the same database
 // through save_memory/get_memory/list_memories; splitting one agent's state across two packages
 // would be a second definition of what this agent knows.
-func Tools(q Querier) []tools.ToolDefinition {
+// Tools is the customer service agent's CRM surface: four reads and four writes, each read over a
+// vw_* view the schema publishes for agents (ADR-003) and each write over a function that owns its
+// decision (ADR-002). No tool here composes SQL against a business table, which is the rule 0021
+// put a marker on: a caller-side INSERT is a rule the database cannot enforce, and finding 4.5 is
+// what that looked like in practice - the blueprint's add_communication.py carried its own INSERT,
+// qualified to a schema no migration creates.
+//
+// The ninth tool is conditional, and that is the only reason the signature has a second parameter:
+// search_communications cannot work without an embedder, and registering a tool the model will call
+// in order to be told "no" is the mistake this file's caller already documents about a missing
+// database. A nil e means the surface is eight tools and the startup line says which.
+func Tools(q Querier, e *embed.Client) []tools.ToolDefinition {
 	if q == nil {
 		return nil
 	}
-	return []tools.ToolDefinition{
+	list := []tools.ToolDefinition{
 		getCustomerInfo(q),
 		getCustomerCommunications(q),
 		getEntityStats(q),
@@ -79,6 +92,10 @@ func Tools(q Querier) []tools.ToolDefinition {
 		addCommunication(q),
 		markCustomerFollowup(q),
 	}
+	if e != nil {
+		list = append(list, searchCommunications(q, e))
+	}
+	return list
 }
 
 // ---------------------------------------------------------------------------
@@ -373,6 +390,108 @@ func getFollowupCustomers(q Querier) tools.ToolDefinition {
 	}
 }
 
+// searchCommunications is the ninth CRM tool and requirement 1's other half: the read that makes the
+// vectors answerable. It embeds the question and hands the numbers to the door, and that split is the
+// design rule - the model chooses what to look for and never what to look it up with, because a
+// coordinate list is not something a reader of the schema can check and not something that belongs in
+// a prompt.
+//
+// It is registered only when an embedder is configured (see Tools), which is this file's existing
+// reasoning about a missing database applied to a missing model: a tool in the prompt that cannot work
+// lands as a data problem, and a capability nobody advertises lands as a question asked of a human.
+// embed.go holds the keeper that fills the column this reads.
+func searchCommunications(q Querier, e *embed.Client) tools.ToolDefinition {
+	return tools.ToolDefinition{
+		Name: "search_communications",
+		Description: "Find recorded communications by what they are about, from " +
+			"search_similar_communications: rows ordered by how close each is to the question, " +
+			"each with the customer's name and status beside it, and a similarity between 0 and " +
+			"1. query is a sentence or a fragment - 'customer complained about shipping late' - " +
+			"and it is matched by meaning and not by words: a row that says the delivery arrived " +
+			"broken and delayed is found by a query about shipping problems, and a row containing " +
+			"the exact word is not found just for containing it. days narrows to interactions that " +
+			"happened inside the window BEFORE the ranking is chosen, so 'last week' means a search " +
+			"of last week rather than a filter on whatever was nearest; omit it to search " +
+			"everything. limit defaults to 5, capped at 50. Two things this cannot do: it cannot " +
+			"see a row the sweep has not embedded yet (an empty result beside a rows_total above " +
+			"rows_embedded means exactly that, and the note says so), and it cannot combine a " +
+			"meaning with a keyword - for a customer by name use get_customer_communications, " +
+			"which is exact. It needs an embedder; without one this tool is not registered.\n",
+		Parameters: object(map[string]any{
+			"query": text("What to look for, in a sentence. Required."),
+			"days":  integer("Only interactions within this many days. Omit for no window."),
+			"limit": integer("Rows to return, 1-50. Default 5."),
+		}),
+		Policy: tools.ToolPolicy{ReadOnly: true},
+		ExecuteContext: func(ctx context.Context, args map[string]any) (string, error) {
+			// str() already trimmed and already turns an all-whitespace value into nil, which is the
+			// rule every other argument in this package follows: a model that emits " " is not
+			// asking a question.
+			qy, _ := str(args, "query").(string)
+			query := strings.TrimSpace(qy)
+			if query == "" {
+				return "", fmt.Errorf("query is required: this tool searches by meaning, and " +
+					"there is no meaning in a search for nothing")
+			}
+			limit, err := clampInt(args, "limit", defaultSearchResults, 1, maxSearchResults)
+			if err != nil {
+				return "", err
+			}
+			window, err := optionalInt(args, "days")
+			if err != nil {
+				return "", err
+			}
+
+			vecs, err := e.Embed(ctx, []string{query})
+			if err != nil {
+				// The embedder being unreachable is a different fact from "no results", and it is
+				// the one a caller can act on. The door would have refused a NULL vector with
+				// 22023, which would have read as an argument error.
+				return "", fmt.Errorf("the question could not be embedded, so there is nothing to "+
+					"search with: %w", err)
+			}
+			rendered, err := json.Marshal(vecs[0])
+			if err != nil {
+				return "", fmt.Errorf("render the query vector: %w", err)
+			}
+
+			// The vector travels as the text pgvector prints, which is exactly what
+			// json.Marshal of []float32 produces; the parameter's own type in the door's
+			// signature is what coerces it, so there is nothing to wrap or re-render here.
+			rows, err := q.Call(ctx, "search_similar_communications",
+				[]any{string(rendered), window, limit})
+			if err != nil {
+				return "", err
+			}
+			for _, r := range rows {
+				if v, ok := r["communication_id"]; ok {
+					turn.Source(ctx, "communications", v)
+				}
+			}
+			if len(rows) == 0 {
+				// "Nothing is similar" and "nothing is searchable" are the same zero rows, and only
+				// one of them is an answer. This is the 4_8 §8 complaint arrived at from the other
+				// direction, and the register is the only place that can tell them apart.
+				cov, cerr := coverage(ctx, q)
+				if cerr == nil && cov.RowsEmbedded == 0 {
+					return Rows(withNote(rows, "nothing is embedded yet, so this searched an empty "+
+						"index and an empty result means nothing about the records: the sweep that "+
+						"fills it runs on a timer"))
+				}
+				if cerr == nil && cov.RowsTotal > cov.RowsEmbedded {
+					return Rows(withNote(rows, fmt.Sprintf(
+						"nothing similar among the %d of %d communications that are embedded; the rest "+
+							"cannot be found by meaning at all and a keyword search will not find them "+
+							"either", cov.RowsEmbedded, cov.RowsTotal)))
+				}
+				return Rows(withNote(rows, "nothing in the recorded history is about that, which is "+
+					"an answer and not a failure to find something"))
+			}
+			return Rows(rows)
+		},
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Writes
 // ---------------------------------------------------------------------------
@@ -404,7 +523,7 @@ func addCustomer(q Querier) tools.ToolDefinition {
 			"address_type":      text("home, business, mailing, shipping, billing or headquarters."),
 			"is_primary":        boolean("Whether this contact is the primary one. Default true."),
 		}),
-		Policy: tools.ToolPolicy{ReadOnly: false},
+		Policy: tools.ToolPolicy{ReadOnly: false, Claims: true},
 		ExecuteContext: func(ctx context.Context, args map[string]any) (string, error) {
 			vals := []any{
 				str(args, "first_name"), str(args, "last_name"), str(args, "email"),
@@ -511,7 +630,7 @@ func addCommunication(q Querier) tools.ToolDefinition {
 			"parent_id":          integer("The id of the message this replies to; roots the whole chain."),
 			"started_at":         text("When the interaction happened, ISO-8601. Defaults to now."),
 		}),
-		Policy: tools.ToolPolicy{ReadOnly: false},
+		Policy: tools.ToolPolicy{ReadOnly: false, Claims: true},
 		ExecuteContext: func(ctx context.Context, args map[string]any) (string, error) {
 			started, err := timestamp(str(args, "started_at"))
 			if err != nil {

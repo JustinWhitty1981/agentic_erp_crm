@@ -237,6 +237,34 @@ case_run 7 get_entity_stats "$CS" "Summarize the account statistics for Jane Doe
 after_8() { obs_has "$RID" get_followup_customers "Alice"; }   # seeded follow-up rows must surface
 case_run 8 get_followup_customers "$CS" "Which customers should we follow up with?" get_followup_customers after_8
 
+# Case 38 is the semantic read, and it is the only case in the plan whose state plane is a property of
+# the corpus rather than of the turn. A search that returns nothing is indistinguishable from a search
+# over an unsearchable corpus unless something checks the register, and 0035 built vw_embedding_status
+# precisely so that this case could tell the two apart. So the first assertion is that the index has
+# rows in it, and it fails loudly with the sweep's own sentence rather than letting an empty answer
+# pass. The ranking itself is asserted on the door's output, not the model's prose: the observation is
+# what the tool returned, and the tool returns what hnsw ordered.
+after_38() {
+    sql_true "(SELECT bool_or(verdict LIKE 'COMPLETE%' OR verdict LIKE 'PARTIAL%')
+                FROM vw_embedding_status WHERE table_name='communications')
+              AND (SELECT rows_embedded > 0 FROM vw_embedding_status
+                    WHERE table_name='communications')" ||
+        { DETAIL="the corpus is not embedded, so an empty search would mean nothing: $(q "SELECT verdict FROM vw_embedding_status WHERE table_name='communications'")"; return 1; }
+    obs_has "$RID" search_communications "late" ||
+        { DETAIL="no observation naming a late delivery, although $(q "SELECT count(*) FROM communications WHERE summary ILIKE '%late%'") do"; return 1; }
+    # What the tool said must be what the door would say right now: the same question, ranked by the
+    # same index, computed in SQL and not remembered from the answer.
+    sql_true "EXISTS (SELECT 1 FROM search_similar_communications(
+                       (SELECT embedding FROM communications
+                         WHERE summary ILIKE '%late%' ORDER BY id LIMIT 1)::vector, NULL, 5) s
+                 WHERE s.summary ILIKE '%late%')" ||
+        { DETAIL="the door cannot reproduce its own ranking against the rows that produced it"; return 1; }
+    true
+}
+case_run 38 search_communications "$CS" \
+  "Have any customers told us that a delivery arrived late or damaged? Search the recorded history by what the conversations were about, not by customer name." \
+  search_communications after_38
+
 after_9() { need_eid || return 1
             [ "$(q "SELECT status FROM entities WHERE id=$EID")" = "follow-up" ] &&
             sql_true "EXISTS (SELECT 1 FROM audit_log WHERE table_name='entities' AND row_pk->>'id'='$EID'

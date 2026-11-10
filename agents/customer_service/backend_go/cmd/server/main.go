@@ -41,6 +41,7 @@ import (
 	"jada-backend/pkg/agent"
 	"jada-backend/pkg/crm"
 	"jada-backend/pkg/db"
+	"jada-backend/pkg/embed"
 	"jada-backend/pkg/logging"
 	"jada-backend/pkg/mcp"
 	"jada-backend/pkg/memory"
@@ -106,7 +107,13 @@ func main() {
 
 	d, dbConfigured := connect()
 
-	toolsList := registerTools(d)
+	// The embedder is resolved before the tools are, because whether one of them exists at all is a
+	// function of it: search_communications cannot do anything without a model that will answer 1536
+	// dimensions, and a registered tool that fails is a capability the prompt advertised and the
+	// deployment does not have. Same reasoning, same order, as the database one line above.
+	embedder := embed.FromEnv()
+
+	toolsList, crmToolCount := registerTools(d, embedder)
 	agentMgr := agent.NewAgentManager(toolsList)
 	agentMgr.AttachRecorder(logging.NewRecorder(d, !envFalse(EnvTrace)))
 
@@ -115,7 +122,7 @@ func main() {
 		rehydrator = d
 	}
 
-	r := buildRouter(agentMgr, d, rehydrator, toolsList, dbConfigured)
+	r := buildRouter(agentMgr, d, rehydrator, toolsList, dbConfigured, embedder, crmToolCount)
 
 	addr := fmt.Sprintf("%s:%s", envOr(EnvHost, "0.0.0.0"), envOr(EnvPort, "8000"))
 	srv := &http.Server{
@@ -128,6 +135,15 @@ func main() {
 		// one. ReadTimeout is deliberately unset for the same reason - the body of a chat request
 		// arrives in one piece, but a long turn must not be cut off mid-stream.
 		IdleTimeout: 750 * time.Second,
+	}
+
+	// The embedding sweep runs in its own goroutine, on the same terms agents/sales and
+	// agents/inventory run theirs: no model in the loop, one trajectory row per tick, and a panic
+	// inside a tick that cannot take the chat endpoints down with it. It is armed whether or not an
+	// embedder is configured, so that "the timer stopped" and "nobody configured the model" stay two
+	// different answerable questions in agent_interactions rather than both becoming an absence.
+	if d != nil {
+		go crm.StartEmbeddingTimer(d, embedder, logging.NewRecorder(d, !envFalse(EnvTrace)))
 	}
 
 	go func() {
@@ -254,10 +270,18 @@ func configOf(err error) string {
 // told about it in the prompt, it will call it, and the failure will look like a data problem. So the
 // CRM tools appear only with a connection, and the health endpoint and /api/tools both report the
 // difference, which is the only way a support conversation can tell "no customers" from "no database".
-func registerTools(d *db.DB) []tools.ToolDefinition {
+// registerTools returns the tool list and how many of its entries the domain package registered.
+//
+// The count is returned rather than re-derived when a request arrives, and that is the fix. Health
+// used to recognise a CRM tool by matching its name against six prefixes, which is the shape of check
+// this repository's own B20 comment refuses - a list of names where a property would do. It held for
+// eight tools because all eight happen to begin with a covered verb; search_communications, the ninth,
+// begins with none of them, and /api/health went on reporting eight while the process registered nine.
+// A number taken from the registration that produced it cannot be told a new name.
+func registerTools(d *db.DB, e *embed.Client) ([]tools.ToolDefinition, int) {
 	var crmTools []tools.ToolDefinition
 	if d != nil {
-		crmTools = crm.Tools(d)
+		crmTools = crm.Tools(d, e)
 	}
 
 	list := append(tools.GetLocalTools(), crmTools...)
@@ -268,17 +292,17 @@ func registerTools(d *db.DB) []tools.ToolDefinition {
 		names = append(names, t.Name)
 	}
 	slog.Info("tools registered", "count", len(list), "names", strings.Join(names, " "),
-		"crm", len(crmTools) > 0)
+		"crm", len(crmTools), "semantic_search", e != nil)
 
 	if len(crmTools) == 0 {
 		slog.Warn("no CRM tools: this agent can search the web and remember things but cannot see a " +
 			"customer. Either AFPC_PG_HOST and AFPC_TENANT_ID are unset, or the database they name " +
 			"refused startup's attempts to reach it - check the line above this one.")
 	}
-	return list
+	return list, len(crmTools)
 }
 
-func buildRouter(am *agent.AgentManager, d *db.DB, q crm.Querier, list []tools.ToolDefinition, dbConfigured bool) *chi.Mux {
+func buildRouter(am *agent.AgentManager, d *db.DB, q crm.Querier, list []tools.ToolDefinition, dbConfigured bool, e *embed.Client, crmCount int) *chi.Mux {
 	r := chi.NewRouter()
 
 	r.Use(chimw.RequestID)
@@ -306,7 +330,7 @@ func buildRouter(am *agent.AgentManager, d *db.DB, q crm.Querier, list []tools.T
 		}
 	}
 
-	r.Get("/api/health", healthHandler(am, d, list, dbConfigured))
+	r.Get("/api/health", healthHandler(am, d, list, dbConfigured, e, crmCount))
 
 	// Everything below answers as the tenant, so everything below is authenticated.
 	r.Group(func(pr chi.Router) {
@@ -635,8 +659,7 @@ func toolsHandler(am *agent.AgentManager) http.HandlerFunc {
 				// asking whether it writes. It belongs in this response because the difference between
 				// "the agent will not retry" and "the agent cannot retry safely" is invisible
 				// anywhere else.
-				"claims_idempotency": strings.HasPrefix(t.Name, "add_") ||
-					strings.HasPrefix(t.Name, "save_"),
+				"claims_idempotency": t.Policy.Claims,
 			})
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -797,7 +820,7 @@ func interactionsHandler(q crm.Querier) http.HandlerFunc {
 	}
 }
 
-func healthHandler(am *agent.AgentManager, d *db.DB, list []tools.ToolDefinition, dbConfigured bool) http.HandlerFunc {
+func healthHandler(am *agent.AgentManager, d *db.DB, list []tools.ToolDefinition, dbConfigured bool, e *embed.Client, crmCount int) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
 		defer cancel()
@@ -812,6 +835,11 @@ func healthHandler(am *agent.AgentManager, d *db.DB, list []tools.ToolDefinition
 			"active_tools_count": len(list),
 			"memory_driver":      memory.Driver(),
 			"auth":               authMode(),
+			// Which embedder fills the vector column, or that none does. On health and not only in
+			// a startup line because "why does semantic search find nothing" is a deployment
+			// question, and a reader should not have to have been present at boot to answer it.
+			// Same register as auth's DISABLED.
+			"embedding": e.Describe(),
 		}
 		if memory.Driver() == memory.DriverFile {
 			out["memory_dir"] = memory.Dir()
@@ -878,17 +906,10 @@ func healthHandler(am *agent.AgentManager, d *db.DB, list []tools.ToolDefinition
 		}
 		out["database"] = dbStatus
 
-		// The tool count the health check reports is counted from the registration, not from the
-		// length of the list the process believes it built, because the two differ when a duplicate
-		// name silently displaced a tool at startup - which is 4.4's fault wearing a different hat.
-		crmCount := 0
-		for _, t := range am.ToolList {
-			if strings.HasPrefix(t.Name, "add_") || strings.HasPrefix(t.Name, "get_customer") ||
-				strings.HasPrefix(t.Name, "get_entity") || strings.HasPrefix(t.Name, "get_followup") ||
-				strings.HasPrefix(t.Name, "update_customer") || strings.HasPrefix(t.Name, "mark_") {
-				crmCount++
-			}
-		}
+		// crmCount comes from registerTools, which is the thing that decided it. The duplicate-name
+		// case that motivated recounting here is not lost: NewAgentManager logs an ERROR naming the
+		// tool it dropped, and that is where the collision is detectable at all - a health field can
+		// only spot one by knowing every name in advance, which is the assumption that just failed.
 		out["crm_tools"] = crmCount
 
 		code := http.StatusOK

@@ -23,6 +23,14 @@ type ToolPolicy struct {
 	ReadOnly         bool `json:"read_only"`
 	Destructive      bool `json:"destructive"`
 	RequiresApproval bool `json:"requires_approval"`
+	// Claims says whether this tool sends an idempotency key with its write, which is the difference
+	// between "a retry is safe" and "a retry is a second row" (ADR-005). It is a field and not a
+	// guess from the tool's name: /api/tools used to derive it by matching the name against "add_"
+	// and "save_", and on agents/sales that reported SEVEN of its EIGHT write tools as not claiming,
+	// because ship, transition, create, cancel and receive are not add. The false was in the
+	// endpoint, and the only reason nobody acted on it is that nothing was contradicted by a row.
+	// TestPolicyClaimsMatchesTheKeyActuallySent is that contradiction, in every domain package.
+	Claims bool `json:"claims_idempotency"`
 }
 
 // ToolDefinition is one callable tool.
@@ -376,6 +384,7 @@ func GetLocalTools() []ToolDefinition {
 				"required": []string{"key", "content"},
 			},
 			Policy: ToolPolicy{
+				Claims:           true,
 				ReadOnly:         false,
 				Destructive:      false,
 				RequiresApproval: false,
