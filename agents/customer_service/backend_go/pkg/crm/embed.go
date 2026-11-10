@@ -263,6 +263,17 @@ func RunEmbeddings(ctx context.Context, q Querier, e *embed.Client, rec *logging
 			return result, jerr
 		}
 		vals := []any{encoded, e.Model, e.BaseURL}
+		// The step has to be opened as well as closed, and this is the only call in the tick that did
+		// not open one. BeginTool appends the paired placeholder that keeps actions_taken and
+		// tool_observations the same length (pkg/logging states that shape as a contract, and 0017's
+		// vw_tool_calls joins the two arrays by position because they carry no key to join on);
+		// EndTool overwrites a slot that exists and appends one that does not. So closing a step that
+		// was never opened grew tool_observations by one, and every step after it read as the answer
+		// to the call before it - which on a tick that embedded anything showed this door's message
+		// under the closing coverage scan's name, and stranded that scan's own sentence where the view
+		// never looks. The run row was always right; only the per-call trail was mis-paired.
+		run.BeginTool(step, "embed_communications",
+			map[string]any{"rows": len(ids), "model": e.Model})
 		drow, err := q.Call(ctx, "embed_communications",
 			append(vals, key(ctx, "embed_communications", vals)))
 		if err != nil {

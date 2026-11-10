@@ -185,3 +185,60 @@ BEGIN
     END IF;
 END
 $$;
+
+-- ---------------------------------------------------------------------------
+-- (d) ONE MODEL PER SPACE - finding 6.4's other half, which 0035 could state and
+--     0036 is the first file able to perform.
+--
+--     What is asserted is not "the column holds one model's vectors" - no SQL can
+--     read that back out of 1536 floats, which is precisely why embedding_space
+--     exists. What is asserted is the timestamp shadow of the claim: the register's
+--     own updated_at is the moment the space was last declared, and a vector older
+--     than it was written while the register named something else. That is the exact
+--     shape of a restamp performed as a config edit - the state 0035's HINT warns of,
+--     where "the keeper only fills NULLs" leaves both embedders in one column and
+--     every query that crosses them returns a plausible ranking of nonsense.
+--
+--     0036 §2 is what makes this pass rather than merely un-violated, so the case is
+--     mapped to it: clearing nothing while the register moves is the failure this
+--     probe can see and no B-check can.
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE
+    v_stale bigint;
+    v_orph  bigint;
+BEGIN
+    ------------------------------------------------------------------
+    -- (d1) no vector predates the space that claims it
+    ------------------------------------------------------------------
+    SELECT count(*) INTO v_stale
+      FROM public.communications c
+      JOIN public.embedding_space e ON e.space_key = 'communications'
+     WHERE c.embedding IS NOT NULL
+       AND c.updated_at < e.updated_at;
+
+    IF v_stale = 0 THEN
+        RAISE NOTICE 'VERDICT OK every embedded communication is newer than the stamp of the space '
+                     'that claims it (6.4d)';
+    ELSE
+        RAISE NOTICE 'VERDICT ERR the register names a model some vectors predate (6.4d): % row(s) '
+                     'were written before embedding_space.updated_at, so communications.embedding '
+                     'holds two embedders and the cosine between them is not a distance', v_stale;
+    END IF;
+
+    ------------------------------------------------------------------
+    -- (d2) a column with vectors has a register row to explain them
+    ------------------------------------------------------------------
+    SELECT count(*) INTO v_orph
+      FROM (SELECT 1 FROM public.communications WHERE embedding IS NOT NULL LIMIT 1) filled
+     WHERE NOT EXISTS (SELECT 1 FROM public.embedding_space WHERE space_key = 'communications');
+
+    IF v_orph = 0 THEN
+        RAISE NOTICE 'VERDICT OK a populated vector column is never unexplained by the register';
+    ELSE
+        RAISE NOTICE 'VERDICT ERR communications.embedding carries vectors and embedding_space holds '
+                     'no row for it (6.4d) - vw_embedding_status would report UNSTAMPED, which is the '
+                     'same zero-answer problem wearing a different name';
+    END IF;
+END
+$$;

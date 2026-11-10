@@ -131,7 +131,7 @@ Two implementations exist, and they share the requirements and the rules:
 ### Deployment
 
 - **Run:** `docker compose up --build -d` in `agents/customer_service/` (publishes `:4550`); `python bot.py` in `archive/blueprint/` runs the reference, which is not deployed on this server ([ADR-006](../../../ARCHITECTURE_DECISION_RECORDS/ADR-006_go_runtime_over_python_reference.md))
-- **Model:** `LLM_PROVIDER=local` against an OpenAI-compatible endpoint (`VLLM_BASE_URL`), or `azure_gcc_high`
+- **Model:** `LLM_PROVIDER=local` against an OpenAI-compatible endpoint (`VLLM_BASE_URL`), or `azure_gcc_high`. On this server that endpoint is the lab's LiteLLM router rather than a vLLM host, so the request carries the `dev/.env` bearer; `LLM_PROVIDER` itself did not change, because the router answers the same protocol and the code's only concession was sending a credential at all
 - **Database:** PostgreSQL at `AFPC_PG_HOST:AFPC_PG_PORT`, database `agent_first_erp_crm`, and every object in **`public`**. The environment table in `agents/customer_service/README.md` explains why the host has to be an IP address
 - **Tenant:** `AFPC_TENANT_ID`, required. It is resolved once at startup and set on every pooled connection, so a per-request tenant is not something this process can be asked to fake
 - **Telegram:** in the reference implementation only. The deployed agent has no transport but HTTP and SSE, and the loop does not care which is attached

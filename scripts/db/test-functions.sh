@@ -215,6 +215,13 @@ CASES=(
 "6_4_vectors|a vector column of a base table leads no hnsw index|6.4|0012_vector_indexing"
 "6_4_vectors|an under-trained ivfflat index is still mounted|6.4|0012_vector_indexing"
 "6_4_vectors|a listing view still projects the vector|6.4|0012_vector_indexing"
+# 6.4d is the half 0012 could not state and 0035 could not perform: one embedder per space. Both
+# phrases are the same defect read from the two ends - a vector older than the register that claims it
+# (a restamp done as a config edit, which is what 0036 exists to make impossible), and a populated
+# column with no register row at all. Mapped to 0036 rather than 0035 because 0035 only refuses a
+# future write; 0036 is what cleared the past ones.
+"6_4_vectors|the register names a model some vectors predate|6.4|0036_embedding_model_4b"
+"6_4_vectors|carries vectors and embedding_space holds|6.4|0036_embedding_model_4b"
 # 6.2 gets four rows: the trail's existence, its accuracy under ordinary DML, the one
 # promise that can only be proven by attempting the forbidden write, and the chain verdict
 # from the seat that writes it. All four print from the existence guard before 0013 (so

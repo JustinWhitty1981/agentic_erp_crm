@@ -64,9 +64,17 @@ Agent First ERP CRM is a database-first AI agent operating system that enables:
 - **Semantic search** using PGVector - *real for `communications`, empty by decision elsewhere*. 0012
   built the three hnsw indexes and 0035 built the two doors, the register, and the record of which model
   filled a column; the customer service agent's keeper is the writer and `search_communications` is the
-  reader. `entities.embedding` and `contacts.embedding` hold nothing, and `vw_embedding_status` says that
+  reader. That column is `qwen3-embedding:4b`'s space since 0036 - before that file, moving the embedder
+  was an environment edit that the schema could not survive, because the keeper fills NULLs only.
+  `entities.embedding` and `contacts.embedding` hold nothing, and `vw_embedding_status` says that
   per table. Read `agents/customer_service/README.md`'s "Semantic search, and the embedding keeper"
   before planning around the other two
+- **Model endpoint** - all three deployed agents call the lab's **LiteLLM router**, not a vLLM host
+  directly: `VLLM_BASE_URL` to `:4000/v1`, `VLLM_MODEL=qwen3.8-flash-next-lb` (one base model, two
+  engines, least-busy), and one bearer key in `dev/.env` that every process reads by name as
+  `LITELLM_API_KEY` and that must be whitelisted for both the chat model and the embedder. `LLM_PROVIDER`
+  stays `local` - the router speaks the same OpenAI-compatible protocol, and the only difference the code
+  had to learn was that the server sends 401 to a request with no credential
 - **Telegram integration** - *not in any of the three deployed agents*, which serve HTTP and SSE. The reference
   implementation in `archive/blueprint/` and the upstream checkout at `/home/justin/agents/dumb_agent` both
   have working adapters; the transport is a `main.go` change and the loop does not care which is attached
@@ -172,9 +180,10 @@ Follow [QUICKSTART.md](QUICKSTART.md) for Docker-based deployment.
    `db/migrations/NNNN_*.sql` function, so start there and not in the Go file (ADR-002)
 2. Give the migration the next free number. `migrate.sh` rejects a file numbered at or below the highest
    applied, which is why the two planned ones became 0024 and 0025 - see db/MIGRATIONS.md. The highest
-   applied today is **0035** (the semantic surface: two doors, `embedding_space`, and the register), and
+   applied today is **0036** (0035 built the semantic surface - two doors, `embedding_space`, and the
+   register; 0036 moved `communications.embedding` into a different embedder's space), and
    0033/0034 are still reserved for the two queued items in `PLAN.md`, which is what "by arrival and not
-   by importance" costs when the arrival is a draft that never landed. So a NEW file here is `0036_*`.
+   by importance" costs when the arrival is a draft that never landed. So a NEW file here is `0037_*`.
    Earlier instances of the same rule: 0026 took a number rather than the free 0024 because a bug fix and
    a planned feature are not the same queue; 0032 is the same rule arriving on the day it was needed; and
    `0031` is the grant that let `agents/sales`' keeper run and is the one migration in this set that
@@ -253,10 +262,14 @@ Follow [QUICKSTART.md](QUICKSTART.md) for Docker-based deployment.
    `get_suppliers` did on its default path until `clauseFor` stopped the builder guessing
 7. **If an agent greets you as one of the other agents, read `conversation_id` before you read the
    prompt.** The prompt is assembled per process and is usually the innocent party; the history is
-   fetched by conversation id, and a model follows ten prior turns of someone else's voice. `SELECT
-   telegram_chat_id, count(DISTINCT bot_id) FROM agent_interactions GROUP BY 1 HAVING count(DISTINCT
-   bot_id) > 1` is the question, and finding 4.9 in `docs/INTERACTION_LOGGING.md` is the answer -
-   including why a thread string is not a conversation, and why `ids.Thread` takes the pair
+   fetched by conversation id, and a model follows ten prior turns of someone else's voice. Ask
+   `SELECT conversation_id FROM agent_interactions GROUP BY 1 HAVING count(DISTINCT bot_id) > 1`;
+   zero rows is the healthy answer. The query this step used to name grouped `telegram_chat_id` the
+   same way, and since 0032 it returns rows on a server with no defect at all - a thread *string* is
+   shared by design (`default`, `schedule`, and the harness's own stamps all appear under three bots),
+   which is precisely why `ids.Thread` takes the agent-and-thread pair instead of the string. Measured
+   here: 6 shared thread strings, 0 shared conversation ids. finding 4.9 in
+   `docs/INTERACTION_LOGGING.md` is the answer, including why a thread string is not a conversation
 
 ### Testing
 Five things can be wrong independently, and each has its own harness:
@@ -341,7 +354,7 @@ agent_first/
 ├── db/                             # THE SCHEMA, and the harness that asserts it
 │   ├── README.md                   # single source of truth: which SQL files are superseded
 │   ├── MIGRATIONS.md               # finding to migration, the marker table, and the tracked tasks
-│   ├── migrations/                 # 0000-0018, 0021-0023, 0026-0032 applied in filename order; 0024/0025 planned
+│   ├── migrations/                 # 0000-0018, 0021-0023, 0026-0036 applied in filename order; 0024/0025 planned
 │   ├── tests/                      # N_N_<finding>.sql, one probe per block, VERDICT lines
 │   └── seeds/                      # 01_demo_customers.sql, 02_demo_inventory.sql - data, idempotent, never DDL
 │

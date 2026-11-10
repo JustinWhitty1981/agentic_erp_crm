@@ -11,6 +11,7 @@ development server, so **the data volume is durable and is never recreated impli
 | TLS | volume `afpc_tls` at `/certs`; CA copy in `dev/tls/afpc-ca.crt` |
 | Migrations | `db/migrations/`, applied in order by `scripts/db/migrate.sh` |
 | The agents | `afpc-customer-service` from `agents/customer_service/` on `:4550`, `afpc-inventory-agent` from `agents/inventory/` on `:4560`, and `afpc-sales-agent` from `agents/sales/` on `:4570` - three compose projects, one database, separated in every row by `AGENT_ROLE`. `agents/jada` is the reference drop the first was derived from, and `:4545` is the container that predates all three |
+| The models | `litellm-litellm-1` publishes `:4000` and is the only model endpoint the agents use: `qwen3.8-flash-next-lb` for chat and `qwen3-embedding:4b` for the vectors, both from the bearer in `dev/.env`. It is not part of this stack's `docker-compose.yml` and nothing here starts or configures it — but a connection that reaches an agent and then stops at a `401` from `:4000` has a router problem, not a database one |
 | Not here | the LiteLLM database (`litellm-db-1`) publishes no host port and is on its own network; nothing in this setup reads or routes to it |
 
 ## Auditing from any server on the network

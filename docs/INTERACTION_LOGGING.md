@@ -305,9 +305,30 @@ SELECT step_number, tool_name, tool_input, observation #>> '{}' AS output
 
 Step *n* of `actions_taken` paired with step *n* of `tool_observations`. This is the grain a table
 named `agent_tool_calls` would have stored; 0017 derives it rather than keep a second log of the
-same calls, because two writers of one fact drift. `observations_aligned` says whether the two
-arrays in that run had the same length - when they do not, the unpaired steps read `observation IS
-NULL` and the column says so, rather than showing an output against the wrong tool.
+same calls, because two writers of one fact drift. `observations_aligned` says whether the two arrays
+in that run had the same length.
+
+**What a length difference looks like depends on which array is longer, and the two halves are not
+symmetric.** The view fans out over `actions_taken` and joins the observations by ordinality, so:
+
+* **actions longer** — the tail of the calls really has no recorded answer, and those rows read
+  `observation IS NULL`. That is the shape this page used to promise in general, and it is the only
+  shape where the view declines to guess.
+* **observations longer** — every row still carries an output, and from the first unpaired step onward
+  each one is *the answer to the call before it*. No NULL anywhere, and the extra observation is
+  dropped on the floor. The run's `final_output`, sources and audit trail are all still right, because
+  those columns do not depend on the pairing. This is the dangerous half, and it is the half that
+  actually happened.
+
+Measured instance: five scheduled embedding sweeps in `agent_interactions` (the ticks on 2026-11-10
+that embedded at least one row) filed 4 actions against 5 observations, because the keeper closed its
+`embed_communications` step with `EndTool` and never opened it with `BeginTool` — and `EndTool`
+overwrites a slot that exists but *appends* one that does not. So `vw_tool_calls` printed the door's
+message under the closing coverage scan's name, and the register's own verdict sentence sat in a fifth
+element no query read. An idle tick, which skips the door entirely, paired perfectly — which is why
+167 conversational runs and 19 empty sweeps looked fine while every backfill lied. `observations_aligned
+= false` on a keeper row is the fingerprint; the fix is the `BeginTool` beside the door call in
+`pkg/crm/embed.go`, and `TestATickThatEmbeddedSomethingFilesEveryCallItMade` is what keeps it.
 
 ### `vw_tool_performance`
 Tool usage statistics and error rates, per tenant

@@ -218,10 +218,15 @@ relational kind: `agent_memories` by key, and thread history read back out of `a
 ## 6. Model Strategy
 
 ### 6.1 Agent Inference (Runtime)
-- **Primary Model:** `qwen3.8-flash-next`, served by vLLM behind an OpenAI-compatible endpoint
-  (`VLLM_BASE_URL=http://<gpu-host>:18300/v1`, `LLM_PROVIDER=local`).
+- **Primary Model:** `qwen3.8-flash-next-lb`, the LiteLLM router's least-busy group over one base model
+  served twice — NVFP4 on vLLM (`http://<gpu-host>:18300/v1`) and IQ4_XS on llama.cpp
+  (`http://<strix-host>:8080/v1`). The agents call the router and not either engine:
+  `VLLM_BASE_URL=http://<router-host>:4000/v1`, `LLM_PROVIDER=local`, one bearer key in `dev/.env` for
+  all three processes and the embedder too.
 - **Why:** self-hosted on bare metal, which is the project's stated constraint — no commercial LLM API
-  spend, and the trajectory records a run against a model the operator controls.
+  spend, and the trajectory records a run against a model the operator controls. The router adds the two
+  things a direct endpoint cannot give: a second host to fail over to, and per-key attribution of what
+  each agent cost.
 - **Streaming:** `LLM_STREAM=true` by default; `false` answers the same turn in one JSON body, which is
   the knob for a proxy that buffers SSE.
 - Earlier drafts of this page named `ornith:35b` via Ollama on `:11434`. That is not what these

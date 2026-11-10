@@ -172,9 +172,12 @@ Create a swarm of specialized AI agents to run a business where **the conversati
   roles (`afpc_app` for the agents, `afpc_readonly` and `afpc_auditor` for humans reading).
 - **Agents:** Go backends (module `jada-backend`, one per agent), a React UI built into the binary's
   `static/`, chi router, `pgx` pool.
-- **LLM:** `qwen3.8-flash-next` on vLLM behind an OpenAI-compatible endpoint
-  (`VLLM_BASE_URL=http://<host>:18300/v1`, `LLM_PROVIDER=local`) for agent inference. Self-hosted; no
-  commercial API spend. The Azure path in `pkg/llm` is inherited from the reference drop and unused
+- **LLM:** `qwen3.8-flash-next-lb` for agent inference, reached through the lab's LiteLLM router
+  (`VLLM_BASE_URL=http://<router-host>:4000/v1`, `LLM_PROVIDER=local`, bearer key in `dev/.env`). The
+  group is the same weights twice — NVFP4 on vLLM and IQ4_XS on llama.cpp — and the router picks the
+  less busy one, so a turn is served by whichever host has room and routed around a host that stops
+  answering. Self-hosted; no commercial API spend, and the router's spend log attributes the calls to
+  the agents' own key. The Azure path in `pkg/llm` is inherited from the reference drop and unused
   here.
 - **Orchestration:** none yet — the CAO is not built, so an agent's schedule is either a human prompt or
   the inventory container's own timer.

@@ -187,6 +187,100 @@ func TestKeeperWritesThroughTheDoorAndClaimsTheBatch(t *testing.T) {
 	}
 }
 
+// filed is a logging.DB that keeps the recorder's parameters instead of running the INSERT. The seam
+// exists because RunEmbeddings builds its Run and files it in a defer: the arrays a tick wrote are
+// reachable nowhere else, and a schedule with no human on the other end is only ever audited through
+// them.
+type filed struct{ rows [][]any }
+
+func (f *filed) Exec(_ context.Context, _ string, args ...any) error {
+	f.rows = append(f.rows, args)
+	return nil
+}
+func (f *filed) Tenant() string { return "00000000-0000-0000-0000-000000000001" }
+
+// filedArray decodes one jsonb parameter of a recorded row. jsonParam hands the recorder a
+// json.RawMessage, so anything else means the recorder's shape moved under this test.
+func filedArray(t *testing.T, v any) []map[string]any {
+	t.Helper()
+	raw, ok := v.(json.RawMessage)
+	if !ok {
+		t.Fatalf("the trajectory column arrived as %T, want json.RawMessage", v)
+	}
+	var out []map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("the trajectory column is not the array the views expect: %v", err)
+	}
+	return out
+}
+
+// The trajectory the tick leaves behind, asserted rather than assumed. Every other test in this file
+// reads EmbedResult, which is what the tick told the log; this one reads what it filed, which is the
+// only version anyone debugs from six weeks later.
+//
+// The bug it is written against: the door call was closed by EndTool and never opened by BeginTool,
+// and EndTool appends when the slot does not exist. So on a tick that embedded something - and only
+// on such a tick, which is why 167 conversational runs were paired and every backfill was not - the
+// two arrays came out 4 against 5, and vw_tool_calls, which joins them by position because they carry
+// no key to join on, printed each later step's answer under the previous step's name.
+func TestATickThatEmbeddedSomethingFilesEveryCallItMade(t *testing.T) {
+	q := &routed{
+		statusSeq: [][]map[string]any{
+			status(0, 26, "EMPTY", "fake/embed:latest"),
+			status(26, 26, "COMPLETE", "fake/embed:latest"),
+		},
+		queue: queued(3, 4),
+		doorRow: []map[string]any{{"success": true, "rows_embedded": int32(2), "rows_refused": int32(0),
+			"message": "2 of 2 offered row(s) embedded at 1536 dimensions by fake/embed:latest"}},
+		memory: []map[string]any{{"content": `{"old":1}`}},
+	}
+	f := &filed{}
+	if _, err := RunEmbeddings(context.Background(), q,
+		embedder(t, embed.SchemaDimensions, false), logging.NewRecorder(f, true)); err != nil {
+		t.Fatalf("a healthy tick returned an error: %v", err)
+	}
+	if len(f.rows) != 1 {
+		t.Fatalf("%d trajectory rows filed for one tick, want exactly 1", len(f.rows))
+	}
+	args := f.rows[0]
+	// Said out loud because this test reaches into the INSERT by position: actions_taken is 7 and
+	// tool_observations is 8. A recorder that changed its column list must fail here rather than read
+	// the wrong slot and pass.
+	if len(args) != 15 {
+		t.Fatalf("the recorder passes %d parameters, want 15 - update this test with the column list",
+			len(args))
+	}
+
+	acts, obs := filedArray(t, args[7]), filedArray(t, args[8])
+
+	// Equal length is pkg/logging's stated contract, and the half that is easy to keep by accident.
+	if len(acts) != len(obs) {
+		t.Fatalf("actions=%d observations=%d: step n of one now answers a different call than step n of "+
+			"the other, which is how a debug view starts lying", len(acts), len(obs))
+	}
+	if len(acts) != 5 {
+		t.Fatalf("%d steps filed, want the five a working tick makes: coverage, queue, embedder, door, "+
+			"coverage", len(acts))
+	}
+
+	// The half that takes deliberate work: the names and the answers have to be the same call's, so a
+	// reordering that preserved the length could not pass.
+	if acts[3]["tool"] != "embed_communications" {
+		t.Errorf("step 3 names %v, want embed_communications - the only write in the tick", acts[3]["tool"])
+	}
+	if out, _ := obs[3]["output"].(string); !strings.Contains(out, "2 of 2 offered") {
+		t.Errorf("step 3 is answered by %q, which is not the door's message", out)
+	}
+	if acts[4]["tool"] != "scan vw_embedding_status" {
+		t.Errorf("step 4 names %v, want the closing coverage scan", acts[4]["tool"])
+	}
+	if out, _ := obs[4]["output"].(string); !strings.HasSuffix(out, "COMPLETE") {
+		t.Errorf("step 4 is answered by %q, want the register's own verdict - it is the sentence a "+
+			"reader cross-checks against vw_embedding_status, and it used to be stranded in a slot "+
+			"the view never reads", out)
+	}
+}
+
 // A tick whose embedder is down must not sound like a tick with nothing to do. This is the same
 // sentence 0031's first hour wrote, one column away: the failure and the healthy zero have to be
 // distinguishable in the one field anybody reads.
